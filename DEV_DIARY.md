@@ -5,7 +5,7 @@ project
 
 <details>
 
-<summary>**Chapter 0: Pre-Project**</summary>
+<summary><b>Chapter 0: Pre-Project</b></summary>
 
 ## Why?
 
@@ -48,7 +48,7 @@ was approved and the project was finally underway!
 
 <details>
 
-<summary>**Chapter 1: Auth**</summary>
+<summary><b>Chapter 1: Auth</b></summary>
 
 ## Rust OAuth 2.1 Adventures
 
@@ -77,7 +77,7 @@ and do some UI work.
 
 <details>
 
-<summary>**Chapter 2: UI Requirements**</summary>
+<summary><b>Chapter 2: UI Requirements</b></summary>
 
 ## What do I Want This Thing to Look Like?
 
@@ -135,18 +135,23 @@ have 3 tabs (in order of usefulness):
 - Search
 - Feed
 
-Content for the time being with the simplicity I had ended up with, I decided to explore some of the
-[example apps](https://ratatui.rs/examples/apps/) on display on the ratatui site. In particular, the first _'Demo'_
-app was particularly good at demonstrating the different possibilities, instantly crowding my brain with possibilities
-for my own app.
+Content for the time being with the simplicity I had ended up with, I decided to move on to the next stage.
 
 </details>
 
 <details>
 
-<summary>**Chapter 3: UI Design**</summary>
+<summary><b>Chapter 3: UI Design</b></summary>
 
-I did come across [a great tool](https://asciiflow.com/#/) for ascii drawings, but I figured instead of spending
-hours on mockups and then scratching my head trying to implement them in a framework and language I have barely ever
-used before, I would just get stuck in and see what happens. While this might not be the most 'proper' approach to
+## Getting Something on the Screen
+
+For all the time I had spent, the program still did nothing at this point other than authenticate (which I was still 
+patting myself on the back for). To actually get something tangible my initial thought was to do some mockups. I did
+come across [a great tool](https://asciiflow.com/#/) for ascii drawings, but I figured instead of spending hours on 
+drawings and then scratching my head trying to implement them in a framework and language I have barely ever
+used before, I would just get stuck in and see what happens. 
+
+For some quick inspiration, I explored some of the [example apps](https://ratatui.rs/examples/apps/) on display on the 
+ratatui site. In particular, the first _'Demo'_ app was particularly good at demonstrating the different possibilities, 
+instantly crowding my brain with possibilities for my own TUI. While this might not be the most 'proper' approach to
 things, this is a personal project so who cares lol.
