@@ -98,6 +98,9 @@ in my understanding of what makes a good TUI. So, I started with a list:
   - No shade to the actual developers at soundcloud but "events near you", "curated to your taste" and "artists to
     watch out for" are just some of the many sections on the homepage that I have never once even considered interacting
     with
+
+![Useless (for me) Features on SoundCloud's Home Page](/media/home.png)
+
 - The overview tab of the library
   - I am a fan of more forced navigation rather than having multiple ways to access things. I also would rather have
     something be an additional click away if it means it keeps it more organised and natural. Therefore, instead of
@@ -113,6 +116,9 @@ in my understanding of what makes a good TUI. So, I started with a list:
       Do have their uses but I don't find myself using them very often. Nonetheless I will likely end up including them
       as features with a lower priority due to the fact that there would be nowhere else to view that data (other than
       the website itself of course)
+
+![The Unused Overview Tab of my Library](/media/library.png)
+
 - Upload
   - I'm not an artist but even if you are an artist, why would you be trying to upload your song through a TUI
     anyway lmao
@@ -145,13 +151,13 @@ Content for the time being with the simplicity I had ended up with, I decided to
 
 ## Getting Something on the Screen
 
-For all the time I had spent, the program still did nothing at this point other than authenticate (which I was still 
+For all the time I had spent, the program still did nothing at this point other than authenticate (which I was still
 patting myself on the back for). To actually get something tangible my initial thought was to do some mockups. I did
-come across [a great tool](https://asciiflow.com/#/) for ascii drawings, but I figured instead of spending hours on 
+come across [a great tool](https://asciiflow.com/#/) for ascii drawings, but I figured instead of spending hours on
 drawings and then scratching my head trying to implement them in a framework and language I have barely ever
-used before, I would just get stuck in and see what happens. 
+used before, I would just get stuck in and see what happens.
 
-For some quick inspiration, I explored some of the [example apps](https://ratatui.rs/examples/apps/) on display on the 
-ratatui site. In particular, the first _'Demo'_ app was particularly good at demonstrating the different possibilities, 
+For some quick inspiration, I explored some of the [example apps](https://ratatui.rs/examples/apps/) on display on the
+ratatui site. In particular, the first _'Demo'_ app was particularly good at demonstrating the different possibilities,
 instantly crowding my brain with possibilities for my own TUI. While this might not be the most 'proper' approach to
 things, this is a personal project so who cares lol.
