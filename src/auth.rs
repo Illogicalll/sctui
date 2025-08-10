@@ -86,8 +86,12 @@ pub fn authenticate() -> Result<Token> {
     webbrowser::open(&auth_url)?;
 
     // server to receive callback with auth code
-    let server =
-        Server::http("127.0.0.1:8080").map_err(|e| anyhow!("Failed to start server: {}", e))?;
+    let server = Server::http("127.0.0.1:8080").map_err(|e| {
+        anyhow!(
+            "Failed to start server, check port 8080 is open and/or free: {}",
+            e
+        )
+    })?;
 
     // parse callback
     let received_data = Arc::new(Mutex::new(None));
