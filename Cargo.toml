@@ -1,0 +1,23 @@
+[package]
+name = "sctui"
+version = "0.1.0"
+description = "a soundcloud client for the terminal"
+authors = ["Will Murphy <illogicallledits@gmail.com>"]
+license = "MIT"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.28.1"
+ratatui = "0.29.0"
+color-eyre = "0.6.3"
+anyhow = "1"
+base64 = "0.21"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+tiny_http = "0.12"
+url = "2"
+webbrowser = "0.8"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+dotenvy = "0.15"
+serde_json = "1.0.142"
