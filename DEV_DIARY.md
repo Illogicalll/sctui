@@ -161,3 +161,77 @@ For some quick inspiration, I explored some of the [example apps](https://ratatu
 ratatui site. In particular, the first _'Demo'_ app was particularly good at demonstrating the different possibilities,
 instantly crowding my brain with possibilities for my own TUI. While this might not be the most 'proper' approach to
 things, this is a personal project so who cares lol.
+
+## General Layout
+
+After playing with ratatui's `Constraint` and `Block` layout system for a while I settled for a basic 3-tiered design with the following:
+
+- A header with a tab selector
+- An area for content, based on the current tab
+- A now playing section
+
+![First Draft of Application Layout](/media/ui_1.png)
+
+I felt that this was reminiscent enough of the actual UI on the soundcloud website, which also has fixed tabs at the top and now playing
+at the bottom, with a variable content area sandwiched between:
+
+![An Example of SoundClouds UI](/media/sc_ui.png)
+
+## The Library Tab
+
+As discussed above I wanted the library tab to have its own set of sub-tabs. To achieve this, I divided the content area once again for a
+second row of tabs:
+
+```rs
+let subchunks = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .split(chunks[1]);
+```
+
+Then I rendered the tabs up top and a table below.
+
+![Subtabs and Table on the Library Tab](/media/ui_2.png)
+
+The table also needed some extra logic to handle different numbers of columns for different sub-tabs, as well as different column
+widths to match. Additionally, I opted to clamp the _Duration_ column to 10% width, to save more space for columns that would likely
+contain much longer strings of text (_e.g. title or artist(s)_).
+
+```rs
+fn styled_header(cells: &[&str]) -> Row<'static> {
+  // map an array of strings to a row of styled cells
+  // this avoids repeating code in the column definitions
+}
+
+let (header, num_columns) = match selected_subtab {
+  // define a tuple that holds the headers (for the styling function above)
+  // and the number of columns (for the column width definition below)
+  // based on the currently selected sub-tab
+};
+
+let column_widths: Vec<Constraint> = if num_columns > 0 {
+    if num_columns > 2 { // all tables with more than 2 columns have a duration column
+      let other_width = 90 / (num_columns as u16 - 1);
+      let mut widths = vec![Constraint::Percentage(other_width); num_columns - 1]; // calculate widths of other columns
+      widths.push(Constraint::Percentage(10)); // clamp duration to 10%
+      widths
+  } else { // otherwise calculate normally
+      let width = 100 / num_columns as u16;
+      (0..num_columns)
+          .map(|_| Constraint::Percentage(width))
+          .collect()
+  }
+} else {
+  vec![]
+};
+```
+
+You may have also noticed in the screenshot above that longer titles are truncated when the window becomes too narrow. To keep things
+short(_ish_), I won't go into any further depth but if you are interested the full UI file with comments is available
+[here](./src/tui.rs).
+
+After polishing the table a little more with arrow key and hjkl movement support, I decided to move on to the next tab.
+
+## The Search Tab
+
+</details>

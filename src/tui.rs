@@ -382,3 +382,4 @@ fn render(
 
     frame.render_widget(now_playing, chunks[2]);
 }
+
