@@ -89,15 +89,13 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                     }
                 }
                 KeyCode::Down => {
-                    if selected_tab == 0 {
-                        let max_rows = get_table_rows_count(selected_subtab);
-                        if selected_row + 1 < max_rows {
-                            selected_row += 1;
-                        }
+                    let max_rows = get_table_rows_count(selected_subtab);
+                    if selected_row + 1 < max_rows {
+                        selected_row += 1;
                     }
                 }
                 KeyCode::Up => {
-                    if selected_tab == 0 && selected_row > 0 {
+                    if selected_row > 0 {
                         selected_row -= 1;
                     }
                 }
@@ -518,6 +516,19 @@ fn render(
             ],
             _ => vec![],
         };
+
+        // highlight selected row
+        let rows: Vec<_> = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| {
+                if i == selected_row {
+                    row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                } else {
+                    row
+                }
+            })
+            .collect();
 
         // render table
         let table = Table::new(rows, col_widths)
