@@ -230,8 +230,41 @@ You may have also noticed in the screenshot above that longer titles are truncat
 short(_ish_), I won't go into any further depth but if you are interested the full UI file with comments is available
 [here](./src/tui.rs).
 
-After polishing the table a little more with arrow key and hjkl movement support, I decided to move on to the next tab.
-
 ## The Search Tab
+
+Two of the most important features to any search are the **query** and the **filters** (honourable mention: sort by, but I'm going to leave that one for now).
+After placing them both next to each other, I decided that this cluttered the space a bit too much:
+
+![First Draft of Search UI](/media/search_1.png)
+
+Instead, I decided to break up the space a bit more by sandwiching the search results inbetween the search bar and the filters:
+
+![Second Draft of Search UI](/media/search_2.png)
+
+Additionally, I added some centering to help further distinguish the filter tabs from the main page tabs:
+
+![Third Draft of Search UI](/media/search_3.png)
+
+Unfortunately `ratatui` doesn't natively support tab centering, so I had to go with my own implementation:
+
+```rs
+// terminal area divided by how many search filters there are
+let tab_width = width / NUM_SEARCHFILTERS;
+
+fn center_text_in_width(text: &str, width: usize) -> String {
+  // account for width of dislayed text
+  let total_padding = width - text.chars().count();
+  let padding = (total_padding / 2) - 1;
+
+  // return padded text
+  format!("{}{}{}", " ".repeat(padding), text, " ".repeat(padding))
+}
+
+// map over array of search filters, returning Spans of padded text
+let searchfilter: Vec<Span<'static>> = searchfilters
+    .iter()
+    .map(|filter| Span::raw(center_text_in_width(filter, tab_width)))
+    .collect();
+```
 
 </details>
