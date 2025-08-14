@@ -189,7 +189,7 @@ let subchunks = Layout::default()
             .split(chunks[1]);
 ```
 
-Then I rendered the tabs up top and a table below.
+Then I rendered the sub-tabs up top and a table below.
 
 ![Subtabs and Table on the Library Tab](/media/ui_2.png)
 
