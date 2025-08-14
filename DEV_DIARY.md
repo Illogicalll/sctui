@@ -189,7 +189,7 @@ let subchunks = Layout::default()
             .split(chunks[1]);
 ```
 
-Then I rendered the tabs up top and a table below.
+Then I rendered the sub-tabs up top and a table below.
 
 ![Subtabs and Table on the Library Tab](/media/ui_2.png)
 
@@ -241,7 +241,7 @@ Instead, I decided to break up the space a bit more by sandwiching the search re
 
 ![Second Draft of Search UI](/media/search_2.png)
 
-Additionally, I added some centering to help further distinguish the filter tabs from the main page tabs:
+Additionally, I centered the filters to help further distinguish the filter tabs from the main page tabs:
 
 ![Third Draft of Search UI](/media/search_3.png)
 
