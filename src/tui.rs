@@ -11,6 +11,8 @@ use ratatui::{
 static NUM_TABS: usize = 3;
 static NUM_SUBTABS: usize = 6;
 static NUM_SEARCHFILTERS: usize = 4;
+static NUM_FEED_ACTIVITY_COLS: usize = 4;
+static NUM_FEED_INFO_COLS: usize = 3;
 
 // prep terminal and color_eyre error reporting
 pub fn run() -> Result<()> {
@@ -38,6 +40,8 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
     let mut query = String::new();
     let searchfilters = ["Tracks", "Albums", "Playlists", "People"];
     let mut selected_searchfilter = 0;
+    let mut info_pane_selected = false;
+    let mut selected_info_row = 0;
 
     loop {
         terminal.draw(|frame| {
@@ -51,6 +55,8 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                 &query,
                 &searchfilters,
                 selected_searchfilter,
+                info_pane_selected,
+                selected_info_row,
             )
         })?;
 
@@ -69,6 +75,8 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                     } else if selected_tab == 1 {
                         selected_searchfilter = (selected_searchfilter + 1) % NUM_SEARCHFILTERS;
                         selected_row = 0
+                    } else if selected_tab == 2 {
+                        info_pane_selected = !info_pane_selected
                     }
                 }
                 KeyCode::Left => {
@@ -86,16 +94,28 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                             selected_searchfilter -= 1;
                         }
                         selected_row = 0;
+                    } else if selected_tab == 2 {
+                        info_pane_selected = !info_pane_selected
                     }
                 }
                 KeyCode::Down => {
                     let max_rows = get_table_rows_count(selected_subtab);
-                    if selected_row + 1 < max_rows {
-                        selected_row += 1;
+                    let max_info_rows = get_info_table_rows_count();
+                    if selected_tab == 2
+                        && info_pane_selected
+                        && selected_info_row + 1 < max_info_rows
+                    {
+                        selected_info_row += 1;
+                    } else {
+                        if selected_row + 1 < max_rows {
+                            selected_row += 1;
+                        }
                     }
                 }
                 KeyCode::Up => {
-                    if selected_row > 0 {
+                    if selected_tab == 2 && info_pane_selected && selected_info_row > 0 {
+                        selected_info_row -= 1;
+                    } else if selected_row > 0 {
                         selected_row -= 1;
                     }
                 }
@@ -116,7 +136,7 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
     Ok(())
 }
 
-// TODO: make this dynamic, as real data won't be of fixed length
+// TODO: make these two functions dynamic, as real data won't be of fixed length
 fn get_table_rows_count(selected_subtab: usize) -> usize {
     match selected_subtab {
         0 => 3,
@@ -127,6 +147,10 @@ fn get_table_rows_count(selected_subtab: usize) -> usize {
         5 => 2,
         _ => 0,
     }
+}
+
+fn get_info_table_rows_count() -> usize {
+    2
 }
 
 // styling for table headers
@@ -191,6 +215,8 @@ fn render(
     query: &str,
     searchfilters: &[&str],
     selected_searchfilter: usize,
+    info_pane_selected: bool,
+    selected_info_row: usize,
 ) {
     let width = frame.area().width as usize;
 
@@ -570,16 +596,123 @@ fn render(
                     .add_modifier(Modifier::BOLD),
             );
         frame.render_widget(searchfilter_widget, subchunks[2]);
-    } else {
-        let paragraph = Paragraph::new("Content of Feed Tab")
+    }
+    //
+    // ========
+    // FEED TAB
+    // ========
+    //
+    else {
+        // split the content area vertically
+        let subchunks = Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+            .split(chunks[1]);
+
+        let activity_header = styled_header(&["User", "Action", "Media Type", "Age"]);
+
+        // truncation to avoid cut-off text in columns
+        let activity_col_widths = calculate_column_widths(NUM_FEED_ACTIVITY_COLS);
+        let activity_col_min_widths = calculate_min_widths(&activity_col_widths, width / 2);
+
+        // define activity table content
+        let activity_rows = vec![
+            vec![
+                truncate_with_ellipsis("User 1", activity_col_min_widths[0]),
+                truncate_with_ellipsis("Post", activity_col_min_widths[1]),
+                truncate_with_ellipsis("Track", activity_col_min_widths[2]),
+                truncate_with_ellipsis("2d", activity_col_min_widths[3]),
+            ],
+            vec![
+                truncate_with_ellipsis("User 2", activity_col_min_widths[0]),
+                truncate_with_ellipsis("Repost", activity_col_min_widths[1]),
+                truncate_with_ellipsis("Album", activity_col_min_widths[2]),
+                truncate_with_ellipsis("5d", activity_col_min_widths[3]),
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, cols)| {
+            let row = Row::new(cols);
+            if i == selected_row && info_pane_selected {
+                row.style(Style::default().bg(Color::Gray).fg(Color::Black))
+            } else if i == selected_row && !info_pane_selected {
+                row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+            } else {
+                row
+            }
+        })
+        .collect::<Vec<_>>();
+
+        // render activity table
+        let table = Table::new(activity_rows, activity_col_widths)
+            .header(activity_header)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
+                    .title("activity")
+                    .title_alignment(Alignment::Center)
+                    .border_type(BorderType::Rounded)
+                    .border_style(if info_pane_selected {
+                        Style::default()
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    }),
             )
-            .alignment(Alignment::Left);
+            .column_spacing(1);
+        frame.render_widget(table, subchunks[0]);
 
-        frame.render_widget(paragraph, chunks[1]);
+        let info_header = styled_header(&["Title", "Artist", "Dur."]);
+
+        // truncation to avoid cut-off text in columns
+        let info_col_widths = calculate_column_widths(NUM_FEED_INFO_COLS);
+        let info_col_min_widths = calculate_min_widths(&info_col_widths, width / 2);
+
+        // define info table content
+        let info_rows = vec![
+            vec![
+                truncate_with_ellipsis("Track 1", info_col_min_widths[0]),
+                truncate_with_ellipsis("Artist 1", info_col_min_widths[1]),
+                truncate_with_ellipsis("1:30", info_col_min_widths[2]),
+            ],
+            vec![
+                truncate_with_ellipsis("Track 2", info_col_min_widths[0]),
+                truncate_with_ellipsis("Artist 1", info_col_min_widths[1]),
+                truncate_with_ellipsis("2:10", info_col_min_widths[2]),
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, cols)| {
+            let row = Row::new(cols);
+            if i == selected_info_row && info_pane_selected {
+                row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+            } else if i == selected_info_row && !info_pane_selected {
+                row.style(Style::default().bg(Color::Gray).fg(Color::Black))
+            } else {
+                row
+            }
+        })
+        .collect::<Vec<_>>();
+
+        // render info table
+        let table = Table::new(info_rows, info_col_widths)
+            .header(info_header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("info")
+                    .title_alignment(Alignment::Center)
+                    .border_type(BorderType::Rounded)
+                    .border_style(if info_pane_selected {
+                        Style::default().fg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    }),
+            )
+            .column_spacing(1);
+
+        frame.render_widget(table, subchunks[1]);
     }
 
     let now_playing = Paragraph::new("Now Playing Area")

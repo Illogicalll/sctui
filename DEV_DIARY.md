@@ -267,4 +267,23 @@ let searchfilter: Vec<Span<'static>> = searchfilters
     .collect();
 ```
 
+## The Feed Tab
+
+Last but not least was the feed tab, where activity of followed accounts resides. This one was a bit more of a challenge to
+implement as I wanted to keep the interface clear and functional, but also be able to represent all types of account activity and
+allow the user to interact with it (play posted/reposted songs or albums) instead of just having it be a static list of events.
+
+In the end I went for a vertical split (two panes next to each other), with the left pane hosting the main activity feed and the right having further
+information on the current selection:
+
+![Draft of the Feed Tab Design](/media/feed.png)
+
+The column headings 'User, Action, Media Type, Age' were the best I could come up with to encapsulate all types of activity displayed on the feed page of
+the official website.
+
+## Now Playing
+
+Since the application is still just a non-functional shell at this point, I figured there wasn't much point mocking up animated elements and such when
+there is no current system to even handle 'playing' a track. Because of this, I will return to this area of the TUI in a later chapter.
+
 </details>
