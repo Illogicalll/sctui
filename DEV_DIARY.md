@@ -393,6 +393,8 @@ if max_rows >= REFRESH_THRESHOLD && selected_row + REFRESH_THRESHOLD >= max_rows
 }
 ```
 
+As seen below the data is now dynamically pulled in through the API:
+
 ![Likes Working](/media/likes_working.png)
 
 As a side note I ended up removing the dynamic even column width calculation function as it was unnecessarily 
