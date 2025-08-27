@@ -407,6 +407,11 @@ can contain hundreds or even thousands of songs and this could lead to quite a l
 parameter to `false`, which then gave me only the playlist metadata, taking significantly less time to execute. The plan would then be to follow the link
 contained in the `tracks_uri` field if the user wants to navigate to that specific playlist.
 
+One that is rather counter-intuitive though is the fact that `/me/playlists/` doesn't actually return **ALL** your saved playlists, only the ones that 
+**YOU** made. To include the playlists you saved that other people made you also need to call `/me/likes/playlists` (which will also retrieve all the albums
+because on soundcloud albums = playlists, so it needs to be filtered). The question then arises how to we interweave these two responses to form a singular,
+cohesive list of saved playlists. There is no `date_saved` so ultimately I settled on `created_at`, which seemed like the next best option.
+
 Another thing I discovered while investigating lag is the slight hitch that occurs when the user holds the down arrow to continuously scroll down. This 
 was obviously occurring due to the fact that the application was trying to fetch more playlists mid-frame. This led to a *slight* (complete) overhaul of
 how the API functions within the `tui.rs` file in order to make it run on a seperate thread.

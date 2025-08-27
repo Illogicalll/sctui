@@ -1,4 +1,5 @@
 use crate::auth::Token;
+use chrono::{DateTime, FixedOffset, Utc};
 use reqwest::blocking::Client;
 use std::sync::{Arc, Mutex};
 
@@ -16,6 +17,7 @@ pub struct Playlist {
     pub title: String,
     pub track_count: String,
     pub duration: String,
+    pub created_at: DateTime<FixedOffset>,
     pub tracks_uri: String,
 }
 
@@ -33,8 +35,10 @@ pub struct API {
     token: Arc<Mutex<Token>>,
     liked_tracks_next_href: Option<String>,
     first_liked_tracks_page_fetched: bool,
-    playlists_next_href: Option<String>,
-    first_playlist_page_fetched: bool,
+    my_playlists_next_href: Option<String>,
+    my_first_playlist_page_fetched: bool,
+    others_playlists_next_href: Option<String>,
+    others_first_playlist_page_fetched: bool,
     albums_next_href: Option<String>,
     first_albums_page_fetched: bool,
 }
@@ -62,14 +66,27 @@ fn format_duration(duration_ms: u64) -> String {
     }
 }
 
+fn parse_str(obj: &serde_json::Value, key: &str) -> String {
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn parse_u64(obj: &serde_json::Value, key: &str) -> u64 {
+    obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
+}
+
 impl API {
     pub fn init(token: Arc<Mutex<Token>>) -> Self {
         Self {
             token,
             liked_tracks_next_href: None,
             first_liked_tracks_page_fetched: false,
-            playlists_next_href: None,
-            first_playlist_page_fetched: false,
+            my_playlists_next_href: None,
+            my_first_playlist_page_fetched: false,
+            others_playlists_next_href: None,
+            others_first_playlist_page_fetched: false,
             albums_next_href: None,
             first_albums_page_fetched: false,
         }
@@ -85,8 +102,8 @@ impl API {
         }
 
         let url = self.liked_tracks_next_href.clone().unwrap_or_else(|| {
-            "https://api.soundcloud.com/me/likes/tracks?limit=40&access=playable&linked_partitioning=true".to_string()
-        });
+        "https://api.soundcloud.com/me/likes/tracks?limit=40&access=playable&linked_partitioning=true".to_string()
+    });
 
         let resp: serde_json::Value = Client::new()
             .get(&url)
@@ -104,50 +121,31 @@ impl API {
 
         if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
             for track in collection {
-                let title = track
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let title = parse_str(track, "title");
 
-                let artists = track
-                    .get("metadata_artist")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        track
-                            .get("user")
-                            .and_then(|u| u.get("username"))
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
-                    })
-                    .unwrap_or_else(|| "Unknown Artist".to_string());
+                let artists = parse_str(track, "metadata_artist");
+                let artists = if !artists.is_empty() {
+                    artists
+                } else {
+                    parse_str(
+                        track.get("user").unwrap_or(&serde_json::Value::Null),
+                        "username",
+                    )
+                };
+                let duration = format_duration(parse_u64(track, "duration"));
 
-                let duration =
-                    format_duration(track.get("duration").and_then(|v| v.as_u64()).unwrap_or(0));
+                let playback_count = parse_u64(track, "playback_count");
+                let playback_count = format_playback_count(playback_count);
 
-                let playback_count = track
-                    .get("playback_count")
-                    .and_then(|v| v.as_u64())
-                    .map(format_playback_count)
-                    .unwrap_or_else(|| "0".to_string());
+                let stream_url = parse_str(track, "stream_url");
 
-                let stream_url = track
-                    .get("stream_url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                let t = Track {
+                tracks.push(Track {
                     title,
                     artists,
                     duration,
                     playback_count,
                     stream_url,
-                };
-
-                tracks.push(t);
+                });
             }
         }
 
@@ -157,68 +155,82 @@ impl API {
     pub fn get_playlists(&mut self) -> anyhow::Result<Vec<Playlist>> {
         let token_guard = self.token.lock().unwrap();
 
-        if self.playlists_next_href.is_none() && !self.first_playlist_page_fetched {
-            self.first_playlist_page_fetched = true;
-        } else if self.playlists_next_href.is_none() {
+        if self.my_playlists_next_href.is_none() && !self.my_first_playlist_page_fetched {
+            self.my_first_playlist_page_fetched = true;
+        } else if self.others_playlists_next_href.is_none()
+            && !self.others_first_playlist_page_fetched
+        {
+            self.others_first_playlist_page_fetched = true;
+        } else if self.my_playlists_next_href.is_none() && self.others_playlists_next_href.is_none()
+        {
             return Ok(Vec::new());
         }
 
-        let url = self.playlists_next_href.clone().unwrap_or_else(|| {
+        let urls = vec![
+        self.my_playlists_next_href.clone().unwrap_or_else(|| {
             "https://api.soundcloud.com/me/playlists?linked_partitioning=true&limit=40&show_tracks=false".to_string()
-        });
-
-        let resp: serde_json::Value = Client::new()
-            .get(&url)
-            .bearer_auth(&token_guard.access_token)
-            .send()?
-            .error_for_status()?
-            .json()?;
-
-        self.playlists_next_href = resp
-            .get("next_href")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        }),
+        self.others_playlists_next_href.clone().unwrap_or_else(|| {
+            "https://api.soundcloud.com/me/likes/playlists?limit=40&linked_partitioning=true".to_string()
+        }),
+    ];
 
         let mut playlists = Vec::new();
 
-        if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
-            for playlist in collection {
-                let title = playlist
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+        for (i, url) in urls.iter().enumerate() {
+            let resp: serde_json::Value = Client::new()
+                .get(url)
+                .bearer_auth(&token_guard.access_token)
+                .send()?
+                .error_for_status()?
+                .json()?;
 
-                let track_count = playlist
-                    .get("track_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    .to_string();
+            let next_href = resp
+                .get("next_href")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if i == 0 {
+                self.my_playlists_next_href = next_href;
+            } else {
+                self.others_playlists_next_href = next_href;
+            }
 
-                let duration = format_duration(
-                    playlist
-                        .get("duration")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0),
-                );
+            if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
+                for playlist in collection {
+                    if i == 1
+                        && playlist
+                            .get("playlist_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            != "PLAYLIST"
+                    {
+                        continue;
+                    }
 
-                let tracks_uri = playlist
-                    .get("tracks_uri")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                    let title = parse_str(&playlist, "title");
+                    let track_count = parse_u64(&playlist, "track_count").to_string();
+                    let duration = format_duration(parse_u64(&playlist, "duration"));
+                    let created_at = DateTime::parse_from_str(
+                        &parse_str(&playlist, "created_at"),
+                        "%Y/%m/%d %H:%M:%S %z",
+                    )
+                    .unwrap_or_else(|_| {
+                        Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap())
+                    });
+                    let tracks_uri = parse_str(&playlist, "tracks_uri");
 
-                let p = Playlist {
-                    title,
-                    track_count,
-                    duration,
-                    tracks_uri,
-                };
-
-                playlists.push(p);
+                    playlists.push(Playlist {
+                        title,
+                        track_count,
+                        duration,
+                        created_at,
+                        tracks_uri,
+                    });
+                }
             }
         }
 
+        playlists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(playlists)
     }
 
@@ -252,50 +264,28 @@ impl API {
 
         if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
             for album in collection {
-                let title = album
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                if parse_str(album, "playlist_type") != "album" {
+                    continue;
+                }
 
-                let artists = album
-                    .get("user")
-                    .and_then(|u| u.get("username"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let title = parse_str(album, "title");
+                let artists = parse_str(
+                    album.get("user").unwrap_or(&serde_json::Value::Null),
+                    "username",
+                );
+                let release_year = parse_u64(album, "release_year").to_string();
+                let track_count = parse_u64(album, "track_count").to_string();
+                let duration = format_duration(parse_u64(album, "duration"));
+                let tracks_uri = parse_str(album, "tracks_uri");
 
-                let release_year = album
-                    .get("release_year")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    .to_string();
-
-                let track_count = album
-                    .get("track_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    .to_string();
-
-                let duration =
-                    format_duration(album.get("duration").and_then(|v| v.as_u64()).unwrap_or(0));
-
-                let tracks_uri = album
-                    .get("tracks_uri")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                let a = Album {
+                albums.push(Album {
                     title,
                     artists,
                     release_year,
                     track_count,
                     duration,
                     tracks_uri,
-                };
-
-                albums.push(a);
+                });
             }
         }
 
