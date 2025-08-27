@@ -439,4 +439,9 @@ loop {
 ```
 
 This process was also applied to the liked songs logic and will be applied to all future API usage to avoid the frame hitching problem.
+
+## Albums, Stations, Following + History
+
+These are basically all just following the same pattern outlined above, so I will skip the details here.
+
 </details>

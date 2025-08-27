@@ -19,12 +19,24 @@ pub struct Playlist {
     pub tracks_uri: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct Album {
+    pub title: String,
+    pub artists: String,
+    pub release_year: String,
+    pub duration: String,
+    pub track_count: String,
+    pub tracks_uri: String,
+}
+
 pub struct API {
     token: Arc<Mutex<Token>>,
     liked_tracks_next_href: Option<String>,
     first_liked_tracks_page_fetched: bool,
     playlists_next_href: Option<String>,
     first_playlist_page_fetched: bool,
+    albums_next_href: Option<String>,
+    first_albums_page_fetched: bool,
 }
 
 fn format_playback_count(n: u64) -> String {
@@ -58,6 +70,8 @@ impl API {
             first_liked_tracks_page_fetched: false,
             playlists_next_href: None,
             first_playlist_page_fetched: false,
+            albums_next_href: None,
+            first_albums_page_fetched: false,
         }
     }
 
@@ -206,5 +220,85 @@ impl API {
         }
 
         Ok(playlists)
+    }
+
+    pub fn get_albums(&mut self) -> anyhow::Result<Vec<Album>> {
+        let token_guard = self.token.lock().unwrap();
+
+        if self.albums_next_href.is_none() && !self.first_albums_page_fetched {
+            self.first_albums_page_fetched = true;
+        } else if self.albums_next_href.is_none() {
+            return Ok(Vec::new());
+        }
+
+        let url = self.albums_next_href.clone().unwrap_or_else(|| {
+            "https://api.soundcloud.com/me/likes/playlists?limit=40&linked_partitioning=true"
+                .to_string()
+        });
+
+        let resp: serde_json::Value = Client::new()
+            .get(&url)
+            .bearer_auth(&token_guard.access_token)
+            .send()?
+            .error_for_status()?
+            .json()?;
+
+        self.albums_next_href = resp
+            .get("next_href")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let mut albums = Vec::new();
+
+        if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
+            for album in collection {
+                let title = album
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let artists = album
+                    .get("user")
+                    .and_then(|u| u.get("username"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let release_year = album
+                    .get("release_year")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .to_string();
+
+                let track_count = album
+                    .get("track_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .to_string();
+
+                let duration =
+                    format_duration(album.get("duration").and_then(|v| v.as_u64()).unwrap_or(0));
+
+                let tracks_uri = album
+                    .get("tracks_uri")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let a = Album {
+                    title,
+                    artists,
+                    release_year,
+                    track_count,
+                    duration,
+                    tracks_uri,
+                };
+
+                albums.push(a);
+            }
+        }
+
+        Ok(albums)
     }
 }

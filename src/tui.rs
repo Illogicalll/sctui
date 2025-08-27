@@ -1,4 +1,4 @@
-use crate::api::{API, Playlist, Track};
+use crate::api::{API, Album, Playlist, Track};
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
@@ -57,24 +57,32 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
     let mut playlists_state = TableState::default();
     playlists_state.select(Some(selected_row));
 
+    let mut albums: Vec<Album> = api_guard.get_albums()?.into_iter().collect();
+    let mut albums_state = TableState::default();
+    albums_state.select(Some(selected_row));
+
     drop(api_guard);
 
-    let get_table_rows_count =
-        |selected_subtab: usize, likes: &Vec<Track>, playlists: &Vec<Playlist>| -> usize {
-            match selected_subtab {
-                0 => likes.len(),
-                1 => playlists.len(),
-                2 => 2,
-                3 => 2,
-                4 => 2,
-                5 => 2,
-                _ => 0,
-            }
-        };
+    let get_table_rows_count = |selected_subtab: usize,
+                                likes: &Vec<Track>,
+                                playlists: &Vec<Playlist>,
+                                albums: &Vec<Album>|
+     -> usize {
+        match selected_subtab {
+            0 => likes.len(),
+            1 => playlists.len(),
+            2 => albums.len(),
+            3 => 2,
+            4 => 2,
+            5 => 2,
+            _ => 0,
+        }
+    };
 
     let (tx_likes, rx_likes): (Sender<Vec<Track>>, Receiver<Vec<Track>>) = mpsc::channel();
     let (tx_playlists, rx_playlists): (Sender<Vec<Playlist>>, Receiver<Vec<Playlist>>) =
         mpsc::channel();
+    let (tx_albums, rx_albums): (Sender<Vec<Album>>, Receiver<Vec<Album>>) = mpsc::channel();
 
     loop {
         // attempt to update application data between frames (to avoid hitching)
@@ -86,6 +94,10 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
             playlists.extend(new_playlists.into_iter());
         }
 
+        while let Ok(new_albums) = rx_albums.try_recv() {
+            albums.extend(new_albums.into_iter());
+        }
+
         terminal.draw(|frame| {
             render(
                 frame,
@@ -93,6 +105,8 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                 &mut likes_state,
                 &playlists,
                 &mut playlists_state,
+                &albums,
+                &mut albums_state,
                 selected_tab,
                 &tab_titles,
                 selected_subtab,
@@ -145,7 +159,8 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                     }
                 }
                 KeyCode::Down => {
-                    let max_rows = get_table_rows_count(selected_subtab, &likes, &playlists);
+                    let max_rows =
+                        get_table_rows_count(selected_subtab, &likes, &playlists, &albums);
                     let max_info_rows = get_info_table_rows_count();
                     if selected_tab == 2
                         && info_pane_selected
@@ -191,6 +206,17 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                                                 api_clone.lock().unwrap().get_playlists();
                                             if let Ok(playlists) = new_playlists {
                                                 let _ = tx.send(playlists);
+                                            }
+                                        });
+                                    }
+                                    2 => {
+                                        let api_clone = Arc::clone(api);
+                                        let tx = tx_albums.clone();
+
+                                        std::thread::spawn(move || {
+                                            let new_albums = api_clone.lock().unwrap().get_albums();
+                                            if let Ok(albums) = new_albums {
+                                                let _ = tx.send(albums);
                                             }
                                         });
                                     }
@@ -287,6 +313,8 @@ fn render(
     likes_state: &mut TableState,
     playlists: &Vec<Playlist>,
     playlists_state: &mut TableState,
+    albums: &Vec<Album>,
+    albums_state: &mut TableState,
     selected_tab: usize,
     tab_titles: &[&str],
     selected_subtab: usize,
@@ -385,10 +413,11 @@ fn render(
                 ],
             ),
             2 => (
-                styled_header(&["Title", "Artist(s)", "Year", "Duration"]),
+                styled_header(&["Title", "Artist(s)", "Year", "No. Songs", "Duration"]),
                 vec![
-                    Constraint::Percentage(40),
-                    Constraint::Percentage(40),
+                    Constraint::Percentage(50),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(10),
                     Constraint::Percentage(10),
                     Constraint::Percentage(10),
                 ],
@@ -426,20 +455,18 @@ fn render(
                     ])
                 })
                 .collect(),
-            2 => vec![
-                Row::new(vec![
-                    truncate_with_ellipsis("Album One", col_min_widths[0]),
-                    truncate_with_ellipsis("Artist X", col_min_widths[1]),
-                    truncate_with_ellipsis("1997", col_min_widths[2]),
-                    truncate_with_ellipsis("45:02", col_min_widths[3]),
-                ]),
-                Row::new(vec![
-                    truncate_with_ellipsis("Album Two", col_min_widths[0]),
-                    truncate_with_ellipsis("Artist Y", col_min_widths[1]),
-                    truncate_with_ellipsis("2009", col_min_widths[2]),
-                    truncate_with_ellipsis("16:03", col_min_widths[3]),
-                ]),
-            ],
+            2 => albums
+                .iter()
+                .map(|album| {
+                    Row::new(vec![
+                        truncate_with_ellipsis(&album.title, col_min_widths[0]),
+                        truncate_with_ellipsis(&album.artists, col_min_widths[1]),
+                        truncate_with_ellipsis(&album.release_year, col_min_widths[2]),
+                        truncate_with_ellipsis(&album.track_count, col_min_widths[3]),
+                        truncate_with_ellipsis(&album.duration, col_min_widths[4]),
+                    ])
+                })
+                .collect(),
             3 => vec![
                 Row::new(vec![truncate_with_ellipsis(
                     "Station Jazz",
@@ -491,8 +518,9 @@ fn render(
             .collect();
 
         let state: &mut TableState = match selected_subtab {
-            0 | 2 => likes_state,
+            0 => likes_state,
             1 => playlists_state,
+            2 => albums_state,
             _ => likes_state,
         };
 
