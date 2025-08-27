@@ -291,7 +291,7 @@ there is no current system to even handle 'playing' a track. Because of this, I 
 
 <details>
 
-<summary><b>API Functions</b></summary>
+<summary><b>Chapter 4: API Functions</b></summary>
 
 ## Getting our Data
 
