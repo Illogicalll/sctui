@@ -1,30 +1,33 @@
-use color_eyre::eyre::{Ok, Result};
+use crate::api::{API, Track};
+use color_eyre::eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, Tabs},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
 };
+use std::result::Result::Ok;
 
 static NUM_TABS: usize = 3;
 static NUM_SUBTABS: usize = 6;
 static NUM_SEARCHFILTERS: usize = 4;
 static NUM_FEED_ACTIVITY_COLS: usize = 4;
 static NUM_FEED_INFO_COLS: usize = 3;
+static REFRESH_THRESHOLD: usize = 5;
 
 // prep terminal and color_eyre error reporting
-pub fn run() -> Result<()> {
+pub fn run(api: &mut API) -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
-    let result = start(terminal);
+    let result = start(terminal, api);
     ratatui::restore();
     result
 }
 
 // state management and render loop
-fn start(mut terminal: DefaultTerminal) -> Result<()> {
+fn start(mut terminal: DefaultTerminal, api: &mut API) -> Result<()> {
     let tab_titles = ["Library", "Search", "Feed"];
     let mut selected_tab = 0;
     let mut selected_subtab = 0;
@@ -42,11 +45,28 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
     let mut selected_searchfilter = 0;
     let mut info_pane_selected = false;
     let mut selected_info_row = 0;
+    let mut likes: Vec<Track> = api.get_liked_tracks().into_iter().flatten().collect();
+    let mut likes_state = TableState::default();
+    likes_state.select(Some(selected_row));
+
+    let get_table_rows_count = |selected_subtab: usize, likes: &Vec<Track>| -> usize {
+        match selected_subtab {
+            0 => likes.len(),
+            1 => 2,
+            2 => 2,
+            3 => 2,
+            4 => 2,
+            5 => 2,
+            _ => 0,
+        }
+    };
 
     loop {
         terminal.draw(|frame| {
             render(
                 frame,
+                &likes,
+                &mut likes_state,
                 selected_tab,
                 &tab_titles,
                 selected_subtab,
@@ -99,7 +119,7 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                     }
                 }
                 KeyCode::Down => {
-                    let max_rows = get_table_rows_count(selected_subtab);
+                    let max_rows = get_table_rows_count(selected_subtab, &likes);
                     let max_info_rows = get_info_table_rows_count();
                     if selected_tab == 2
                         && info_pane_selected
@@ -109,6 +129,15 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                     } else {
                         if selected_row + 1 < max_rows {
                             selected_row += 1;
+                            likes_state.select(Some(selected_row));
+
+                            if max_rows >= REFRESH_THRESHOLD
+                                && selected_row + REFRESH_THRESHOLD >= max_rows
+                            {
+                                if let Ok(new_likes) = api.get_liked_tracks() {
+                                    likes.extend(new_likes.into_iter());
+                                }
+                            }
                         }
                     }
                 }
@@ -117,6 +146,7 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
                         selected_info_row -= 1;
                     } else if selected_row > 0 {
                         selected_row -= 1;
+                        likes_state.select(Some(selected_row));
                     }
                 }
                 KeyCode::Char(c) => {
@@ -134,19 +164,6 @@ fn start(mut terminal: DefaultTerminal) -> Result<()> {
         }
     }
     Ok(())
-}
-
-// TODO: make these two functions dynamic, as real data won't be of fixed length
-fn get_table_rows_count(selected_subtab: usize) -> usize {
-    match selected_subtab {
-        0 => 3,
-        1 => 2,
-        2 => 2,
-        3 => 2,
-        4 => 2,
-        5 => 2,
-        _ => 0,
-    }
 }
 
 fn get_info_table_rows_count() -> usize {
@@ -207,6 +224,8 @@ fn truncate_with_ellipsis(s: &str, min_width: usize) -> String {
 // receives the state and renders the application
 fn render(
     frame: &mut Frame,
+    likes: &Vec<Track>,
+    likes_state: &mut TableState,
     selected_tab: usize,
     tab_titles: &[&str],
     selected_subtab: usize,
@@ -285,56 +304,57 @@ fn render(
             );
         frame.render_widget(subtabs_widget, subchunks[0]);
 
-        // define headers for tables for each subtab
-        let (header, num_columns) = match selected_subtab {
+        // define headers and column widths for tables for each subtab
+        let (header, col_widths) = match selected_subtab {
             0 | 5 => (
-                styled_header(&["Title", "Artist(s)", "Album", "Duration"]),
-                4,
+                styled_header(&["Title", "Artist(s)", "Duration", "Streams"]),
+                vec![
+                    Constraint::Percentage(55),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(10),
+                ],
             ),
-            1 => (styled_header(&["Name", "No. Songs", "Duration"]), 3),
+            1 => (
+                styled_header(&["Name", "No. Songs", "Duration"]),
+                vec![
+                    Constraint::Percentage(80),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(10),
+                ],
+            ),
             2 => (
                 styled_header(&["Title", "Artist(s)", "Year", "Duration"]),
-                4,
+                vec![
+                    Constraint::Percentage(40),
+                    Constraint::Percentage(40),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(10),
+                ],
             ),
-            3 | 4 => (styled_header(&["Name"]), 1),
-            _ => (Row::new(vec![] as Vec<Cell>), 0),
+            3 | 4 => (styled_header(&["Name"]), vec![Constraint::Percentage(100)]),
+            _ => (
+                Row::new(vec![] as Vec<Cell>),
+                vec![Constraint::Percentage(100)],
+            ),
         };
 
         // truncation to avoid cut-off text in columns
-        let col_widths = calculate_column_widths(num_columns);
         let col_min_widths = calculate_min_widths(&col_widths, width);
 
         // define rows for each subtab
         let rows = match selected_subtab {
-            0 => vec![
-                Row::new(vec![
-                    truncate_with_ellipsis("Short song name", col_min_widths[0]),
-                    truncate_with_ellipsis("Short artist name", col_min_widths[1]),
-                    truncate_with_ellipsis("Short album name", col_min_widths[2]),
-                    truncate_with_ellipsis("0:57", col_min_widths[3]),
-                ]),
-                Row::new(vec![
-                    truncate_with_ellipsis("Medium length song name", col_min_widths[0]),
-                    truncate_with_ellipsis("Medium length artist name", col_min_widths[1]),
-                    truncate_with_ellipsis("Medium length album name", col_min_widths[2]),
-                    truncate_with_ellipsis("12:54", col_min_widths[3]),
-                ]),
-                Row::new(vec![
-                    truncate_with_ellipsis(
-                        "Really really really long song name",
-                        col_min_widths[0],
-                    ),
-                    truncate_with_ellipsis(
-                        "Really really really long artist name",
-                        col_min_widths[1],
-                    ),
-                    truncate_with_ellipsis(
-                        "Really really really long album name",
-                        col_min_widths[2],
-                    ),
-                    truncate_with_ellipsis("12:59:30", col_min_widths[3]),
-                ]),
-            ],
+            0 => likes
+                .iter()
+                .map(|track| {
+                    Row::new(vec![
+                        truncate_with_ellipsis(&track.title, col_min_widths[0]),
+                        truncate_with_ellipsis(&track.artists, col_min_widths[1]),
+                        truncate_with_ellipsis(&track.duration, col_min_widths[2]),
+                        truncate_with_ellipsis(&track.playback_count, col_min_widths[3]),
+                    ])
+                })
+                .collect(),
             1 => vec![
                 Row::new(vec![
                     truncate_with_ellipsis("Playlist 1", col_min_widths[0]),
@@ -421,7 +441,7 @@ fn render(
             )
             .column_spacing(1);
 
-        frame.render_widget(table, subchunks[1]);
+        frame.render_stateful_widget(table, subchunks[1], likes_state);
     }
     //
     // ==========

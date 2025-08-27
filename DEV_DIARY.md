@@ -194,8 +194,9 @@ Then I rendered the sub-tabs up top and a table below.
 ![Subtabs and Table on the Library Tab](/media/ui_2.png)
 
 The table also needed some extra logic to handle different numbers of columns for different sub-tabs, as well as different column
-widths to match. Additionally, I opted to clamp the _Duration_ column to 10% width, to save more space for columns that would likely
-contain much longer strings of text (_e.g. title or artist(s)_).
+widths to match. ~~Additionally, I opted to clamp the _Duration_ column to 10% width, to save more space for columns that would likely
+contain much longer strings of text (_e.g. title or artist(s)_).~~ I ended up removing this logic and opting for
+fixed defined column widths as this method introduced unnecessary complexity.
 
 ```rs
 fn styled_header(cells: &[&str]) -> Row<'static> {
@@ -286,4 +287,114 @@ the official website.
 Since the application is still just a non-functional shell at this point, I figured there wasn't much point mocking up animated elements and such when
 there is no current system to even handle 'playing' a track. Because of this, I will return to this area of the TUI in a later chapter.
 
+</details>
+
+<details>
+
+<summary><b>API Functions</b></summary>
+
+## Getting our Data
+
+Before I hook anything up to the UI I just made, I want to write logic that will be able to bring in any data I need and return it in the
+format I want. I find it best to approach this going tab by tab and then going over each feature to check we will have what we need.
+
+At first I started defining a list of public functions with the token arc mutex in the parameters. While this is the simplest
+approach, it would have resulted in the token having to be passed in every time an API call is made. This would have plagued the
+UI code with references to authorisation/token code, which I wanted to keep completely separate.
+
+After deleting what little progress I had made, I instead went for a different approach:
+
+`api.rs`:
+
+```rs
+// define an API struct that holds a shared, thread-safe token
+pub struct API {
+    token: Arc<Mutex<Token>>,
+}
+
+impl API {
+  // when instantiated, the token will be internally accessible with self.token
+  pub fn init(token: Arc<Mutex<Token>>) -> Self {
+      Self {
+          token,
+      }
+  }
+
+  // define API functions here
+  pub fn api_function_name(&mut self) -> anyhow::Result<Value> {
+    // ...
+  }
+```
+
+`main.rs`:
+
+```rs
+// define an API object and pass in a reference to the thread-safe token
+let mut api = api::API::init(Arc::clone(&token));
+
+// pass the object into the UI file
+tui::run(&mut api).map_err(|e| anyhow::anyhow!(e))?;
+```
+
+This implementation means that the `tui.rs` file can remain completely oblivious to the existence of tokens and authorisation logic,
+while still being able to fetch whatever data it needs.
+
+## Likes
+
+So here we go then, the first API function. Honestly, it ended up taking slightly longer to think get working
+than I would have liked given all the supporting setup I did. But such is the reality of building anything I 
+suppose.
+
+The first major blocker was that there didn't seem to be a way to fetch the Album of a track. I found this 
+rather ridiculous and spent a long time figuring out a workaround. In the end all I could come up with was to
+return the top result of the playlists a track is in that has the `playlist_type` property set to `album`.
+
+However, this would obviously result in a ton more API calls, and to add insult to injury this feature was only
+available on Soundcloud's V2 API which I didn't have access to. In the end I opted to substitute the Album column
+for a stream count column. It still bugs me but at least I knew there wasn't really much I could do about it.
+
+Another problem I ran into was that Go+ (Soundcloud's premium tier allowing access to mainstream music, offline
+listening, *etc.*) tracks had no `stream_url`. This ultimately meant that, while I could display the tracks
+metadata on the table, the user would not actually be able to play the track. After some reading up on the 
+documentation, it didn't seem there was a way around this either, so I simply opted to hide those tracks.
+
+With those setbacks aside, it was time to design the API function. The Soundcloud API enforces the reasonable 
+requirement of pagination (to avoid large requests). With this in mind I made space for a
+`liked_tracks_next_href` variable in the API struct, allowing it to persist between function
+calls:
+
+```rs
+pub struct API {
+    token: Arc<Mutex<Token>>,
+    liked_tracks_next_href: Option<String>,
+}
+```
+
+My thinking for the `get_liked_tracks()` function would be to attempt to fetch from the `liked_tracks_next_href` first, and
+if it doesn't exist yet call from the default URL that fetches the first 40 tracks (40 seemed like a good balance 
+of not leaving blank space even in tall windows but still not taking too long to fetch).
+
+This, paired with some formatting functions to handle duration and stream count readability resulted in a relatively
+straight-forward first API function.
+
+After hooking it all up to the TUI I realised that scrolling to the bottom didn't make the table scroll. This turned
+out to be as my table was not a stateful widget yet. Luckily ratatui makes it pretty straight forward, and 
+after some adjustments to update the table state and then calling `render_stateful_widget(...)` as opposed to `render_widget(...)`,
+scrolling was fully functional.
+
+Lastly I needed to simply re-call the `get_liked_tracks()` function whenever the user was close to reaching the 
+bottom of the list:
+
+```rs
+if max_rows >= REFRESH_THRESHOLD && selected_row + REFRESH_THRESHOLD >= max_rows {
+    if let Ok(new_likes) = api.get_liked_tracks() {
+        likes.extend(new_likes.into_iter());
+    }
+}
+```
+
+![Likes Working](/media/likes_working.png)
+
+As a side note I ended up removing the dynamic even column width calculation function as it was unnecessarily 
+complicated, instead opting for defining fixed percentage widths.
 </details>
