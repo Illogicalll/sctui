@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 static NUM_TABS: usize = 3;
-static NUM_SUBTABS: usize = 6;
+static NUM_SUBTABS: usize = 5;
 static NUM_SEARCHFILTERS: usize = 4;
 static NUM_FEED_ACTIVITY_COLS: usize = 4;
 static NUM_FEED_INFO_COLS: usize = 3;
@@ -33,14 +33,7 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
     let mut selected_tab = 0;
     let mut selected_subtab = 0;
     let mut selected_row = 0;
-    let subtab_titles = [
-        "Likes",
-        "Playlists",
-        "Albums",
-        "Stations",
-        "Following",
-        "History",
-    ];
+    let subtab_titles = ["Likes", "Playlists", "Albums", "Following", "History"];
     let mut query = String::new();
     let searchfilters = ["Tracks", "Albums", "Playlists", "People"];
     let mut selected_searchfilter = 0;
@@ -395,7 +388,7 @@ fn render(
 
         // define headers and column widths for tables for each subtab
         let (header, col_widths) = match selected_subtab {
-            0 | 5 => (
+            0 | 4 => (
                 styled_header(&["Title", "Artist(s)", "Duration", "Streams"]),
                 vec![
                     Constraint::Percentage(55),
@@ -422,7 +415,7 @@ fn render(
                     Constraint::Percentage(10),
                 ],
             ),
-            3 | 4 => (styled_header(&["Name"]), vec![Constraint::Percentage(100)]),
+            3 => (styled_header(&["Name"]), vec![Constraint::Percentage(100)]),
             _ => (
                 Row::new(vec![] as Vec<Cell>),
                 vec![Constraint::Percentage(100)],
@@ -469,16 +462,6 @@ fn render(
                 .collect(),
             3 => vec![
                 Row::new(vec![truncate_with_ellipsis(
-                    "Station Jazz",
-                    col_min_widths[0],
-                )]),
-                Row::new(vec![truncate_with_ellipsis(
-                    "Station Rock",
-                    col_min_widths[0],
-                )]),
-            ],
-            4 => vec![
-                Row::new(vec![truncate_with_ellipsis(
                     "Following Artist A",
                     col_min_widths[0],
                 )]),
@@ -487,7 +470,7 @@ fn render(
                     col_min_widths[0],
                 )]),
             ],
-            5 => vec![
+            4 => vec![
                 Row::new(vec![
                     truncate_with_ellipsis("History Song A", col_min_widths[0]),
                     truncate_with_ellipsis("Artist X", col_min_widths[1]),

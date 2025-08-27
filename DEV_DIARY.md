@@ -449,4 +449,7 @@ This process was also applied to the liked songs logic and will be applied to al
 
 These are basically all just following the same pattern outlined above, so I will skip the details here.
 
+The only noteworthy inclusion is that unless I am missing something (I probably am) there doesn't seem to be a way to retrieve the saved stations.
+Oh well I never used those anyway.
+
 </details>
