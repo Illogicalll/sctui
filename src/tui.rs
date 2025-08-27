@@ -1,5 +1,4 @@
-use crate::api::{API, Track};
-use color_eyre::eyre::Result;
+use crate::api::{API, Playlist, Track};
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
@@ -9,6 +8,8 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
 };
 use std::result::Result::Ok;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 static NUM_TABS: usize = 3;
 static NUM_SUBTABS: usize = 6;
@@ -18,8 +19,8 @@ static NUM_FEED_INFO_COLS: usize = 3;
 static REFRESH_THRESHOLD: usize = 5;
 
 // prep terminal and color_eyre error reporting
-pub fn run(api: &mut API) -> Result<()> {
-    color_eyre::install()?;
+pub fn run(api: &mut Arc<Mutex<API>>) -> anyhow::Result<()> {
+    color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
     let result = start(terminal, api);
     ratatui::restore();
@@ -27,7 +28,7 @@ pub fn run(api: &mut API) -> Result<()> {
 }
 
 // state management and render loop
-fn start(mut terminal: DefaultTerminal, api: &mut API) -> Result<()> {
+fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Result<()> {
     let tab_titles = ["Library", "Search", "Feed"];
     let mut selected_tab = 0;
     let mut selected_subtab = 0;
@@ -45,28 +46,53 @@ fn start(mut terminal: DefaultTerminal, api: &mut API) -> Result<()> {
     let mut selected_searchfilter = 0;
     let mut info_pane_selected = false;
     let mut selected_info_row = 0;
-    let mut likes: Vec<Track> = api.get_liked_tracks().into_iter().flatten().collect();
+
+    let mut api_guard = api.lock().unwrap();
+
+    let mut likes: Vec<Track> = api_guard.get_liked_tracks()?.into_iter().collect();
     let mut likes_state = TableState::default();
     likes_state.select(Some(selected_row));
 
-    let get_table_rows_count = |selected_subtab: usize, likes: &Vec<Track>| -> usize {
-        match selected_subtab {
-            0 => likes.len(),
-            1 => 2,
-            2 => 2,
-            3 => 2,
-            4 => 2,
-            5 => 2,
-            _ => 0,
-        }
-    };
+    let mut playlists: Vec<Playlist> = api_guard.get_playlists()?.into_iter().collect();
+    let mut playlists_state = TableState::default();
+    playlists_state.select(Some(selected_row));
+
+    drop(api_guard);
+
+    let get_table_rows_count =
+        |selected_subtab: usize, likes: &Vec<Track>, playlists: &Vec<Playlist>| -> usize {
+            match selected_subtab {
+                0 => likes.len(),
+                1 => playlists.len(),
+                2 => 2,
+                3 => 2,
+                4 => 2,
+                5 => 2,
+                _ => 0,
+            }
+        };
+
+    let (tx_likes, rx_likes): (Sender<Vec<Track>>, Receiver<Vec<Track>>) = mpsc::channel();
+    let (tx_playlists, rx_playlists): (Sender<Vec<Playlist>>, Receiver<Vec<Playlist>>) =
+        mpsc::channel();
 
     loop {
+        // attempt to update application data between frames (to avoid hitching)
+        while let Ok(new_likes) = rx_likes.try_recv() {
+            likes.extend(new_likes.into_iter());
+        }
+
+        while let Ok(new_playlists) = rx_playlists.try_recv() {
+            playlists.extend(new_playlists.into_iter());
+        }
+
         terminal.draw(|frame| {
             render(
                 frame,
                 &likes,
                 &mut likes_state,
+                &playlists,
+                &mut playlists_state,
                 selected_tab,
                 &tab_titles,
                 selected_subtab,
@@ -80,7 +106,7 @@ fn start(mut terminal: DefaultTerminal, api: &mut API) -> Result<()> {
             )
         })?;
 
-        // support for both arrow keys and hjkl
+        // input handling
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Esc => break,
@@ -119,7 +145,7 @@ fn start(mut terminal: DefaultTerminal, api: &mut API) -> Result<()> {
                     }
                 }
                 KeyCode::Down => {
-                    let max_rows = get_table_rows_count(selected_subtab, &likes);
+                    let max_rows = get_table_rows_count(selected_subtab, &likes, &playlists);
                     let max_info_rows = get_info_table_rows_count();
                     if selected_tab == 2
                         && info_pane_selected
@@ -129,13 +155,46 @@ fn start(mut terminal: DefaultTerminal, api: &mut API) -> Result<()> {
                     } else {
                         if selected_row + 1 < max_rows {
                             selected_row += 1;
-                            likes_state.select(Some(selected_row));
+
+                            match selected_subtab {
+                                0 => {
+                                    likes_state.select(Some(selected_row));
+                                }
+                                1 => {
+                                    playlists_state.select(Some(selected_row));
+                                }
+                                _ => {}
+                            }
 
                             if max_rows >= REFRESH_THRESHOLD
                                 && selected_row + REFRESH_THRESHOLD >= max_rows
                             {
-                                if let Ok(new_likes) = api.get_liked_tracks() {
-                                    likes.extend(new_likes.into_iter());
+                                match selected_subtab {
+                                    0 => {
+                                        let api_clone = Arc::clone(api);
+                                        let tx = tx_likes.clone();
+
+                                        std::thread::spawn(move || {
+                                            let new_likes =
+                                                api_clone.lock().unwrap().get_liked_tracks();
+                                            if let Ok(tracks) = new_likes {
+                                                let _ = tx.send(tracks);
+                                            }
+                                        });
+                                    }
+                                    1 => {
+                                        let api_clone = Arc::clone(api);
+                                        let tx = tx_playlists.clone();
+
+                                        std::thread::spawn(move || {
+                                            let new_playlists =
+                                                api_clone.lock().unwrap().get_playlists();
+                                            if let Ok(playlists) = new_playlists {
+                                                let _ = tx.send(playlists);
+                                            }
+                                        });
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -226,6 +285,8 @@ fn render(
     frame: &mut Frame,
     likes: &Vec<Track>,
     likes_state: &mut TableState,
+    playlists: &Vec<Playlist>,
+    playlists_state: &mut TableState,
     selected_tab: usize,
     tab_titles: &[&str],
     selected_subtab: usize,
@@ -355,18 +416,16 @@ fn render(
                     ])
                 })
                 .collect(),
-            1 => vec![
-                Row::new(vec![
-                    truncate_with_ellipsis("Playlist 1", col_min_widths[0]),
-                    truncate_with_ellipsis("15", col_min_widths[1]),
-                    truncate_with_ellipsis("30:00", col_min_widths[2]),
-                ]),
-                Row::new(vec![
-                    truncate_with_ellipsis("Playlist 2", col_min_widths[0]),
-                    truncate_with_ellipsis("1", col_min_widths[1]),
-                    truncate_with_ellipsis("2:30", col_min_widths[2]),
-                ]),
-            ],
+            1 => playlists
+                .iter()
+                .map(|playlist| {
+                    Row::new(vec![
+                        truncate_with_ellipsis(&playlist.title, col_min_widths[0]),
+                        truncate_with_ellipsis(&playlist.track_count, col_min_widths[1]),
+                        truncate_with_ellipsis(&playlist.duration, col_min_widths[2]),
+                    ])
+                })
+                .collect(),
             2 => vec![
                 Row::new(vec![
                     truncate_with_ellipsis("Album One", col_min_widths[0]),
@@ -431,6 +490,12 @@ fn render(
             })
             .collect();
 
+        let state: &mut TableState = match selected_subtab {
+            0 | 2 => likes_state,
+            1 => playlists_state,
+            _ => likes_state,
+        };
+
         // render table
         let table = Table::new(rows, col_widths)
             .header(header)
@@ -441,7 +506,7 @@ fn render(
             )
             .column_spacing(1);
 
-        frame.render_stateful_widget(table, subchunks[1], likes_state);
+        frame.render_stateful_widget(table, subchunks[1], state);
     }
     //
     // ==========

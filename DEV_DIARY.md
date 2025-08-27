@@ -399,4 +399,44 @@ As seen below the data is now dynamically pulled in through the API:
 
 As a side note I ended up removing the dynamic even column width calculation function as it was unnecessarily 
 complicated, instead opting for defining fixed percentage widths.
+
+## Playlists
+
+Soundcloud offers a `/me/playlists` end point that returns a specified number of playlists and all the tracks in them at once. This is great, but playlists
+can contain hundreds or even thousands of songs and this could lead to quite a lot of lag in the application. To avoid this I set the handy `show_tracks`
+parameter to `false`, which then gave me only the playlist metadata, taking significantly less time to execute. The plan would then be to follow the link
+contained in the `tracks_uri` field if the user wants to navigate to that specific playlist.
+
+Another thing I discovered while investigating lag is the slight hitch that occurs when the user holds the down arrow to continuously scroll down. This 
+was obviously occurring due to the fact that the application was trying to fetch more playlists mid-frame. This led to a *slight* (complete) overhaul of
+how the API functions within the `tui.rs` file in order to make it run on a seperate thread.
+
+If different threads are going to call the API, we obviously need to make it thread safe which means more `Arc`s and more `Mutex`es (yay). Now I have this 
+abomination in `main.rs`
+
+```rs
+let mut api = Arc::new(Mutex::new(api::API::init(Arc::clone(&token))));
+```
+
+In order to receive data between frames we need to be able to set up a channel that we can *'check up on'* in between frames:
+
+```rs
+let (tx_playlists, rx_playlists): (Sender<Vec<Playlist>>, Receiver<Vec<Playlist>>) = mpsc::channel();
+```
+
+We define a transmitter `tx` for pushing a `Vec<Playlist>` into the channel, and a receiver `rx` for reading the data from the channel.
+The API thread(s) fetch playlists from the API and use the sender to pass results back. Meanwhile, the main render loop uses `try_recv()` on the receiver to 
+check up on the channel between framees for new data:
+
+```rs
+loop {
+  while let Ok(new_playlists) = rx_playlists.try_recv() {
+      playlists.extend(new_playlists.into_iter());
+  }
+
+  terminal.draw(|frame| {
+    // ...
+```
+
+This process was also applied to the liked songs logic and will be applied to all future API usage to avoid the frame hitching problem.
 </details>

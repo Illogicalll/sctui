@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
 
     auth::start_auto_refresh(Arc::clone(&token));
 
-    let mut api = api::API::init(Arc::clone(&token));
+    let mut api = Arc::new(Mutex::new(api::API::init(Arc::clone(&token))));
 
     tui::run(&mut api).map_err(|e| anyhow::anyhow!(e))?;
 
