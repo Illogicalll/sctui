@@ -449,7 +449,10 @@ This process was also applied to the liked songs logic and will be applied to al
 
 These are basically all just following the same pattern outlined above, so I will skip the details here.
 
-The only noteworthy inclusion is that unless I am missing something (I probably am) there doesn't seem to be a way to retrieve the saved stations.
-Oh well I never used those anyway.
+The only noteworthy inclusion is that unless I am missing something (I probably am) there doesn't seem to be a way 
+to retrieve the saved stations or the listening history.
+
+Oh well, I never used the saved stations feature before and while I could implement the listening history myself
+(with a simple array), it is not a priority right now.
 
 </details>

@@ -31,6 +31,12 @@ pub struct Album {
     pub tracks_uri: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct Artist {
+    pub name: String,
+    pub urn: String,
+}
+
 pub struct API {
     token: Arc<Mutex<Token>>,
     liked_tracks_next_href: Option<String>,
@@ -41,6 +47,8 @@ pub struct API {
     others_first_playlist_page_fetched: bool,
     albums_next_href: Option<String>,
     first_albums_page_fetched: bool,
+    following_next_href: Option<String>,
+    first_following_page_fetched: bool,
 }
 
 fn format_playback_count(n: u64) -> String {
@@ -77,6 +85,13 @@ fn parse_u64(obj: &serde_json::Value, key: &str) -> u64 {
     obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
 }
 
+fn parse_next_href(resp: &serde_json::Value) -> Option<String> {
+    return resp
+        .get("next_href")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+}
+
 impl API {
     pub fn init(token: Arc<Mutex<Token>>) -> Self {
         Self {
@@ -89,6 +104,8 @@ impl API {
             others_first_playlist_page_fetched: false,
             albums_next_href: None,
             first_albums_page_fetched: false,
+            following_next_href: None,
+            first_following_page_fetched: false,
         }
     }
 
@@ -112,10 +129,7 @@ impl API {
             .error_for_status()?
             .json()?;
 
-        self.liked_tracks_next_href = resp
-            .get("next_href")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        self.liked_tracks_next_href = parse_next_href(&resp);
 
         let mut tracks = Vec::new();
 
@@ -185,10 +199,7 @@ impl API {
                 .error_for_status()?
                 .json()?;
 
-            let next_href = resp
-                .get("next_href")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+            let next_href = parse_next_href(&resp);
             if i == 0 {
                 self.my_playlists_next_href = next_href;
             } else {
@@ -255,10 +266,7 @@ impl API {
             .error_for_status()?
             .json()?;
 
-        self.albums_next_href = resp
-            .get("next_href")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        self.albums_next_href = parse_next_href(&resp);
 
         let mut albums = Vec::new();
 
@@ -290,5 +298,41 @@ impl API {
         }
 
         Ok(albums)
+    }
+
+    pub fn get_following(&mut self) -> anyhow::Result<Vec<Artist>> {
+        let token_guard = self.token.lock().unwrap();
+
+        if self.following_next_href.is_none() && !self.first_following_page_fetched {
+            self.first_following_page_fetched = true;
+        } else if self.following_next_href.is_none() {
+            return Ok(Vec::new());
+        }
+
+        let url = self.following_next_href.clone().unwrap_or_else(|| {
+            "https://api.soundcloud.com/me/followings?limit=40&linked_partitioning=true".to_string()
+        });
+
+        let resp: serde_json::Value = Client::new()
+            .get(&url)
+            .bearer_auth(&token_guard.access_token)
+            .send()?
+            .error_for_status()?
+            .json()?;
+
+        self.following_next_href = parse_next_href(&resp);
+
+        let mut following = Vec::new();
+
+        if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
+            for artist in collection {
+                let name = parse_str(artist, "username");
+                let urn = parse_str(artist, "urn");
+
+                following.push(Artist { name, urn });
+            }
+        }
+
+        Ok(following)
     }
 }

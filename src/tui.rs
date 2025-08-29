@@ -1,4 +1,4 @@
-use crate::api::{API, Album, Playlist, Track};
+use crate::api::{API, Album, Artist, Playlist, Track};
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
@@ -12,7 +12,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 static NUM_TABS: usize = 3;
-static NUM_SUBTABS: usize = 5;
+static NUM_SUBTABS: usize = 4;
 static NUM_SEARCHFILTERS: usize = 4;
 static NUM_FEED_ACTIVITY_COLS: usize = 4;
 static NUM_FEED_INFO_COLS: usize = 3;
@@ -27,13 +27,31 @@ pub fn run(api: &mut Arc<Mutex<API>>) -> anyhow::Result<()> {
     result
 }
 
+// function to create a separate thread to fetch from the API
+fn spawn_fetch<T, F>(api: Arc<Mutex<API>>, tx: std::sync::mpsc::Sender<Vec<T>>, fetch_fn: F)
+where
+    T: Send + 'static,
+    F: FnOnce(&mut API) -> anyhow::Result<Vec<T>> + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let result = {
+            let mut api_guard = api.lock().unwrap();
+            fetch_fn(&mut api_guard)
+        };
+
+        if let Ok(items) = result {
+            let _ = tx.send(items);
+        }
+    });
+}
+
 // state management and render loop
 fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Result<()> {
     let tab_titles = ["Library", "Search", "Feed"];
     let mut selected_tab = 0;
     let mut selected_subtab = 0;
     let mut selected_row = 0;
-    let subtab_titles = ["Likes", "Playlists", "Albums", "Following", "History"];
+    let subtab_titles = ["Likes", "Playlists", "Albums", "Following"];
     let mut query = String::new();
     let searchfilters = ["Tracks", "Albums", "Playlists", "People"];
     let mut selected_searchfilter = 0;
@@ -54,20 +72,23 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
     let mut albums_state = TableState::default();
     albums_state.select(Some(selected_row));
 
+    let mut following: Vec<Artist> = api_guard.get_following()?.into_iter().collect();
+    let mut following_state = TableState::default();
+    following_state.select(Some(selected_row));
+
     drop(api_guard);
 
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
                                 playlists: &Vec<Playlist>,
-                                albums: &Vec<Album>|
+                                albums: &Vec<Album>,
+                                following: &Vec<Artist>|
      -> usize {
         match selected_subtab {
             0 => likes.len(),
             1 => playlists.len(),
             2 => albums.len(),
-            3 => 2,
-            4 => 2,
-            5 => 2,
+            3 => following.len(),
             _ => 0,
         }
     };
@@ -76,6 +97,8 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
     let (tx_playlists, rx_playlists): (Sender<Vec<Playlist>>, Receiver<Vec<Playlist>>) =
         mpsc::channel();
     let (tx_albums, rx_albums): (Sender<Vec<Album>>, Receiver<Vec<Album>>) = mpsc::channel();
+    let (tx_following, rx_following): (Sender<Vec<Artist>>, Receiver<Vec<Artist>>) =
+        mpsc::channel();
 
     loop {
         // attempt to update application data between frames (to avoid hitching)
@@ -91,6 +114,10 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
             albums.extend(new_albums.into_iter());
         }
 
+        while let Ok(new_following) = rx_following.try_recv() {
+            following.extend(new_following.into_iter());
+        }
+
         terminal.draw(|frame| {
             render(
                 frame,
@@ -100,6 +127,8 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                 &mut playlists_state,
                 &albums,
                 &mut albums_state,
+                &following,
+                &mut following_state,
                 selected_tab,
                 &tab_titles,
                 selected_subtab,
@@ -152,8 +181,13 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                     }
                 }
                 KeyCode::Down => {
-                    let max_rows =
-                        get_table_rows_count(selected_subtab, &likes, &playlists, &albums);
+                    let max_rows = get_table_rows_count(
+                        selected_subtab,
+                        &likes,
+                        &playlists,
+                        &albums,
+                        &following,
+                    );
                     let max_info_rows = get_info_table_rows_count();
                     if selected_tab == 2
                         && info_pane_selected
@@ -178,40 +212,21 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                                 && selected_row + REFRESH_THRESHOLD >= max_rows
                             {
                                 match selected_subtab {
-                                    0 => {
-                                        let api_clone = Arc::clone(api);
-                                        let tx = tx_likes.clone();
-
-                                        std::thread::spawn(move || {
-                                            let new_likes =
-                                                api_clone.lock().unwrap().get_liked_tracks();
-                                            if let Ok(tracks) = new_likes {
-                                                let _ = tx.send(tracks);
-                                            }
-                                        });
-                                    }
+                                    0 => spawn_fetch(Arc::clone(api), tx_likes.clone(), |api| {
+                                        api.get_liked_tracks()
+                                    }),
                                     1 => {
-                                        let api_clone = Arc::clone(api);
-                                        let tx = tx_playlists.clone();
-
-                                        std::thread::spawn(move || {
-                                            let new_playlists =
-                                                api_clone.lock().unwrap().get_playlists();
-                                            if let Ok(playlists) = new_playlists {
-                                                let _ = tx.send(playlists);
-                                            }
-                                        });
+                                        spawn_fetch(Arc::clone(api), tx_playlists.clone(), |api| {
+                                            api.get_playlists()
+                                        })
                                     }
-                                    2 => {
-                                        let api_clone = Arc::clone(api);
-                                        let tx = tx_albums.clone();
-
-                                        std::thread::spawn(move || {
-                                            let new_albums = api_clone.lock().unwrap().get_albums();
-                                            if let Ok(albums) = new_albums {
-                                                let _ = tx.send(albums);
-                                            }
-                                        });
+                                    2 => spawn_fetch(Arc::clone(api), tx_albums.clone(), |api| {
+                                        api.get_albums()
+                                    }),
+                                    3 => {
+                                        spawn_fetch(Arc::clone(api), tx_following.clone(), |api| {
+                                            api.get_following()
+                                        })
                                     }
                                     _ => {}
                                 }
@@ -308,6 +323,8 @@ fn render(
     playlists_state: &mut TableState,
     albums: &Vec<Album>,
     albums_state: &mut TableState,
+    following: &Vec<Artist>,
+    following_state: &mut TableState,
     selected_tab: usize,
     tab_titles: &[&str],
     selected_subtab: usize,
@@ -388,7 +405,7 @@ fn render(
 
         // define headers and column widths for tables for each subtab
         let (header, col_widths) = match selected_subtab {
-            0 | 4 => (
+            0 => (
                 styled_header(&["Title", "Artist(s)", "Duration", "Streams"]),
                 vec![
                     Constraint::Percentage(55),
@@ -460,30 +477,15 @@ fn render(
                     ])
                 })
                 .collect(),
-            3 => vec![
-                Row::new(vec![truncate_with_ellipsis(
-                    "Following Artist A",
-                    col_min_widths[0],
-                )]),
-                Row::new(vec![truncate_with_ellipsis(
-                    "Following Artist B",
-                    col_min_widths[0],
-                )]),
-            ],
-            4 => vec![
-                Row::new(vec![
-                    truncate_with_ellipsis("History Song A", col_min_widths[0]),
-                    truncate_with_ellipsis("Artist X", col_min_widths[1]),
-                    truncate_with_ellipsis("Album X", col_min_widths[2]),
-                    truncate_with_ellipsis("3:10", col_min_widths[3]),
-                ]),
-                Row::new(vec![
-                    truncate_with_ellipsis("History Song B", col_min_widths[0]),
-                    truncate_with_ellipsis("Artist Y", col_min_widths[1]),
-                    truncate_with_ellipsis("Album Y", col_min_widths[2]),
-                    truncate_with_ellipsis("2:54", col_min_widths[3]),
-                ]),
-            ],
+            3 => following
+                .iter()
+                .map(|artist| {
+                    Row::new(vec![truncate_with_ellipsis(
+                        &artist.name,
+                        col_min_widths[0],
+                    )])
+                })
+                .collect(),
             _ => vec![],
         };
 
@@ -504,6 +506,7 @@ fn render(
             0 => likes_state,
             1 => playlists_state,
             2 => albums_state,
+            3 => following_state,
             _ => likes_state,
         };
 
