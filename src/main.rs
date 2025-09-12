@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 mod api;
 mod auth;
+mod player;
 mod tui;
+use player::Player;
 
 fn main() -> anyhow::Result<()> {
     // try to load token, else start auth
@@ -16,7 +18,9 @@ fn main() -> anyhow::Result<()> {
 
     let mut api = Arc::new(Mutex::new(api::API::init(Arc::clone(&token))));
 
-    tui::run(&mut api).map_err(|e| anyhow::anyhow!(e))?;
+    let player = Player::new(Arc::clone(&token));
+
+    tui::run(&mut api, player).map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())
 }

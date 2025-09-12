@@ -1,4 +1,5 @@
 use crate::api::{API, Album, Artist, Playlist, Track};
+use crate::player::Player;
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
@@ -19,10 +20,10 @@ static NUM_FEED_INFO_COLS: usize = 3;
 static REFRESH_THRESHOLD: usize = 5;
 
 // prep terminal and color_eyre error reporting
-pub fn run(api: &mut Arc<Mutex<API>>) -> anyhow::Result<()> {
+pub fn run(api: &mut Arc<Mutex<API>>, player: Player) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
-    let result = start(terminal, api);
+    let result = start(terminal, api, player);
     ratatui::restore();
     result
 }
@@ -46,7 +47,11 @@ where
 }
 
 // state management and render loop
-fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Result<()> {
+fn start(
+    mut terminal: DefaultTerminal,
+    api: &mut Arc<Mutex<API>>,
+    player: Player,
+) -> anyhow::Result<()> {
     let tab_titles = ["Library", "Search", "Feed"];
     let mut selected_tab = 0;
     let mut selected_subtab = 0;
@@ -250,6 +255,15 @@ fn start(mut terminal: DefaultTerminal, api: &mut Arc<Mutex<API>>) -> anyhow::Re
                 KeyCode::Backspace => {
                     if selected_tab == 1 {
                         query.pop();
+                    }
+                }
+                KeyCode::Enter => {
+                    if selected_tab == 0 {
+                        if selected_subtab == 0 {
+                            if let Some(track) = likes.get(selected_row) {
+                                player.play(track.stream_url.to_string());
+                            }
+                        }
                     }
                 }
                 _ => {}

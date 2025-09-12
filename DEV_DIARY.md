@@ -456,3 +456,68 @@ Oh well, I never used the saved stations feature before and while I could implem
 (with a simple array), it is not a priority right now.
 
 </details>
+
+<details>
+
+<summary><b>Chapter 5: Playing Audio</b></summary>
+
+## Clueless
+
+I spent like a solid day blindly fumbling with `rodio` (an audio playback library) and `tokio` (an asynchronous runtime) 
+when I barely understood either. In the end I got so frustrated I deleted all the audio playback code and just started
+fresh.
+
+## Clear Head
+
+After taking a break from the project I finally had a fresh start on the playback system. Previously, I had tried to 
+give the implement the `Track` struct with a `play()` method that I could call from `tui.rs`. This had many downsides 
+and, in hindsight, was doomed to fail from the get go.
+
+This time I opted to create a new `player.rs` file which would spawn an entirely separate thread, whose sole purpose
+was to receive commands sent from `tui.rs` and handle audio playback functionality.
+
+```rs
+pub enum PlayerCommand {
+  // types of commands the player can receive
+}
+
+// transmitter that can communicate with the player thread
+pub struct Player {
+  tx: Sender<PlayerCommand>,
+}
+
+impl Player {
+  pub fn new(token: Arc<Mutex<Token>>) -> Self {
+    // spawn the player thread
+  }
+
+  pub fn play(&self, url: String) {
+    // transmit the stream_url to the player
+  }
+}
+
+// the player logic that runs in the thread and awaits commands
+fn player_loop(rx: Receiver<PlayerCommand>, token: Arc<Mutex<Token>>) {
+  let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+
+  for msg in rx {
+      match msg {
+        // commands and logic go here
+      }
+  }
+}
+```
+
+## Handling Audio Download and Playback
+
+In my first attempt I had attempted to build it all from scratch myself and while I'm sure I could have eventually
+got it working, it just wasn't worth the hassle.
+
+Instead, I found the super useful [stream-download-rs](https://github.com/aschey/stream-download-rs) crate which handled
+much of the headache for me.
+
+SoundCloud does actually offer a HLS (HTTP Live Streaming) approach which would allow me to download chunks of songs
+instead of the whole thing at once. While this is certainly a better approach (for playing entire live sets and such),
+from my initial research it did seem vastly more complicated. I had already spent such a long time just getting some
+audio to come out of the speakers I decided to just put this on the backlog for now.
+</details>

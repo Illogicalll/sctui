@@ -129,6 +129,8 @@ impl API {
             .error_for_status()?
             .json()?;
 
+        drop(token_guard);
+
         self.liked_tracks_next_href = parse_next_href(&resp);
 
         let mut tracks = Vec::new();
@@ -266,6 +268,8 @@ impl API {
             .error_for_status()?
             .json()?;
 
+        drop(token_guard);
+
         self.albums_next_href = parse_next_href(&resp);
 
         let mut albums = Vec::new();
@@ -319,6 +323,8 @@ impl API {
             .send()?
             .error_for_status()?
             .json()?;
+
+        drop(token_guard);
 
         self.following_next_href = parse_next_href(&resp);
 
