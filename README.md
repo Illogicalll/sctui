@@ -2,6 +2,8 @@
 
 a soundcloud client for the terminal
 
+![demo](./media/playing_demo.png)
+
 find the dev diary to follow along the development ~~struggle~~ process [here](./DEV_DIARY.md)
 
 ## License

@@ -5,12 +5,26 @@ use ratatui::{
     crossterm::event::{self, Event, KeyCode},
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
+    symbols::{self},
+    text::{Span, Text},
+    widgets::{
+        Axis, Block, BorderType, Borders, Cell, Chart, Dataset, Gauge, Paragraph, Row, Table,
+        TableState, Tabs,
+    },
 };
+
 use std::result::Result::Ok;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use ratatui_image::{
+    StatefulImage,
+    errors::Errors,
+    picker::Picker,
+    thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
+};
+use reqwest;
 
 static NUM_TABS: usize = 3;
 static NUM_SUBTABS: usize = 4;
@@ -19,7 +33,40 @@ static NUM_FEED_ACTIVITY_COLS: usize = 4;
 static NUM_FEED_INFO_COLS: usize = 3;
 static REFRESH_THRESHOLD: usize = 5;
 
-// prep terminal and color_eyre error reporting
+// part of playing animation
+#[derive(Clone)]
+struct SinSignal {
+    x: f64,
+    interval: f64,
+    period: f64,
+    scale: f64,
+}
+
+impl SinSignal {
+    const fn new(interval: f64, period: f64, scale: f64) -> Self {
+        Self {
+            x: 0.0,
+            interval,
+            period,
+            scale,
+        }
+    }
+}
+
+impl Iterator for SinSignal {
+    type Item = (f64, f64);
+    fn next(&mut self) -> Option<Self::Item> {
+        let point = (self.x, (self.x * 1.0 / self.period).sin() * self.scale);
+        self.x += self.interval;
+        Some(point)
+    }
+}
+
+// for cover art
+enum AppEvent {
+    Redraw(Result<ResizeResponse, Errors>),
+}
+
 pub fn run(api: &mut Arc<Mutex<API>>, player: Player) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
@@ -83,6 +130,12 @@ fn start(
 
     drop(api_guard);
 
+    let mut signal = SinSignal::new(0.1, 2.0, 10.0);
+    let mut data = signal.by_ref().take(200).collect::<Vec<(f64, f64)>>();
+    let mut window = [0.0, 20.0];
+
+    let mut progress = 0;
+
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
                                 playlists: &Vec<Playlist>,
@@ -105,22 +158,87 @@ fn start(
     let (tx_following, rx_following): (Sender<Vec<Artist>>, Receiver<Vec<Artist>>) =
         mpsc::channel();
 
+    // used to create resize protocols for cover art
+    let picker = Picker::from_query_stdio()?;
+
+    // define channels to send & receive requests for resizing/encoding to worker thread
+    let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
+    let (tx_main, rx_main) = mpsc::channel::<AppEvent>();
+
+    // worker thread for resizing and encoding image data
+    {
+        let tx_main_render = tx_main.clone();
+        std::thread::spawn(move || {
+            loop {
+                if let Ok(request) = rx_worker.recv() {
+                    tx_main_render
+                        .send(AppEvent::Redraw(request.resize_encode()))
+                        .unwrap();
+                }
+            }
+        });
+    }
+
+    // holds state for the image being rendered
+    let mut cover_art_async = ThreadProtocol::new(tx_worker.clone(), None);
+
+    // avoid redundant downloads
+    let mut last_artwork_url: Option<String> = None;
+
+    let tick_rate = Duration::from_millis(200); // animation update rate
+    let mut last_tick = Instant::now();
+
     loop {
         // attempt to update application data between frames (to avoid hitching)
         while let Ok(new_likes) = rx_likes.try_recv() {
-            likes.extend(new_likes.into_iter());
+            likes.extend(new_likes);
         }
-
         while let Ok(new_playlists) = rx_playlists.try_recv() {
-            playlists.extend(new_playlists.into_iter());
+            playlists.extend(new_playlists);
         }
-
         while let Ok(new_albums) = rx_albums.try_recv() {
-            albums.extend(new_albums.into_iter());
+            albums.extend(new_albums);
+        }
+        while let Ok(new_following) = rx_following.try_recv() {
+            following.extend(new_following);
         }
 
-        while let Ok(new_following) = rx_following.try_recv() {
-            following.extend(new_following.into_iter());
+        // handle completed image resize/encode results from worker thread
+        while let Ok(app_ev) = rx_main.try_recv() {
+            match app_ev {
+                AppEvent::Redraw(completed) => {
+                    let _ = cover_art_async.update_resized_protocol(completed?);
+                }
+            }
+        }
+
+        // if selected track artwork changed, download the image and request resize
+        if let Some(track) = likes.get(selected_row) {
+            if !track.artwork_url.is_empty() {
+                let url = &track.artwork_url;
+                let should_update = match &last_artwork_url {
+                    Some(prev) => prev != url,
+                    None => true,
+                };
+
+                if should_update {
+                    if let Ok(resp) = reqwest::blocking::get(url.as_str()) {
+                        if let Ok(bytes) = resp.bytes() {
+                            if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                                let resize_proto = picker.new_resize_protocol(dyn_img);
+                                cover_art_async =
+                                    ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
+
+                                last_artwork_url = Some(url.clone());
+                            }
+                        }
+                    }
+                }
+            } else {
+                last_artwork_url = None;
+            }
+        } else {
+            last_artwork_url = None;
         }
 
         terminal.draw(|frame| {
@@ -144,75 +262,75 @@ fn start(
                 selected_searchfilter,
                 info_pane_selected,
                 selected_info_row,
+                &mut data,
+                &mut window,
+                &mut progress,
+                likes.get(selected_row),
+                &mut cover_art_async,
             )
         })?;
 
         // input handling
-        if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Esc => break,
-                KeyCode::Tab => {
-                    selected_tab = (selected_tab + 1) % NUM_TABS;
-                    selected_row = 0;
-                }
-                KeyCode::Right => {
-                    if selected_tab == 0 {
-                        selected_subtab = (selected_subtab + 1) % NUM_SUBTABS;
+        while event::poll(Duration::from_millis(10))? {
+            // poll very frequently for responsiveness (separate from animation tick rate)
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Esc => return Ok(()), // exit function
+                    KeyCode::Tab => {
+                        selected_tab = (selected_tab + 1) % NUM_TABS;
                         selected_row = 0;
-                    } else if selected_tab == 1 {
-                        selected_searchfilter = (selected_searchfilter + 1) % NUM_SEARCHFILTERS;
-                        selected_row = 0
-                    } else if selected_tab == 2 {
-                        info_pane_selected = !info_pane_selected
                     }
-                }
-                KeyCode::Left => {
-                    if selected_tab == 0 {
-                        if selected_subtab == 0 {
-                            selected_subtab = NUM_SUBTABS - 1;
-                        } else {
-                            selected_subtab -= 1;
+                    KeyCode::Right => {
+                        if selected_tab == 0 {
+                            selected_subtab = (selected_subtab + 1) % NUM_SUBTABS;
+                            selected_row = 0;
+                        } else if selected_tab == 1 {
+                            selected_searchfilter = (selected_searchfilter + 1) % NUM_SEARCHFILTERS;
+                            selected_row = 0;
+                        } else if selected_tab == 2 {
+                            info_pane_selected = !info_pane_selected;
                         }
-                        selected_row = 0;
-                    } else if selected_tab == 1 {
-                        if selected_searchfilter == 0 {
-                            selected_searchfilter = NUM_SEARCHFILTERS - 1;
-                        } else {
-                            selected_searchfilter -= 1;
-                        }
-                        selected_row = 0;
-                    } else if selected_tab == 2 {
-                        info_pane_selected = !info_pane_selected
                     }
-                }
-                KeyCode::Down => {
-                    let max_rows = get_table_rows_count(
-                        selected_subtab,
-                        &likes,
-                        &playlists,
-                        &albums,
-                        &following,
-                    );
-                    let max_info_rows = get_info_table_rows_count();
-                    if selected_tab == 2
-                        && info_pane_selected
-                        && selected_info_row + 1 < max_info_rows
-                    {
-                        selected_info_row += 1;
-                    } else {
-                        if selected_row + 1 < max_rows {
+                    KeyCode::Left => {
+                        if selected_tab == 0 {
+                            selected_subtab = if selected_subtab == 0 {
+                                NUM_SUBTABS - 1
+                            } else {
+                                selected_subtab - 1
+                            };
+                            selected_row = 0;
+                        } else if selected_tab == 1 {
+                            selected_searchfilter = if selected_searchfilter == 0 {
+                                NUM_SEARCHFILTERS - 1
+                            } else {
+                                selected_searchfilter - 1
+                            };
+                            selected_row = 0;
+                        } else if selected_tab == 2 {
+                            info_pane_selected = !info_pane_selected;
+                        }
+                    }
+                    KeyCode::Down => {
+                        let max_rows = get_table_rows_count(
+                            selected_subtab,
+                            &likes,
+                            &playlists,
+                            &albums,
+                            &following,
+                        );
+                        let max_info_rows = get_info_table_rows_count();
+                        if selected_tab == 2
+                            && info_pane_selected
+                            && selected_info_row + 1 < max_info_rows
+                        {
+                            selected_info_row += 1;
+                        } else if selected_row + 1 < max_rows {
                             selected_row += 1;
-
                             match selected_subtab {
-                                0 => {
-                                    likes_state.select(Some(selected_row));
-                                }
-                                1 => {
-                                    playlists_state.select(Some(selected_row));
-                                }
+                                0 => likes_state.select(Some(selected_row)),
+                                1 => playlists_state.select(Some(selected_row)),
                                 _ => {}
                             }
-
                             if max_rows >= REFRESH_THRESHOLD
                                 && selected_row + REFRESH_THRESHOLD >= max_rows
                             {
@@ -238,39 +356,84 @@ fn start(
                             }
                         }
                     }
-                }
-                KeyCode::Up => {
-                    if selected_tab == 2 && info_pane_selected && selected_info_row > 0 {
-                        selected_info_row -= 1;
-                    } else if selected_row > 0 {
-                        selected_row -= 1;
-                        likes_state.select(Some(selected_row));
+                    KeyCode::Up => {
+                        if selected_tab == 2 && info_pane_selected && selected_info_row > 0 {
+                            selected_info_row -= 1;
+                        } else if selected_row > 0 {
+                            selected_row -= 1;
+                            likes_state.select(Some(selected_row));
+                        }
                     }
-                }
-                KeyCode::Char(c) => {
-                    if selected_tab == 1 {
-                        query.push(c);
+                    KeyCode::Char(c) => {
+                        if selected_tab == 0 {
+                            if c == ' ' {
+                                if player.is_playing() {
+                                    player.pause();
+                                } else {
+                                    player.resume();
+                                }
+                            }
+                        } else if selected_tab == 1 {
+                            query.push(c);
+                        }
                     }
-                }
-                KeyCode::Backspace => {
-                    if selected_tab == 1 {
-                        query.pop();
+                    KeyCode::Backspace => {
+                        if selected_tab == 1 {
+                            query.pop();
+                        }
                     }
-                }
-                KeyCode::Enter => {
-                    if selected_tab == 0 {
-                        if selected_subtab == 0 {
+                    KeyCode::Enter => {
+                        if selected_tab == 0 && selected_subtab == 0 {
                             if let Some(track) = likes.get(selected_row) {
                                 player.play(track.stream_url.to_string());
                             }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
+
+        // tick playing animation and render
+        if last_tick.elapsed() >= tick_rate {
+            if player.is_playing() {
+                on_tick(&mut data, &mut window, &mut signal);
+
+                progress = player.elapsed();
+            }
+
+            terminal.draw(|frame| {
+                render(
+                    frame,
+                    &likes,
+                    &mut likes_state,
+                    &playlists,
+                    &mut playlists_state,
+                    &albums,
+                    &mut albums_state,
+                    &following,
+                    &mut following_state,
+                    selected_tab,
+                    &tab_titles,
+                    selected_subtab,
+                    &subtab_titles,
+                    selected_row,
+                    &query,
+                    &searchfilters,
+                    selected_searchfilter,
+                    info_pane_selected,
+                    selected_info_row,
+                    &mut data,
+                    &mut window,
+                    &mut progress,
+                    likes.get(selected_row),
+                    &mut cover_art_async,
+                )
+            })?;
+
+            last_tick = Instant::now();
+        }
     }
-    Ok(())
 }
 
 fn get_info_table_rows_count() -> usize {
@@ -328,6 +491,28 @@ fn truncate_with_ellipsis(s: &str, min_width: usize) -> String {
     }
 }
 
+// for playing animation
+fn on_tick(data: &mut Vec<(f64, f64)>, window: &mut [f64; 2], signal: &mut SinSignal) {
+    data.drain(0..10);
+    data.extend(signal.by_ref().take(10));
+    window[0] += 1.0;
+    window[1] += 1.0;
+}
+
+// for progress bar
+fn format_duration(duration_ms: u64) -> String {
+    let duration_sec = duration_ms / 1000;
+    let hours = duration_sec / 3600;
+    let minutes = (duration_sec % 3600) / 60;
+    let seconds = duration_sec % 60;
+
+    if hours > 0 {
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    } else {
+        format!("{:02}:{:02}", minutes, seconds)
+    }
+}
+
 // receives the state and renders the application
 fn render(
     frame: &mut Frame,
@@ -349,6 +534,11 @@ fn render(
     selected_searchfilter: usize,
     info_pane_selected: bool,
     selected_info_row: usize,
+    data: &mut Vec<(f64, f64)>,
+    window: &mut [f64; 2],
+    progress: &mut u64,
+    selected_track: Option<&Track>,
+    cover_art_async: &mut ThreadProtocol, // <-- new param
 ) {
     let width = frame.area().width as usize;
 
@@ -828,13 +1018,129 @@ fn render(
         frame.render_widget(table, subchunks[1]);
     }
 
-    let now_playing = Paragraph::new("Now Playing Area")
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded),
+    //
+    // ===================
+    // NOW PLAYING DISPLAY
+    // ===================
+    //
+
+    let subchunks = Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage(15),
+                Constraint::Percentage(70),
+                Constraint::Percentage(15),
+            ]
+            .as_ref(),
         )
+        .split(chunks[2]);
+
+    let now_playing = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded);
+
+    frame.render_widget(now_playing, subchunks[1]);
+
+    let padding = Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(1),
+            Constraint::Percentage(98),
+            Constraint::Percentage(1),
+        ])
+        .split(subchunks[1]);
+
+    let horizontal_split = Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(1),
+            Constraint::Length(12),
+            Constraint::Percentage(5),
+            Constraint::Min(0),
+            Constraint::Percentage(5),
+            Constraint::Length(9),
+            Constraint::Percentage(1),
+        ])
+        .split(padding[1]);
+
+    let image_padding = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+        ])
+        .split(horizontal_split[1]);
+
+    let subsubchunks = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(12),
+            Constraint::Percentage(12),
+            Constraint::Percentage(12),
+            Constraint::Percentage(12),
+            Constraint::Percentage(12),
+            Constraint::Percentage(20),
+        ])
+        .split(horizontal_split[3]);
+
+    frame.render_stateful_widget(StatefulImage::new(), image_padding[1], cover_art_async);
+
+    let sel_track = selected_track.unwrap();
+
+    let song_name = Paragraph::new(sel_track.title.clone())
+        .style(Style::default().add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center);
 
-    frame.render_widget(now_playing, chunks[2]);
+    frame.render_widget(song_name, subsubchunks[1]);
+
+    let artist = Paragraph::new(sel_track.artists.clone()).alignment(Alignment::Center);
+
+    frame.render_widget(artist, subsubchunks[3]);
+
+    let max_time: f64 = sel_track.duration_ms.clone() as f64;
+
+    let progress_float = *progress as f64;
+
+    let label = Span::styled(
+        format!(
+            "{} / {}",
+            format_duration(*progress),
+            sel_track.duration.clone()
+        ),
+        Style::default().fg(Color::White),
+    );
+
+    let progress_bar = Gauge::default()
+        .style(Style::default().bg(Color::LightBlue))
+        .gauge_style(Color::Cyan)
+        .ratio(progress_float / max_time)
+        .label(label);
+
+    frame.render_widget(progress_bar, subsubchunks[5]);
+
+    let lines = vec!["", "", "⇄: true ", "", "↺: false"];
+    let text = Text::from(lines.join("\n"));
+
+    let song_name = Paragraph::new(text)
+        .style(Style::default().add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Right);
+
+    frame.render_widget(song_name, horizontal_split[5]);
+    let datasets = vec![
+        Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Cyan))
+            .data(&data),
+    ];
+
+    let chart = Chart::new(datasets)
+        .block(Block::default())
+        .x_axis(Axis::default().bounds([window[0], window[1]]))
+        .y_axis(Axis::default().bounds([-10.0, 10.0]));
+
+    frame.render_widget(&chart, subchunks[2]);
+    frame.render_widget(&chart, subchunks[0]);
 }

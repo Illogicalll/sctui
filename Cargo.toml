@@ -26,3 +26,5 @@ stream-download = { version = "0.22.4", features = ["reqwest-native-tls"] }
 tokio = {version = "1.47.1", features = ["rt-multi-thread"] }
 rodio = "0.21.1"
 futures = "0.3.31"
+ratatui-image = "8.0.1"
+image = "0.25.8"

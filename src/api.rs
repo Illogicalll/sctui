@@ -8,7 +8,9 @@ pub struct Track {
     pub title: String,
     pub artists: String,
     pub duration: String,
+    pub duration_ms: u64,
     pub playback_count: String,
+    pub artwork_url: String,
     pub stream_url: String,
 }
 
@@ -149,9 +151,12 @@ impl API {
                     )
                 };
                 let duration = format_duration(parse_u64(track, "duration"));
+                let duration_ms = parse_u64(track, "duration");
 
                 let playback_count = parse_u64(track, "playback_count");
                 let playback_count = format_playback_count(playback_count);
+
+                let artwork_url = parse_str(track, "artwork_url");
 
                 let stream_url = parse_str(track, "stream_url");
 
@@ -159,7 +164,9 @@ impl API {
                     title,
                     artists,
                     duration,
+                    duration_ms,
                     playback_count,
+                    artwork_url,
                     stream_url,
                 });
             }

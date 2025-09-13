@@ -342,10 +342,10 @@ while still being able to fetch whatever data it needs.
 ## Likes
 
 So here we go then, the first API function. Honestly, it ended up taking slightly longer to think get working
-than I would have liked given all the supporting setup I did. But such is the reality of building anything I 
+than I would have liked given all the supporting setup I did. But such is the reality of building anything I
 suppose.
 
-The first major blocker was that there didn't seem to be a way to fetch the Album of a track. I found this 
+The first major blocker was that there didn't seem to be a way to fetch the Album of a track. I found this
 rather ridiculous and spent a long time figuring out a workaround. In the end all I could come up with was to
 return the top result of the playlists a track is in that has the `playlist_type` property set to `album`.
 
@@ -354,11 +354,11 @@ available on Soundcloud's V2 API which I didn't have access to. In the end I opt
 for a stream count column. It still bugs me but at least I knew there wasn't really much I could do about it.
 
 Another problem I ran into was that Go+ (Soundcloud's premium tier allowing access to mainstream music, offline
-listening, *etc.*) tracks had no `stream_url`. This ultimately meant that, while I could display the tracks
-metadata on the table, the user would not actually be able to play the track. After some reading up on the 
+listening, _etc._) tracks had no `stream_url`. This ultimately meant that, while I could display the tracks
+metadata on the table, the user would not actually be able to play the track. After some reading up on the
 documentation, it didn't seem there was a way around this either, so I simply opted to hide those tracks.
 
-With those setbacks aside, it was time to design the API function. The Soundcloud API enforces the reasonable 
+With those setbacks aside, it was time to design the API function. The Soundcloud API enforces the reasonable
 requirement of pagination (to avoid large requests). With this in mind I made space for a
 `liked_tracks_next_href` variable in the API struct, allowing it to persist between function
 calls:
@@ -371,18 +371,18 @@ pub struct API {
 ```
 
 My thinking for the `get_liked_tracks()` function would be to attempt to fetch from the `liked_tracks_next_href` first, and
-if it doesn't exist yet call from the default URL that fetches the first 40 tracks (40 seemed like a good balance 
+if it doesn't exist yet call from the default URL that fetches the first 40 tracks (40 seemed like a good balance
 of not leaving blank space even in tall windows but still not taking too long to fetch).
 
 This, paired with some formatting functions to handle duration and stream count readability resulted in a relatively
 straight-forward first API function.
 
 After hooking it all up to the TUI I realised that scrolling to the bottom didn't make the table scroll. This turned
-out to be as my table was not a stateful widget yet. Luckily ratatui makes it pretty straight forward, and 
+out to be as my table was not a stateful widget yet. Luckily ratatui makes it pretty straight forward, and
 after some adjustments to update the table state and then calling `render_stateful_widget(...)` as opposed to `render_widget(...)`,
 scrolling was fully functional.
 
-Lastly I needed to simply re-call the `get_liked_tracks()` function whenever the user was close to reaching the 
+Lastly I needed to simply re-call the `get_liked_tracks()` function whenever the user was close to reaching the
 bottom of the list:
 
 ```rs
@@ -397,7 +397,7 @@ As seen below the data is now dynamically pulled in through the API:
 
 ![Likes Working](/media/likes_working.png)
 
-As a side note I ended up removing the dynamic even column width calculation function as it was unnecessarily 
+As a side note I ended up removing the dynamic even column width calculation function as it was unnecessarily
 complicated, instead opting for defining fixed percentage widths.
 
 ## Playlists
@@ -407,30 +407,30 @@ can contain hundreds or even thousands of songs and this could lead to quite a l
 parameter to `false`, which then gave me only the playlist metadata, taking significantly less time to execute. The plan would then be to follow the link
 contained in the `tracks_uri` field if the user wants to navigate to that specific playlist.
 
-One that is rather counter-intuitive though is the fact that `/me/playlists/` doesn't actually return **ALL** your saved playlists, only the ones that 
+One that is rather counter-intuitive though is the fact that `/me/playlists/` doesn't actually return **ALL** your saved playlists, only the ones that
 **YOU** made. To include the playlists you saved that other people made you also need to call `/me/likes/playlists` (which will also retrieve all the albums
 because on soundcloud albums = playlists, so it needs to be filtered). The question then arises how to we interweave these two responses to form a singular,
 cohesive list of saved playlists. There is no `date_saved` so ultimately I settled on `created_at`, which seemed like the next best option.
 
-Another thing I discovered while investigating lag is the slight hitch that occurs when the user holds the down arrow to continuously scroll down. This 
-was obviously occurring due to the fact that the application was trying to fetch more playlists mid-frame. This led to a *slight* (complete) overhaul of
+Another thing I discovered while investigating lag is the slight hitch that occurs when the user holds the down arrow to continuously scroll down. This
+was obviously occurring due to the fact that the application was trying to fetch more playlists mid-frame. This led to a _slight_ (complete) overhaul of
 how the API functions within the `tui.rs` file in order to make it run on a seperate thread.
 
-If different threads are going to call the API, we obviously need to make it thread safe which means more `Arc`s and more `Mutex`es (yay). Now I have this 
+If different threads are going to call the API, we obviously need to make it thread safe which means more `Arc`s and more `Mutex`es (yay). Now I have this
 abomination in `main.rs`
 
 ```rs
 let mut api = Arc::new(Mutex::new(api::API::init(Arc::clone(&token))));
 ```
 
-In order to receive data between frames we need to be able to set up a channel that we can *'check up on'* in between frames:
+In order to receive data between frames we need to be able to set up a channel that we can _'check up on'_ in between frames:
 
 ```rs
 let (tx_playlists, rx_playlists): (Sender<Vec<Playlist>>, Receiver<Vec<Playlist>>) = mpsc::channel();
 ```
 
 We define a transmitter `tx` for pushing a `Vec<Playlist>` into the channel, and a receiver `rx` for reading the data from the channel.
-The API thread(s) fetch playlists from the API and use the sender to pass results back. Meanwhile, the main render loop uses `try_recv()` on the receiver to 
+The API thread(s) fetch playlists from the API and use the sender to pass results back. Meanwhile, the main render loop uses `try_recv()` on the receiver to
 check up on the channel between framees for new data:
 
 ```rs
@@ -449,7 +449,7 @@ This process was also applied to the liked songs logic and will be applied to al
 
 These are basically all just following the same pattern outlined above, so I will skip the details here.
 
-The only noteworthy inclusion is that unless I am missing something (I probably am) there doesn't seem to be a way 
+The only noteworthy inclusion is that unless I am missing something (I probably am) there doesn't seem to be a way
 to retrieve the saved stations or the listening history.
 
 Oh well, I never used the saved stations feature before and while I could implement the listening history myself
@@ -463,14 +463,14 @@ Oh well, I never used the saved stations feature before and while I could implem
 
 ## Clueless
 
-I spent like a solid day blindly fumbling with `rodio` (an audio playback library) and `tokio` (an asynchronous runtime) 
+I spent like a solid day blindly fumbling with `rodio` (an audio playback library) and `tokio` (an asynchronous runtime)
 when I barely understood either. In the end I got so frustrated I deleted all the audio playback code and just started
 fresh.
 
 ## Clear Head
 
-After taking a break from the project I finally had a fresh start on the playback system. Previously, I had tried to 
-give the implement the `Track` struct with a `play()` method that I could call from `tui.rs`. This had many downsides 
+After taking a break from the project I finally had a fresh start on the playback system. Previously, I had tried to
+give the implement the `Track` struct with a `play()` method that I could call from `tui.rs`. This had many downsides
 and, in hindsight, was doomed to fail from the get go.
 
 This time I opted to create a new `player.rs` file which would spawn an entirely separate thread, whose sole purpose
@@ -520,4 +520,26 @@ SoundCloud does actually offer a HLS (HTTP Live Streaming) approach which would 
 instead of the whole thing at once. While this is certainly a better approach (for playing entire live sets and such),
 from my initial research it did seem vastly more complicated. I had already spent such a long time just getting some
 audio to come out of the speakers I decided to just put this on the backlog for now.
+
+</details>
+
+<details>
+
+<summary><b>Chapter 6: Now Playing UI</b></summary>
+
+Finally away from the headache of the audio playback, I could focus on some easy stuff again: The now playing
+display.
+
+I went through a couple designs and ideas in my head and I decided that (on top of the regular title, artist
+and progress bar) I really wanted a sine wave animation to emphasise playing status and the cover art to show
+up too.
+
+Originally I had the art on the left, the info in the middle, and the wave on the right. But the art was a
+nightmare to center in its own box and handle resizing with so ultimately I settled for something else:
+
+![Now Playing](/media/now_playing.png)
+
+Honestly, I'm glad the original design didn't work because I think this one with the waves on either side
+actually looks better!
+
 </details>
