@@ -23,9 +23,8 @@ pub enum PlayerCommand {
 pub struct Player {
     tx: Sender<PlayerCommand>,
     is_playing_flag: Arc<AtomicBool>,
-    start_instant: Arc<Mutex<Option<Instant>>>,
-    paused_instant: Arc<Mutex<Option<Instant>>>,
-    paused_duration: Arc<Mutex<Duration>>,
+    elapsed_time: Arc<Mutex<Duration>>,
+    last_start: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Player {
@@ -33,18 +32,15 @@ impl Player {
         let (tx, rx) = mpsc::channel();
         let is_playing_flag = Arc::new(AtomicBool::new(false));
         let sink = Arc::new(Mutex::new(None));
-        let start_instant = Arc::new(Mutex::new(None));
-        let paused_instant = Arc::new(Mutex::new(None));
-        let paused_duration = Arc::new(Mutex::new(Duration::ZERO));
+        let elapsed_time = Arc::new(Mutex::new(Duration::ZERO));
+        let last_start = Arc::new(Mutex::new(None));
 
-        // spawn player thread
         {
             let flag_clone = Arc::clone(&is_playing_flag);
             let sink_clone = Arc::clone(&sink);
-            let start_clone = Arc::clone(&start_instant);
-            let paused_clone = Arc::clone(&paused_instant);
-            let paused_dur_clone = Arc::clone(&paused_duration);
             let token_clone = Arc::clone(&token);
+            let elapsed_clone = Arc::clone(&elapsed_time);
+            let last_start_clone = Arc::clone(&last_start);
 
             thread::spawn(move || {
                 player_loop(
@@ -52,9 +48,8 @@ impl Player {
                     token_clone,
                     flag_clone,
                     sink_clone,
-                    start_clone,
-                    paused_clone,
-                    paused_dur_clone,
+                    elapsed_clone,
+                    last_start_clone,
                 );
             });
         }
@@ -62,9 +57,8 @@ impl Player {
         Self {
             tx,
             is_playing_flag,
-            start_instant,
-            paused_instant,
-            paused_duration,
+            elapsed_time,
+            last_start,
         }
     }
 
@@ -85,16 +79,13 @@ impl Player {
     }
 
     pub fn elapsed(&self) -> u64 {
-        let start_opt = *self.start_instant.lock().unwrap();
-        if let Some(start) = start_opt {
-            let paused_dur = *self.paused_duration.lock().unwrap();
-            let paused_since = *self.paused_instant.lock().unwrap();
-            let extra_pause = paused_since.map_or(Duration::ZERO, |p| Instant::now() - p);
-            let total_elapsed = Instant::now() - start - (paused_dur + extra_pause);
-            total_elapsed.as_millis() as u64
-        } else {
-            0
+        let mut elapsed = *self.elapsed_time.lock().unwrap();
+        if self.is_playing() {
+            if let Some(start) = *self.last_start.lock().unwrap() {
+                elapsed += start.elapsed();
+            }
         }
+        elapsed.as_millis().try_into().unwrap()
     }
 }
 
@@ -103,9 +94,8 @@ fn player_loop(
     token: Arc<Mutex<Token>>,
     is_playing_flag: Arc<AtomicBool>,
     sink_arc: Arc<Mutex<Option<Sink>>>,
-    start_instant: Arc<Mutex<Option<Instant>>>,
-    paused_instant: Arc<Mutex<Option<Instant>>>,
-    paused_duration: Arc<Mutex<Duration>>,
+    elapsed_time: Arc<Mutex<Duration>>,
+    last_start: Arc<Mutex<Option<Instant>>>,
 ) {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
@@ -117,16 +107,13 @@ fn player_loop(
     for msg in rx {
         match msg {
             PlayerCommand::Play(url) => {
-                // stop any current playback
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.stop();
                 }
 
-                // reset timing info
-                *paused_instant.lock().unwrap() = None;
-                *paused_duration.lock().unwrap() = Duration::ZERO;
-                *start_instant.lock().unwrap() = Some(Instant::now());
                 is_playing_flag.store(true, Ordering::SeqCst);
+                *elapsed_time.lock().unwrap() = Duration::ZERO;
+                *last_start.lock().unwrap() = Some(Instant::now());
 
                 let token_clone = Arc::clone(&token);
                 let sink_store = Arc::clone(&sink_arc);
@@ -155,7 +142,6 @@ fn player_loop(
                             .await
                             {
                                 Ok(reader) => {
-                                    // create the sink and immediately drop the stream guard
                                     let sink = {
                                         let stream_guard = stream_clone.lock().unwrap();
                                         Sink::connect_new(stream_guard.mixer())
@@ -178,22 +164,23 @@ fn player_loop(
             PlayerCommand::Pause => {
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.pause();
-                    *paused_instant.lock().unwrap() = Some(Instant::now());
                     is_playing_flag.store(false, Ordering::SeqCst);
+                    if let Some(start) = *last_start.lock().unwrap() {
+                        let mut elapsed = elapsed_time.lock().unwrap();
+                        *elapsed += start.elapsed();
+                    }
+                    *last_start.lock().unwrap() = None;
                 }
             }
 
-            // TODO: fix resume messing with thread
             PlayerCommand::Resume => {
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.play();
-                    if let Some(pause_start) = *paused_instant.lock().unwrap() {
-                        *paused_duration.lock().unwrap() += Instant::now() - pause_start;
-                        *paused_instant.lock().unwrap() = None;
-                    }
                     is_playing_flag.store(true, Ordering::SeqCst);
+                    *last_start.lock().unwrap() = Some(Instant::now());
                 }
             }
         }
     }
 }
+
