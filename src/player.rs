@@ -99,7 +99,7 @@ impl Player {
             .unwrap()
             .clone()
             .unwrap_or_else(|| Track {
-                title: "No track playing".to_string(),
+                title: "No Track Playing - Press <ENTER> on Something to Play!".to_string(),
                 artists: "N/A".to_string(),
                 duration: "0:00".to_string(),
                 duration_ms: 1,
@@ -209,3 +209,4 @@ fn player_loop(
         }
     }
 }
+
