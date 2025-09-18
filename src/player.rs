@@ -18,6 +18,10 @@ pub enum PlayerCommand {
     Play(Track),
     Pause,
     Resume,
+    VolumeUp,
+    VolumeDown,
+    NextSong,
+    PrevSong,
 }
 
 pub struct Player {
@@ -26,6 +30,7 @@ pub struct Player {
     elapsed_time: Arc<Mutex<Duration>>,
     last_start: Arc<Mutex<Option<Instant>>>,
     current_track: Arc<Mutex<Option<Track>>>,
+    sink: Arc<Mutex<Option<Sink>>>,
 }
 
 impl Player {
@@ -64,6 +69,7 @@ impl Player {
             elapsed_time,
             last_start,
             current_track,
+            sink,
         }
     }
 
@@ -77,6 +83,22 @@ impl Player {
 
     pub fn resume(&self) {
         let _ = self.tx.send(PlayerCommand::Resume);
+    }
+
+    pub fn volume_up(&self) {
+        let _ = self.tx.send(PlayerCommand::VolumeUp);
+    }
+
+    pub fn volume_down(&self) {
+        let _ = self.tx.send(PlayerCommand::VolumeDown);
+    }
+
+    pub fn next_song(&self) {
+        let _ = self.tx.send(PlayerCommand::NextSong);
+    }
+
+    pub fn prev_song(&self) {
+        let _ = self.tx.send(PlayerCommand::PrevSong);
     }
 
     pub fn is_playing(&self) -> bool {
@@ -108,6 +130,14 @@ impl Player {
                 stream_url: "".to_string(),
             })
     }
+
+    pub fn get_volume(&self) -> f32 {
+        if let Some(ref s) = *self.sink.lock().unwrap() {
+            s.volume()
+        } else {
+            1.0
+        }
+    }
 }
 
 fn player_loop(
@@ -120,8 +150,6 @@ fn player_loop(
     current_track: Arc<Mutex<Option<Track>>>,
 ) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-
-    // keep the OutputStream alive for the entire duration of the player loop
     let stream = Arc::new(Mutex::new(
         OutputStreamBuilder::open_default_stream().unwrap(),
     ));
@@ -206,6 +234,24 @@ fn player_loop(
                     *last_start.lock().unwrap() = Some(Instant::now());
                 }
             }
+
+            PlayerCommand::VolumeUp => {
+                if let Some(ref s) = *sink_arc.lock().unwrap() {
+                    let new_volume = (s.volume() + 0.1).min(2.0);
+                    s.set_volume(new_volume);
+                }
+            }
+
+            PlayerCommand::VolumeDown => {
+                if let Some(ref s) = *sink_arc.lock().unwrap() {
+                    let new_volume = (s.volume() - 0.1).max(0.0);
+                    s.set_volume(new_volume);
+                }
+            }
+
+            PlayerCommand::NextSong => {}
+
+            PlayerCommand::PrevSong => {}
         }
     }
 }

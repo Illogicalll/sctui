@@ -2,7 +2,7 @@ use crate::api::{API, Album, Artist, Playlist, Track};
 use crate::player::Player;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode},
+    crossterm::event::{self, Event, KeyCode, KeyModifiers},
     layout::{Alignment, Constraint, Layout},
     style::{Color, Modifier, Style},
     symbols::{self},
@@ -258,6 +258,7 @@ fn start(
                 &mut progress,
                 player.current_track(),
                 &mut cover_art_async,
+                player.get_volume(),
             )
         })?;
 
@@ -272,64 +273,85 @@ fn start(
                         selected_row = 0;
                     }
                     KeyCode::Right => {
-                        if selected_tab == 0 {
-                            selected_subtab = (selected_subtab + 1) % NUM_SUBTABS;
-                            selected_row = 0;
-                        } else if selected_tab == 1 {
-                            selected_searchfilter = (selected_searchfilter + 1) % NUM_SEARCHFILTERS;
-                            selected_row = 0;
-                        } else if selected_tab == 2 {
-                            info_pane_selected = !info_pane_selected;
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            if player.is_playing() {
+                                player.next_song();
+                            }
+                        } else {
+                            if selected_tab == 0 {
+                                selected_subtab = (selected_subtab + 1) % NUM_SUBTABS;
+                                selected_row = 0;
+                            } else if selected_tab == 1 {
+                                selected_searchfilter =
+                                    (selected_searchfilter + 1) % NUM_SEARCHFILTERS;
+                                selected_row = 0;
+                            } else if selected_tab == 2 {
+                                info_pane_selected = !info_pane_selected;
+                            }
                         }
                     }
                     KeyCode::Left => {
-                        if selected_tab == 0 {
-                            selected_subtab = if selected_subtab == 0 {
-                                NUM_SUBTABS - 1
-                            } else {
-                                selected_subtab - 1
-                            };
-                            selected_row = 0;
-                        } else if selected_tab == 1 {
-                            selected_searchfilter = if selected_searchfilter == 0 {
-                                NUM_SEARCHFILTERS - 1
-                            } else {
-                                selected_searchfilter - 1
-                            };
-                            selected_row = 0;
-                        } else if selected_tab == 2 {
-                            info_pane_selected = !info_pane_selected;
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            if player.is_playing() {
+                                player.prev_song();
+                            }
+                        } else {
+                            if selected_tab == 0 {
+                                selected_subtab = if selected_subtab == 0 {
+                                    NUM_SUBTABS - 1
+                                } else {
+                                    selected_subtab - 1
+                                };
+                                selected_row = 0;
+                            } else if selected_tab == 1 {
+                                selected_searchfilter = if selected_searchfilter == 0 {
+                                    NUM_SEARCHFILTERS - 1
+                                } else {
+                                    selected_searchfilter - 1
+                                };
+                                selected_row = 0;
+                            } else if selected_tab == 2 {
+                                info_pane_selected = !info_pane_selected;
+                            }
                         }
                     }
                     KeyCode::Down => {
-                        let max_rows = get_table_rows_count(
-                            selected_subtab,
-                            &likes,
-                            &playlists,
-                            &albums,
-                            &following,
-                        );
-                        let max_info_rows = get_info_table_rows_count();
-                        if selected_tab == 2
-                            && info_pane_selected
-                            && selected_info_row + 1 < max_info_rows
-                        {
-                            selected_info_row += 1;
-                        } else if selected_row + 1 < max_rows {
-                            selected_row += 1;
-                            match selected_subtab {
-                                0 => likes_state.select(Some(selected_row)),
-                                1 => playlists_state.select(Some(selected_row)),
-                                _ => {}
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            player.volume_down();
+                        } else {
+                            let max_rows = get_table_rows_count(
+                                selected_subtab,
+                                &likes,
+                                &playlists,
+                                &albums,
+                                &following,
+                            );
+                            let max_info_rows = get_info_table_rows_count();
+                            if selected_tab == 2
+                                && info_pane_selected
+                                && selected_info_row + 1 < max_info_rows
+                            {
+                                selected_info_row += 1;
+                            } else if selected_row + 1 < max_rows {
+                                selected_row += 1;
+                                match selected_subtab {
+                                    0 => likes_state.select(Some(selected_row)),
+                                    1 => playlists_state.select(Some(selected_row)),
+                                    _ => {}
+                                }
                             }
                         }
                     }
                     KeyCode::Up => {
-                        if selected_tab == 2 && info_pane_selected && selected_info_row > 0 {
-                            selected_info_row -= 1;
-                        } else if selected_row > 0 {
-                            selected_row -= 1;
-                            likes_state.select(Some(selected_row));
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            player.volume_up();
+                        } else {
+                            if selected_tab == 2 && info_pane_selected && selected_info_row > 0 {
+                                selected_info_row -= 1;
+                            } else if selected_row > 0 {
+                                selected_row -= 1;
+                                likes_state.select(Some(selected_row));
+                            }
                         }
                     }
                     KeyCode::Char(c) => {
@@ -396,6 +418,7 @@ fn start(
                     &mut progress,
                     player.current_track(),
                     &mut cover_art_async,
+                    player.get_volume(),
                 )
             })?;
 
@@ -520,7 +543,8 @@ fn render(
     window: &mut [f64; 2],
     progress: &mut u64,
     selected_track: Track,
-    cover_art_async: &mut ThreadProtocol, // <-- new param
+    cover_art_async: &mut ThreadProtocol,
+    current_volume: f32,
 ) {
     let width = frame.area().width as usize;
 
@@ -1101,7 +1125,14 @@ fn render(
 
     frame.render_widget(progress_bar, subsubchunks[5]);
 
-    let lines = vec!["", "", "⇄: true ", "", "↺: false"];
+    let lines = vec![
+        "".to_string(),
+        "".to_string(),
+        "shf:   ✔︎".to_string(),
+        format!("vol: {:.1}", current_volume),
+        "rep:   ×".to_string(),
+    ];
+
     let text = Text::from(lines.join("\n"));
 
     let song_name = Paragraph::new(text)
@@ -1124,4 +1155,3 @@ fn render(
     frame.render_widget(&chart, subchunks[2]);
     frame.render_widget(&chart, subchunks[0]);
 }
-
