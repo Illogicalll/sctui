@@ -516,10 +516,12 @@ got it working, it just wasn't worth the hassle.
 Instead, I found the super useful [stream-download-rs](https://github.com/aschey/stream-download-rs) crate which handled
 much of the headache for me.
 
-SoundCloud does actually offer a HLS (HTTP Live Streaming) approach which would allow me to download chunks of songs
-instead of the whole thing at once. While this is certainly a better approach (for playing entire live sets and such),
-from my initial research it did seem vastly more complicated. I had already spent such a long time just getting some
-audio to come out of the speakers I decided to just put this on the backlog for now.
+This also meant that I could easily play tracks of any length (which is especially useful for soundcloud as many
+DJs will upload entire sets) without having to download the entire file first or load it all into memory.
+
+However, this approach would cause me a lot of frustrations when attempting to implement seeking (skipping back and forth
+within a track). In the end I got it _semi_-working but it would either take forever to load after the skip or just
+sometimes crash so I decided that, given it wasn't a priority, I would come back to it later.
 
 </details>
 
