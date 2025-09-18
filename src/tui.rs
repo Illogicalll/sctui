@@ -213,32 +213,24 @@ fn start(
         }
 
         // if selected track artwork changed, download the image and request resize
-        if let Some(track) = likes.get(selected_row) {
-            if !track.artwork_url.is_empty() {
-                let url = &track.artwork_url;
-                let should_update = match &last_artwork_url {
-                    Some(prev) => prev != url,
-                    None => true,
-                };
+        let url = &player.current_track().artwork_url;
+        let should_update = match &last_artwork_url {
+            Some(prev) => prev != url,
+            None => true,
+        };
 
-                if should_update {
-                    if let Ok(resp) = reqwest::blocking::get(url.as_str()) {
-                        if let Ok(bytes) = resp.bytes() {
-                            if let Ok(dyn_img) = image::load_from_memory(&bytes) {
-                                let resize_proto = picker.new_resize_protocol(dyn_img);
-                                cover_art_async =
-                                    ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
+        if should_update {
+            if let Ok(resp) = reqwest::blocking::get(url.as_str()) {
+                if let Ok(bytes) = resp.bytes() {
+                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                        let resize_proto = picker.new_resize_protocol(dyn_img);
+                        cover_art_async =
+                            ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
 
-                                last_artwork_url = Some(url.clone());
-                            }
-                        }
+                        last_artwork_url = Some(url.clone());
                     }
                 }
-            } else {
-                last_artwork_url = None;
             }
-        } else {
-            last_artwork_url = None;
         }
 
         terminal.draw(|frame| {
@@ -265,7 +257,7 @@ fn start(
                 &mut data,
                 &mut window,
                 &mut progress,
-                likes.get(selected_row),
+                player.current_track(),
                 &mut cover_art_async,
             )
         })?;
@@ -385,7 +377,7 @@ fn start(
                     KeyCode::Enter => {
                         if selected_tab == 0 && selected_subtab == 0 {
                             if let Some(track) = likes.get(selected_row) {
-                                player.play(track.stream_url.to_string());
+                                player.play(track.clone());
                             }
                         }
                     }
@@ -426,7 +418,7 @@ fn start(
                     &mut data,
                     &mut window,
                     &mut progress,
-                    likes.get(selected_row),
+                    player.current_track(),
                     &mut cover_art_async,
                 )
             })?;
@@ -537,7 +529,7 @@ fn render(
     data: &mut Vec<(f64, f64)>,
     window: &mut [f64; 2],
     progress: &mut u64,
-    selected_track: Option<&Track>,
+    selected_track: Track,
     cover_art_async: &mut ThreadProtocol, // <-- new param
 ) {
     let width = frame.area().width as usize;
@@ -1088,19 +1080,17 @@ fn render(
 
     frame.render_stateful_widget(StatefulImage::new(), image_padding[1], cover_art_async);
 
-    let sel_track = selected_track.unwrap();
-
-    let song_name = Paragraph::new(sel_track.title.clone())
+    let song_name = Paragraph::new(selected_track.title.clone())
         .style(Style::default().add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center);
 
     frame.render_widget(song_name, subsubchunks[1]);
 
-    let artist = Paragraph::new(sel_track.artists.clone()).alignment(Alignment::Center);
+    let artist = Paragraph::new(selected_track.artists.clone()).alignment(Alignment::Center);
 
     frame.render_widget(artist, subsubchunks[3]);
 
-    let max_time: f64 = sel_track.duration_ms.clone() as f64;
+    let max_time: f64 = selected_track.duration_ms.clone() as f64;
 
     let progress_float = *progress as f64;
 
@@ -1108,7 +1098,7 @@ fn render(
         format!(
             "{} / {}",
             format_duration(*progress),
-            sel_track.duration.clone()
+            selected_track.duration.clone()
         ),
         Style::default().fg(Color::White),
     );
@@ -1144,3 +1134,4 @@ fn render(
     frame.render_widget(&chart, subchunks[2]);
     frame.render_widget(&chart, subchunks[0]);
 }
+

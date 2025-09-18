@@ -1,4 +1,7 @@
+use crate::api::Track;
 use crate::auth::Token;
+use reqwest::header::{HeaderMap, HeaderValue};
+use rodio::{Decoder, OutputStreamBuilder, Sink};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -6,16 +9,13 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant};
-
-use reqwest::header::{HeaderMap, HeaderValue};
-use rodio::{Decoder, OutputStreamBuilder, Sink};
 use stream_download::http::HttpStream;
 use stream_download::http::reqwest::Client;
 use stream_download::storage::temp::TempStorageProvider;
 use stream_download::{Settings, StreamDownload};
 
 pub enum PlayerCommand {
-    Play(String),
+    Play(Track),
     Pause,
     Resume,
 }
@@ -25,6 +25,7 @@ pub struct Player {
     is_playing_flag: Arc<AtomicBool>,
     elapsed_time: Arc<Mutex<Duration>>,
     last_start: Arc<Mutex<Option<Instant>>>,
+    current_track: Arc<Mutex<Option<Track>>>,
 }
 
 impl Player {
@@ -34,6 +35,7 @@ impl Player {
         let sink = Arc::new(Mutex::new(None));
         let elapsed_time = Arc::new(Mutex::new(Duration::ZERO));
         let last_start = Arc::new(Mutex::new(None));
+        let current_track = Arc::new(Mutex::new(None));
 
         {
             let flag_clone = Arc::clone(&is_playing_flag);
@@ -41,6 +43,7 @@ impl Player {
             let token_clone = Arc::clone(&token);
             let elapsed_clone = Arc::clone(&elapsed_time);
             let last_start_clone = Arc::clone(&last_start);
+            let track_clone = Arc::clone(&current_track);
 
             thread::spawn(move || {
                 player_loop(
@@ -50,6 +53,7 @@ impl Player {
                     sink_clone,
                     elapsed_clone,
                     last_start_clone,
+                    track_clone,
                 );
             });
         }
@@ -59,11 +63,12 @@ impl Player {
             is_playing_flag,
             elapsed_time,
             last_start,
+            current_track,
         }
     }
 
-    pub fn play(&self, url: String) {
-        let _ = self.tx.send(PlayerCommand::Play(url));
+    pub fn play(&self, track: Track) {
+        let _ = self.tx.send(PlayerCommand::Play(track));
     }
 
     pub fn pause(&self) {
@@ -87,6 +92,22 @@ impl Player {
         }
         elapsed.as_millis().try_into().unwrap()
     }
+
+    pub fn current_track(&self) -> Track {
+        self.current_track
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| Track {
+                title: "No track playing".to_string(),
+                artists: "N/A".to_string(),
+                duration: "0:00".to_string(),
+                duration_ms: 1,
+                playback_count: "0".to_string(),
+                artwork_url: "".to_string(),
+                stream_url: "".to_string(),
+            })
+    }
 }
 
 fn player_loop(
@@ -96,6 +117,7 @@ fn player_loop(
     sink_arc: Arc<Mutex<Option<Sink>>>,
     elapsed_time: Arc<Mutex<Duration>>,
     last_start: Arc<Mutex<Option<Instant>>>,
+    current_track: Arc<Mutex<Option<Track>>>,
 ) {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
@@ -106,7 +128,7 @@ fn player_loop(
 
     for msg in rx {
         match msg {
-            PlayerCommand::Play(url) => {
+            PlayerCommand::Play(track) => {
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.stop();
                 }
@@ -114,11 +136,14 @@ fn player_loop(
                 is_playing_flag.store(true, Ordering::SeqCst);
                 *elapsed_time.lock().unwrap() = Duration::ZERO;
                 *last_start.lock().unwrap() = Some(Instant::now());
+                *current_track.lock().unwrap() = Some(track.clone());
 
                 let token_clone = Arc::clone(&token);
                 let sink_store = Arc::clone(&sink_arc);
                 let flag_clone = Arc::clone(&is_playing_flag);
                 let stream_clone = Arc::clone(&stream);
+
+                let stream_url = track.stream_url.clone();
 
                 rt.block_on(async move {
                     let token_guard = token_clone.lock().unwrap();
@@ -132,7 +157,7 @@ fn player_loop(
 
                     let client = Client::builder().default_headers(headers).build().unwrap();
 
-                    match HttpStream::new(client, url.parse().unwrap()).await {
+                    match HttpStream::new(client, stream_url.parse().unwrap()).await {
                         Ok(stream) => {
                             match StreamDownload::from_stream(
                                 stream,
@@ -165,6 +190,7 @@ fn player_loop(
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.pause();
                     is_playing_flag.store(false, Ordering::SeqCst);
+
                     if let Some(start) = *last_start.lock().unwrap() {
                         let mut elapsed = elapsed_time.lock().unwrap();
                         *elapsed += start.elapsed();
@@ -183,4 +209,3 @@ fn player_loop(
         }
     }
 }
-
