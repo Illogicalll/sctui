@@ -209,4 +209,3 @@ fn player_loop(
         }
     }
 }
-

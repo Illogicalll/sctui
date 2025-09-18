@@ -121,7 +121,7 @@ impl API {
         }
 
         let url = self.liked_tracks_next_href.clone().unwrap_or_else(|| {
-        "https://api.soundcloud.com/me/likes/tracks?limit=100&access=playable&linked_partitioning=true".to_string()
+        "https://api.soundcloud.com/me/likes/tracks?limit=40&access=playable&linked_partitioning=true".to_string()
     });
 
         let resp: serde_json::Value = Client::new()

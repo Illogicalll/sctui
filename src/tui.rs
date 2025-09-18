@@ -31,7 +31,6 @@ static NUM_SUBTABS: usize = 4;
 static NUM_SEARCHFILTERS: usize = 4;
 static NUM_FEED_ACTIVITY_COLS: usize = 4;
 static NUM_FEED_INFO_COLS: usize = 3;
-static REFRESH_THRESHOLD: usize = 5;
 
 // part of playing animation
 #[derive(Clone)]
@@ -323,29 +322,6 @@ fn start(
                                 1 => playlists_state.select(Some(selected_row)),
                                 _ => {}
                             }
-                            if max_rows >= REFRESH_THRESHOLD
-                                && selected_row + REFRESH_THRESHOLD >= max_rows
-                            {
-                                match selected_subtab {
-                                    0 => spawn_fetch(Arc::clone(api), tx_likes.clone(), |api| {
-                                        api.get_liked_tracks()
-                                    }),
-                                    1 => {
-                                        spawn_fetch(Arc::clone(api), tx_playlists.clone(), |api| {
-                                            api.get_playlists()
-                                        })
-                                    }
-                                    2 => spawn_fetch(Arc::clone(api), tx_albums.clone(), |api| {
-                                        api.get_albums()
-                                    }),
-                                    3 => {
-                                        spawn_fetch(Arc::clone(api), tx_following.clone(), |api| {
-                                            api.get_following()
-                                        })
-                                    }
-                                    _ => {}
-                                }
-                            }
                         }
                     }
                     KeyCode::Up => {
@@ -424,6 +400,20 @@ fn start(
             })?;
 
             last_tick = Instant::now();
+
+            match selected_subtab {
+                0 => spawn_fetch(Arc::clone(api), tx_likes.clone(), |api| {
+                    api.get_liked_tracks()
+                }),
+                1 => spawn_fetch(Arc::clone(api), tx_playlists.clone(), |api| {
+                    api.get_playlists()
+                }),
+                2 => spawn_fetch(Arc::clone(api), tx_albums.clone(), |api| api.get_albums()),
+                3 => spawn_fetch(Arc::clone(api), tx_following.clone(), |api| {
+                    api.get_following()
+                }),
+                _ => {}
+            }
         }
     }
 }
