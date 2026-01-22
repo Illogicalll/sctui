@@ -8,7 +8,7 @@ find the dev diary to follow along the development ~~struggle~~ process [here](.
 
 ## License
 
-Copyright (c) Will Murphy <contact@w-murphy.com>
+Copyright (©) Will Murphy <contact@w-murphy.com>
 
 This project is licensed under the MIT license ([LICENSE] or <http://opensource.org/licenses/MIT>)
 
