@@ -587,4 +587,18 @@ nightmare to center in its own box and handle resizing with so ultimately I sett
 Honestly, I'm glad the original design didn't work because I think this one with the waves on either side
 actually looks better!
 
+## Queue Popup (and Making Shuffle Predictable)
+
+Slightly adjacent to the Now Playing UI, but its related so I thought I would include it here.
+
+TL;DR, I immediately had to rework the shuffle logic like I said I would. In order to show the upcoming queue, I needed the "random" choices to be deterministic, otherwise the list would just change every time it was rendered. The fix was to build a `queue` data structure up front and then pop from it when the next song is needed.
+
+This also made the skip controls behave much nicer because `SHIFT + Right` now pulls from the queue instead of rolling a new random number every time.
+
+Once I had a real queue, I added a popup with `SHIFT + Q` that shows the upcoming songs in a small table. It includes the Title, Artist and Duration (no stream count as that isn't essential information)
+
+![Queue](/media/queue.png)
+
+On top of that, the first row shows the previously played song in a greyed out format and the second row shows the currently playing song (highlighted). This makes it super easy to see where you are in the history and what is coming next.
+
 </details>

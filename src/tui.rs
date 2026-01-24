@@ -3,13 +3,13 @@ use crate::player::Player;
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
-    layout::{Alignment, Constraint, Layout},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     symbols::{self},
     text::{Span, Text},
     widgets::{
         Axis, Block, BorderType, Borders, Cell, Chart, Dataset, Gauge, Paragraph, Row, Table,
-        TableState, Tabs,
+        TableState, Tabs, Clear,
     },
 };
 
@@ -17,6 +17,8 @@ use std::result::Result::Ok;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+use rand::seq::SliceRandom;
 use rand::Rng;
 
 use ratatui_image::{
@@ -139,6 +141,8 @@ fn start(
     let mut shuffle_enabled = false;
     let mut repeat_enabled = false;
     let mut playback_history: Vec<usize> = Vec::new();
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    let mut queue_visible = false;
 
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
@@ -237,6 +241,7 @@ fn start(
             }
         }
 
+        let previous_playing_index = playback_history.last().copied();
         terminal.draw(|frame| {
             render(
                 frame,
@@ -266,6 +271,10 @@ fn start(
                 player.get_volume(),
                 shuffle_enabled,
                 repeat_enabled,
+                queue_visible,
+                &queue,
+                current_playing_index,
+                previous_playing_index,
             )
         })?;
 
@@ -292,36 +301,16 @@ fn start(
                             if selected_tab == 0 && selected_subtab == 0 {
                                 // play next song
                                 if let Some(current_idx) = current_playing_index {
-                                    if shuffle_enabled {
-                                        // shuffle mode: pick a random song
-                                        if !likes.is_empty() {
-                                            let mut rng = rand::thread_rng();
-                                            let mut next_idx = rng.gen_range(0..likes.len());
-                                            // avoid playing the same song if there's more than one song
-                                            if likes.len() > 1 {
-                                                while next_idx == current_idx {
-                                                    next_idx = rng.gen_range(0..likes.len());
-                                                }
-                                            }
-                                            if let Some(track) = likes.get(next_idx) {
-                                                playback_history.push(current_idx);
-                                                player.play(track.clone());
-                                                current_playing_index = Some(next_idx);
-                                                selected_row = next_idx;
-                                                likes_state.select(Some(next_idx));
-                                            }
-                                        }
-                                    } else {
-                                        // normal mode: play next song sequentially
-                                        let next_idx = current_idx + 1;
-                                        if next_idx < likes.len() {
-                                            if let Some(track) = likes.get(next_idx) {
-                                                playback_history.push(current_idx);
-                                                player.play(track.clone());
-                                                current_playing_index = Some(next_idx);
-                                                selected_row = next_idx;
-                                                likes_state.select(Some(next_idx));
-                                            }
+                                    if queue.is_empty() {
+                                        queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                    }
+                                    if let Some(next_idx) = queue.pop_front() {
+                                        if let Some(track) = likes.get(next_idx) {
+                                            playback_history.push(current_idx);
+                                            player.play(track.clone());
+                                            current_playing_index = Some(next_idx);
+                                            selected_row = next_idx;
+                                            likes_state.select(Some(next_idx));
                                         }
                                     }
                                 }
@@ -355,6 +344,7 @@ fn start(
                                             current_playing_index = Some(prev_idx);
                                             selected_row = prev_idx;
                                             likes_state.select(Some(prev_idx));
+                                            queue = build_queue(prev_idx, likes.len(), shuffle_enabled);
                                         }
                                     }
                                 }
@@ -423,9 +413,22 @@ fn start(
                             match c {
                                 's' | 'S' => {
                                     shuffle_enabled = !shuffle_enabled;
+                                    if let Some(current_idx) = current_playing_index {
+                                        queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                    }
                                 }
                                 'r' | 'R' => {
                                     repeat_enabled = !repeat_enabled;
+                                }
+                                'q' | 'Q' => {
+                                    queue_visible = !queue_visible;
+                                    if queue_visible {
+                                        if let Some(current_idx) = current_playing_index {
+                                            if queue.is_empty() {
+                                                queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                            }
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }
@@ -459,6 +462,7 @@ fn start(
                                 }
                                 player.play(track.clone());
                                 current_playing_index = Some(selected_row);
+                                queue = build_queue(selected_row, likes.len(), shuffle_enabled);
                             }
                         }
                     }
@@ -489,31 +493,11 @@ fn start(
                                 selected_row = current_idx;
                                 likes_state.select(Some(current_idx));
                             }
-                        } else if shuffle_enabled {
-                            // shuffle: play a random song from the list
-                            if !likes.is_empty() {
-                                let mut rng = rand::thread_rng();
-                                let mut next_idx = rng.gen_range(0..likes.len());
-                                if likes.len() > 1 {
-                                    while next_idx == current_idx {
-                                        next_idx = rng.gen_range(0..likes.len());
-                                    }
-                                }
-                                if let Some(track) = likes.get(next_idx) {
-                                    playback_history.push(current_idx);
-                                    player.play(track.clone());
-                                    current_playing_index = Some(next_idx);
-                                    selected_row = next_idx;
-                                    likes_state.select(Some(next_idx));
-                                }
-                            } else {
-                                player.pause();
-                                current_playing_index = None;
-                            }
                         } else {
-                            // normal: play next song sequentially
-                            let next_idx = current_idx + 1;
-                            if next_idx < likes.len() {
+                            if queue.is_empty() {
+                                queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                            }
+                            if let Some(next_idx) = queue.pop_front() {
                                 if let Some(track) = likes.get(next_idx) {
                                     playback_history.push(current_idx);
                                     player.play(track.clone());
@@ -531,6 +515,7 @@ fn start(
                 }
             }
 
+            let previous_playing_index = playback_history.last().copied();
             terminal.draw(|frame| {
                 render(
                     frame,
@@ -560,6 +545,10 @@ fn start(
                     player.get_volume(),
                     shuffle_enabled,
                     repeat_enabled,
+                    queue_visible,
+                    &queue,
+                    current_playing_index,
+                    previous_playing_index,
                 )
             })?;
 
@@ -584,6 +573,21 @@ fn start(
 
 fn get_info_table_rows_count() -> usize {
     2
+}
+
+fn build_queue(current_idx: usize, list_len: usize, shuffle_enabled: bool) -> VecDeque<usize> {
+    if list_len == 0 {
+        return VecDeque::new();
+    }
+
+    if shuffle_enabled {
+        let mut indices: Vec<usize> = (0..list_len).filter(|&i| i != current_idx).collect();
+        indices.shuffle(&mut rand::thread_rng());
+        VecDeque::from(indices)
+    } else {
+        let indices: Vec<usize> = (current_idx + 1..list_len).collect();
+        VecDeque::from(indices)
+    }
 }
 
 // styling for table headers
@@ -659,6 +663,26 @@ fn format_duration(duration_ms: u64) -> String {
     }
 }
 
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
 // receives the state and renders the application
 fn render(
     frame: &mut Frame,
@@ -688,6 +712,10 @@ fn render(
     current_volume: f32,
     shuffle_enabled: bool,
     repeat_enabled: bool,
+    queue_visible: bool,
+    queue: &VecDeque<usize>,
+    current_playing_index: Option<usize>,
+    previous_playing_index: Option<usize>,
 ) {
     let width = frame.area().width as usize;
 
@@ -1302,4 +1330,88 @@ fn render(
 
     frame.render_widget(&chart, subchunks[2]);
     frame.render_widget(&chart, subchunks[0]);
+
+    if queue_visible {
+        let popup_area = centered_rect(70, 60, frame.area());
+        frame.render_widget(Clear, popup_area);
+
+        let total_width = popup_area.width as usize;
+        let title_width = (total_width * 65) / 100;
+        let artist_width = (total_width * 25) / 100;
+
+        let mut rows: Vec<Row> = Vec::new();
+
+        if let Some(prev_idx) = previous_playing_index {
+            if let Some(track) = likes.get(prev_idx) {
+                rows.push(
+                    Row::new(vec![
+                        truncate_with_ellipsis(&track.title, title_width),
+                        truncate_with_ellipsis(&track.artists, artist_width),
+                        track.duration.clone(),
+                    ])
+                    .style(Style::default().fg(Color::DarkGray)),
+                );
+            }
+        } else {
+            rows.push(
+                Row::new(vec![
+                    "Previous: None",
+                    "",
+                    "",
+                ])
+                .style(Style::default().fg(Color::DarkGray)),
+            );
+        }
+
+        if let Some(current_idx) = current_playing_index {
+            if let Some(track) = likes.get(current_idx) {
+                rows.push(
+                    Row::new(vec![
+                        truncate_with_ellipsis(&track.title, title_width),
+                        truncate_with_ellipsis(&track.artists, artist_width),
+                        track.duration.clone(),
+                    ])
+                    .style(Style::default().bg(Color::LightBlue).fg(Color::White)),
+                );
+            }
+        } else {
+            rows.push(Row::new(vec!["Now Playing: None", "", ""]));
+        }
+
+        let max_rows = popup_area.height.saturating_sub(3) as usize;
+        let remaining_slots = max_rows.saturating_sub(rows.len());
+        for idx in queue.iter().take(remaining_slots) {
+            if let Some(track) = likes.get(*idx) {
+                rows.push(Row::new(vec![
+                    truncate_with_ellipsis(&track.title, title_width),
+                    truncate_with_ellipsis(&track.artists, artist_width),
+                    track.duration.clone(),
+                ]));
+            }
+        }
+
+        if rows.len() <= 2 {
+            rows.push(Row::new(vec!["Queue is empty", "", ""]));
+        }
+
+        let header = styled_header(&["Title", "Artist", "Duration"]);
+        let table = Table::new(
+            rows,
+            vec![
+                Constraint::Percentage(65),
+                Constraint::Percentage(25),
+                Constraint::Percentage(10),
+            ],
+        )
+        .header(header)
+        .block(
+            Block::default()
+                .title("Queue")
+                .title_alignment(Alignment::Center)
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded),
+        )
+        .column_spacing(1);
+        frame.render_widget(table, popup_area);
+    }
 }
