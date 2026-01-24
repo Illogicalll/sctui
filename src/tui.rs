@@ -147,6 +147,9 @@ fn start(
     let mut help_visible = false;
     let mut quit_confirm_visible = false;
     let mut quit_confirm_selected = 0;
+    let mut search_popup_visible = false;
+    let mut search_query = String::new();
+    let mut search_matches: Vec<usize> = Vec::new();
 
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
@@ -246,16 +249,123 @@ fn start(
         }
 
         let previous_playing_index = playback_history.last().copied();
+        let filter_active =
+            search_popup_visible && selected_tab == 0 && !search_query.trim().is_empty();
+        let filtered_likes = if filter_active && selected_subtab == 0 {
+            likes
+                .iter()
+                .filter(|track| {
+                    let q = search_query.trim().to_lowercase();
+                    !q.is_empty()
+                        && (track.title.to_lowercase().contains(&q)
+                            || track.artists.to_lowercase().contains(&q))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let filtered_playlists = if filter_active && selected_subtab == 1 {
+            playlists
+                .iter()
+                .filter(|playlist| {
+                    let q = search_query.trim().to_lowercase();
+                    !q.is_empty() && playlist.title.to_lowercase().contains(&q)
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let filtered_albums = if filter_active && selected_subtab == 2 {
+            albums
+                .iter()
+                .filter(|album| {
+                    let q = search_query.trim().to_lowercase();
+                    !q.is_empty()
+                        && (album.title.to_lowercase().contains(&q)
+                            || album.artists.to_lowercase().contains(&q))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let filtered_following = if filter_active && selected_subtab == 3 {
+            following
+                .iter()
+                .filter(|artist| {
+                    let q = search_query.trim().to_lowercase();
+                    !q.is_empty() && artist.name.to_lowercase().contains(&q)
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let likes_ref = if filter_active && selected_subtab == 0 {
+            &filtered_likes
+        } else {
+            &likes
+        };
+        let playlists_ref = if filter_active && selected_subtab == 1 {
+            &filtered_playlists
+        } else {
+            &playlists
+        };
+        let albums_ref = if filter_active && selected_subtab == 2 {
+            &filtered_albums
+        } else {
+            &albums
+        };
+        let following_ref = if filter_active && selected_subtab == 3 {
+            &filtered_following
+        } else {
+            &following
+        };
+
+        if filter_active {
+            match selected_subtab {
+                0 => {
+                    if selected_row >= likes_ref.len() && !likes_ref.is_empty() {
+                        selected_row = likes_ref.len() - 1;
+                    }
+                    likes_state.select(Some(selected_row));
+                }
+                1 => {
+                    if selected_row >= playlists_ref.len() && !playlists_ref.is_empty() {
+                        selected_row = playlists_ref.len() - 1;
+                    }
+                    playlists_state.select(Some(selected_row));
+                }
+                2 => {
+                    if selected_row >= albums_ref.len() && !albums_ref.is_empty() {
+                        selected_row = albums_ref.len() - 1;
+                    }
+                    albums_state.select(Some(selected_row));
+                }
+                3 => {
+                    if selected_row >= following_ref.len() && !following_ref.is_empty() {
+                        selected_row = following_ref.len() - 1;
+                    }
+                    following_state.select(Some(selected_row));
+                }
+                _ => {}
+            }
+        }
+
         terminal.draw(|frame| {
             render(
                 frame,
+                likes_ref,
                 &likes,
                 &mut likes_state,
-                &playlists,
+                playlists_ref,
                 &mut playlists_state,
-                &albums,
+                albums_ref,
                 &mut albums_state,
-                &following,
+                following_ref,
                 &mut following_state,
                 selected_tab,
                 &tab_titles,
@@ -283,6 +393,9 @@ fn start(
                 help_visible,
                 quit_confirm_visible,
                 quit_confirm_selected,
+                search_popup_visible,
+                &search_query,
+                search_matches.len(),
             )
         })?;
 
@@ -308,6 +421,49 @@ fn start(
                         _ => {}
                     }
                     continue;
+                }
+                if search_popup_visible {
+                    let mut handled = true;
+                    match key.code {
+                        KeyCode::Backspace => {
+                            search_query.pop();
+                            search_matches = build_search_matches(
+                                selected_subtab,
+                                &search_query,
+                                &likes,
+                                &playlists,
+                                &albums,
+                                &following,
+                            );
+                        }
+                        KeyCode::Char(c) => {
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                if c == 'f' || c == 'F' {
+                                    search_popup_visible = false;
+                                    search_query.clear();
+                                    search_matches.clear();
+                                } else {
+                                    handled = false;
+                                }
+                            } else {
+                                search_query.push(c);
+                                search_matches = build_search_matches(
+                                    selected_subtab,
+                                    &search_query,
+                                    &likes,
+                                    &playlists,
+                                    &albums,
+                                    &following,
+                                );
+                            }
+                        }
+                        _ => {
+                            handled = false;
+                        }
+                    }
+                    if handled {
+                        continue;
+                    }
                 }
                 if player.is_seeking() {
                     continue;
@@ -490,7 +646,29 @@ fn start(
                                 }
                                 'a' | 'A' => {
                                     if selected_tab == 0 && selected_subtab == 0 {
-                                        manual_queue.push_back(selected_row);
+                                        let search_active = search_popup_visible
+                                            && !search_query.trim().is_empty();
+                                        if search_active {
+                                            if let Some(&idx) = search_matches.get(selected_row) {
+                                                manual_queue.push_back(idx);
+                                            }
+                                        } else {
+                                            manual_queue.push_back(selected_row);
+                                        }
+                                    }
+                                }
+                                'f' | 'F' => {
+                                    if selected_tab == 0 {
+                                        search_popup_visible = true;
+                                        search_query.clear();
+                                        search_matches = build_search_matches(
+                                            selected_subtab,
+                                            &search_query,
+                                            &likes,
+                                            &playlists,
+                                            &albums,
+                                            &following,
+                                        );
                                     }
                                 }
                                 'h' | 'H' => {
@@ -529,16 +707,32 @@ fn start(
                     }
                     KeyCode::Enter => {
                         if selected_tab == 0 && selected_subtab == 0 {
-                            if let Some(track) = likes.get(selected_row) {
-                                // if switching to a new song, add previous to history
-                                if let Some(prev_idx) = current_playing_index {
-                                    if prev_idx != selected_row {
-                                        playback_history.push(prev_idx);
+                            let search_active =
+                                search_popup_visible && !search_query.trim().is_empty();
+                            let selected_idx = if search_active {
+                                search_matches.get(selected_row).copied()
+                            } else {
+                                Some(selected_row)
+                            };
+                            if let Some(selected_idx) = selected_idx {
+                                if let Some(track) = likes.get(selected_idx) {
+                                    // if switching to a new song, add previous to history
+                                    if let Some(prev_idx) = current_playing_index {
+                                        if prev_idx != selected_idx {
+                                            playback_history.push(prev_idx);
+                                        }
+                                    }
+                                    player.play(track.clone());
+                                    current_playing_index = Some(selected_idx);
+                                    auto_queue =
+                                        build_queue(selected_idx, likes.len(), shuffle_enabled);
+                                    if !search_active {
+                                        if selected_tab == 0 && selected_subtab == 0 {
+                                            selected_row = selected_idx;
+                                            likes_state.select(Some(selected_row));
+                                        }
                                     }
                                 }
-                                player.play(track.clone());
-                                current_playing_index = Some(selected_row);
-                                auto_queue = build_queue(selected_row, likes.len(), shuffle_enabled);
                             }
                         }
                     }
@@ -598,17 +792,124 @@ fn start(
                 }
             }
 
+            let filter_active =
+                search_popup_visible && selected_tab == 0 && !search_query.trim().is_empty();
+            let filtered_likes = if filter_active && selected_subtab == 0 {
+                likes
+                    .iter()
+                    .filter(|track| {
+                        let q = search_query.trim().to_lowercase();
+                        !q.is_empty()
+                            && (track.title.to_lowercase().contains(&q)
+                                || track.artists.to_lowercase().contains(&q))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let filtered_playlists = if filter_active && selected_subtab == 1 {
+                playlists
+                    .iter()
+                    .filter(|playlist| {
+                        let q = search_query.trim().to_lowercase();
+                        !q.is_empty() && playlist.title.to_lowercase().contains(&q)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let filtered_albums = if filter_active && selected_subtab == 2 {
+                albums
+                    .iter()
+                    .filter(|album| {
+                        let q = search_query.trim().to_lowercase();
+                        !q.is_empty()
+                            && (album.title.to_lowercase().contains(&q)
+                                || album.artists.to_lowercase().contains(&q))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let filtered_following = if filter_active && selected_subtab == 3 {
+                following
+                    .iter()
+                    .filter(|artist| {
+                        let q = search_query.trim().to_lowercase();
+                        !q.is_empty() && artist.name.to_lowercase().contains(&q)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+
+            let likes_ref = if filter_active && selected_subtab == 0 {
+                &filtered_likes
+            } else {
+                &likes
+            };
+            let playlists_ref = if filter_active && selected_subtab == 1 {
+                &filtered_playlists
+            } else {
+                &playlists
+            };
+            let albums_ref = if filter_active && selected_subtab == 2 {
+                &filtered_albums
+            } else {
+                &albums
+            };
+            let following_ref = if filter_active && selected_subtab == 3 {
+                &filtered_following
+            } else {
+                &following
+            };
+
+            if filter_active {
+                match selected_subtab {
+                    0 => {
+                        if selected_row >= likes_ref.len() && !likes_ref.is_empty() {
+                            selected_row = likes_ref.len() - 1;
+                        }
+                        likes_state.select(Some(selected_row));
+                    }
+                    1 => {
+                        if selected_row >= playlists_ref.len() && !playlists_ref.is_empty() {
+                            selected_row = playlists_ref.len() - 1;
+                        }
+                        playlists_state.select(Some(selected_row));
+                    }
+                    2 => {
+                        if selected_row >= albums_ref.len() && !albums_ref.is_empty() {
+                            selected_row = albums_ref.len() - 1;
+                        }
+                        albums_state.select(Some(selected_row));
+                    }
+                    3 => {
+                        if selected_row >= following_ref.len() && !following_ref.is_empty() {
+                            selected_row = following_ref.len() - 1;
+                        }
+                        following_state.select(Some(selected_row));
+                    }
+                    _ => {}
+                }
+            }
+
             let previous_playing_index = playback_history.last().copied();
             terminal.draw(|frame| {
                 render(
                     frame,
+                    likes_ref,
                     &likes,
                     &mut likes_state,
-                    &playlists,
+                    playlists_ref,
                     &mut playlists_state,
-                    &albums,
+                    albums_ref,
                     &mut albums_state,
-                    &following,
+                    following_ref,
                     &mut following_state,
                     selected_tab,
                     &tab_titles,
@@ -636,6 +937,9 @@ fn start(
                     help_visible,
                     quit_confirm_visible,
                     quit_confirm_selected,
+                    search_popup_visible,
+                    &search_query,
+                    search_matches.len(),
                 )
             })?;
 
@@ -674,6 +978,54 @@ fn build_queue(current_idx: usize, list_len: usize, shuffle_enabled: bool) -> Ve
     } else {
         let indices: Vec<usize> = (current_idx + 1..list_len).collect();
         VecDeque::from(indices)
+    }
+}
+
+fn build_search_matches(
+    selected_subtab: usize,
+    query: &str,
+    likes: &Vec<Track>,
+    playlists: &Vec<Playlist>,
+    albums: &Vec<Album>,
+    following: &Vec<Artist>,
+) -> Vec<usize> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Vec::new();
+    }
+
+    match selected_subtab {
+        0 => likes
+            .iter()
+            .enumerate()
+            .filter(|(_, track)| {
+                track.title.to_lowercase().contains(&q)
+                    || track.artists.to_lowercase().contains(&q)
+            })
+            .map(|(i, _)| i)
+            .collect(),
+        1 => playlists
+            .iter()
+            .enumerate()
+            .filter(|(_, playlist)| playlist.title.to_lowercase().contains(&q))
+            .map(|(i, _)| i)
+            .collect(),
+        2 => albums
+            .iter()
+            .enumerate()
+            .filter(|(_, album)| {
+                album.title.to_lowercase().contains(&q)
+                    || album.artists.to_lowercase().contains(&q)
+            })
+            .map(|(i, _)| i)
+            .collect(),
+        3 => following
+            .iter()
+            .enumerate()
+            .filter(|(_, artist)| artist.name.to_lowercase().contains(&q))
+            .map(|(i, _)| i)
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -773,7 +1125,8 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 // receives the state and renders the application
 fn render(
     frame: &mut Frame,
-    likes: &Vec<Track>,
+    likes_view: &Vec<Track>,
+    likes_all: &Vec<Track>,
     likes_state: &mut TableState,
     playlists: &Vec<Playlist>,
     playlists_state: &mut TableState,
@@ -807,6 +1160,9 @@ fn render(
     help_visible: bool,
     quit_confirm_visible: bool,
     quit_confirm_selected: usize,
+    search_popup_visible: bool,
+    search_query: &str,
+    search_match_count: usize,
 ) {
     let width = frame.area().width as usize;
 
@@ -852,11 +1208,22 @@ fn render(
     // ===========
     //
     if selected_tab == 0 {
-        // divide the content area into 2 'chunks' (subtabs and table)
-        let subchunks = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
-            .split(chunks[1]);
+        // divide the content area into chunks (subtabs, optional search, table)
+        let subchunks = if search_popup_visible {
+            Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                ])
+                .split(chunks[1])
+        } else {
+            Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+                .split(chunks[1])
+        };
 
         // 'likes, playlists, albums, ...' subtabs
         let subtabs: Vec<_> = subtab_titles.iter().map(|t| Span::raw(*t)).collect();
@@ -874,6 +1241,19 @@ fn render(
                     .add_modifier(Modifier::BOLD),
             );
         frame.render_widget(subtabs_widget, subchunks[0]);
+
+        if search_popup_visible {
+            let input = Paragraph::new(search_query.to_string())
+                .block(
+                    Block::default()
+                        .title("search")
+                        .title_alignment(Alignment::Center)
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded),
+                )
+                .alignment(Alignment::Center);
+            frame.render_widget(input, subchunks[1]);
+        }
 
         // define headers and column widths for tables for each subtab
         let (header, col_widths) = match selected_subtab {
@@ -916,7 +1296,7 @@ fn render(
 
         // define rows for each subtab
         let rows = match selected_subtab {
-            0 => likes
+            0 => likes_view
                 .iter()
                 .map(|track| {
                     Row::new(vec![
@@ -983,6 +1363,7 @@ fn render(
         };
 
         // render table
+        let table_chunk_idx = if search_popup_visible { 2 } else { 1 };
         let table = Table::new(rows, col_widths)
             .header(header)
             .block(
@@ -991,8 +1372,7 @@ fn render(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-
-        frame.render_stateful_widget(table, subchunks[1], state);
+        frame.render_stateful_widget(table, subchunks[table_chunk_idx], state);
     }
     //
     // ==========
@@ -1433,7 +1813,7 @@ fn render(
         let mut rows: Vec<Row> = Vec::new();
 
         if let Some(prev_idx) = previous_playing_index {
-            if let Some(track) = likes.get(prev_idx) {
+            if let Some(track) = likes_all.get(prev_idx) {
                 rows.push(
                     Row::new(vec![
                         truncate_with_ellipsis(&track.title, title_width),
@@ -1455,7 +1835,7 @@ fn render(
         }
 
         if let Some(current_idx) = current_playing_index {
-            if let Some(track) = likes.get(current_idx) {
+            if let Some(track) = likes_all.get(current_idx) {
                 rows.push(
                     Row::new(vec![
                         truncate_with_ellipsis(&track.title, title_width),
@@ -1476,7 +1856,7 @@ fn render(
             if remaining == 0 {
                 break;
             }
-            if let Some(track) = likes.get(*idx) {
+            if let Some(track) = likes_all.get(*idx) {
                 rows.push(Row::new(vec![
                     truncate_with_ellipsis(&track.title, title_width),
                     truncate_with_ellipsis(&track.artists, artist_width),
@@ -1490,7 +1870,7 @@ fn render(
             if remaining == 0 {
                 break;
             }
-            if let Some(track) = likes.get(*idx) {
+            if let Some(track) = likes_all.get(*idx) {
                 rows.push(Row::new(vec![
                     truncate_with_ellipsis(&track.title, title_width),
                     truncate_with_ellipsis(&track.artists, artist_width),
@@ -1540,10 +1920,12 @@ fn render(
             Row::new(vec!["Shift + Left", "Go back a song"]),
             Row::new(vec!["Option + Right", "Fast forward 10s"]),
             Row::new(vec!["Option + Left", "Rewind 10s"]),
+            Row::new(vec!["Option + Up/Down", "Jump 10 items"]),
             Row::new(vec!["Shift + Up/Down", "Volume up/down"]),
             Row::new(vec!["Shift + S", "Toggle shuffle queue"]),
             Row::new(vec!["Shift + R", "Toggle repeat same song"]),
             Row::new(vec!["Shift + A", "Add selected song to queue"]),
+            Row::new(vec!["Shift + F", "Search current view (only works in library)"]),
             Row::new(vec!["Shift + Q", "Toggle queue popup"]),
             Row::new(vec!["Shift + H", "Toggle help popup"]),
         ];
@@ -1604,4 +1986,5 @@ fn render(
             );
         frame.render_widget(box_widget, popup_area);
     }
+
 }

@@ -639,4 +639,48 @@ While this worked perfectly fine, long lists such as a large amount of liked son
 
 To help this issue, I added the `OPTION/ALT + DOWN` / `OPTION/ALT + UP` keys, to jump 10 items at a time. It was honestly crazy how much of a difference this tiny change made to the usability of the application.
 
+## Search
+
+Another usability headache was just finding *anything* once your lists start getting big. Sure the jumping functionality helped you navigate, but navigating is no use if you don't even know where to look.
+
+I didn't want to add a whole search tab for Library, as that would be complicated with different types of results (tracks, playlists, albums, artists). So instead I went with an inline search bar that appears between the sub-tabs and the list when you press `SHIFT + F`.
+
+![Search](/media/search.png)
+
+The tricky part was that the list behind the search bar needed to *actually filter* while you type, without breaking the underlying data (which is also used by the queue). The fix was to render a filtered view while still keeping the full list around for indexing:
+
+```rs
+let filter_active =
+    search_popup_visible && selected_tab == 0 && !search_query.trim().is_empty();
+let filtered_likes = if filter_active && selected_subtab == 0 {
+    likes
+        .iter()
+        .filter(|track| {
+            let q = search_query.trim().to_lowercase();
+            !q.is_empty()
+                && (track.title.to_lowercase().contains(&q)
+                    || track.artists.to_lowercase().contains(&q))
+        })
+        .cloned()
+        .collect::<Vec<_>>()
+} else {
+    Vec::new()
+};
+```
+
+That solved the visual part, but it introduced a new bug: when you hit `SHIFT + A` to add a song to the queue, it used the *unfiltered* index. I had to map the selection back to the underlying list instead:
+
+```rs
+let search_active = search_popup_visible && !search_query.trim().is_empty();
+if search_active {
+    if let Some(&idx) = search_matches.get(selected_row) {
+        manual_queue.push_back(idx);
+    }
+} else {
+    manual_queue.push_back(selected_row);
+}
+```
+
+With all that in place, the feature was working as intended!
+
 </details>
