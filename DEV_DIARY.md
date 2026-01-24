@@ -683,4 +683,16 @@ if search_active {
 
 With all that in place, the feature was working as intended!
 
+## Development Quality of Life
+
+All of these changes to benefit the end-user got me thinking... *what about me??*
+
+This whole time I had been extending the same 5 files and it was beginning to be almost impossible to work with.
+
+I knew that refactoring all this work would be quite a challenge, but it was one I was willing to accept purely because I knew how much time it would save me down the line as I continued to extend this application.
+
+After many frustrations, I finally ended up with a structure that turned the 5 files I had into 5 folders, with their functionalities divided up into files within them.
+
+I would explain the structure in more detail, but to be honest you can literally just go look for yourself in like 2 clicks if you are reading this so I won't bother. Oh well, glad this nightmare is over though.
+
 </details>

@@ -24,7 +24,6 @@ fn main() -> anyhow::Result<()> {
     // spawn a thread to handle re-authentication requests
     let token_clone = Arc::clone(&token);
     let api_clone = Arc::clone(&api);
-    let player_token_clone = Arc::clone(&token);
     std::thread::spawn(move || {
         for _ in reauth_rx {
             // re-authenticate (this will block waiting for user interaction)

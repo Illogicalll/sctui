@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{Rng, distributions::Alphanumeric};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -9,43 +8,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Response, Server};
 use url::Url;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Token {
-    pub access_token: String,
-    pub refresh_token: String,
-
-    #[serde(default)]
-    pub obtained_at: u64,
-}
+use super::token::Token;
 
 static CODE_VERIFIER_LEN: usize = 64;
 static STATE_LEN: usize = 56;
-static REFRESH_TIME: u64 = 2700;
-static REFRESH_BUFFER: u64 = 300;
 
-// give a token the ability to be 'expired'
-impl Token {
-    pub fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        now > self.obtained_at + REFRESH_TIME
-    }
-}
-
-// called by main.rs on program start
-pub fn load_token() -> Option<Token> {
-    let data = fs::read_to_string("token.json").ok()?;
-    let token: Token = serde_json::from_str(&data).ok()?;
-    if token.is_expired() {
-        None
-    } else {
-        Some(token)
-    }
-}
-
-// helper functions for OAuth
 fn generate_code_verifier() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -67,9 +34,7 @@ fn generate_state() -> String {
         .collect()
 }
 
-// soundcloud OAuth 2.1 user authentication
 pub fn authenticate() -> Result<Token> {
-    // define auth url
     dotenvy::dotenv().ok();
     let client_id = std::env::var("SOUNDCLOUD_CLIENT_ID")?;
     let client_secret = std::env::var("SOUNDCLOUD_CLIENT_SECRET")?;
@@ -86,7 +51,6 @@ pub fn authenticate() -> Result<Token> {
     );
     webbrowser::open(&auth_url)?;
 
-    // server to receive callback with auth code
     let server = Server::http("127.0.0.1:8080").map_err(|e| {
         anyhow!(
             "Failed to start server, check port 8080 is open and/or free: {}",
@@ -94,7 +58,6 @@ pub fn authenticate() -> Result<Token> {
         )
     })?;
 
-    // parse callback
     let received_data = Arc::new(Mutex::new(None));
     for request in server.incoming_requests() {
         let url_str = format!("http://127.0.0.1:8080{}", request.url());
@@ -135,7 +98,6 @@ pub fn authenticate() -> Result<Token> {
         }
     }
 
-    // exchange code and code_verifier for token
     let code = {
         let data = received_data.lock().unwrap();
         data.clone()
@@ -156,91 +118,8 @@ pub fn authenticate() -> Result<Token> {
         .error_for_status()?
         .json::<Token>()?;
 
-    // set time token was obtained and save it
     resp.obtained_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     fs::write("token.json", serde_json::to_string_pretty(&resp)?)?;
 
     Ok(resp)
-}
-
-// soundcloud OAuth 2.1 token refresh
-pub fn refresh_token(old_token: &Token) -> Result<Token> {
-    // define refresh url
-    dotenvy::dotenv().ok();
-    let client_id = std::env::var("SOUNDCLOUD_CLIENT_ID")?;
-    let client_secret = std::env::var("SOUNDCLOUD_CLIENT_SECRET")?;
-    let params = [
-        ("grant_type", "refresh_token"),
-        ("client_id", &client_id),
-        ("client_secret", &client_secret),
-        ("refresh_token", &old_token.refresh_token),
-    ];
-    let mut resp = reqwest::blocking::Client::new()
-        .post("https://secure.soundcloud.com/oauth/token")
-        .header("accept", "application/json; charset=utf-8")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .form(&params)
-        .send()?
-        .error_for_status()?
-        .json::<Token>()?;
-
-    // set time token was obtained and save it
-    resp.obtained_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    fs::write("token.json", serde_json::to_string_pretty(&resp)?)?;
-
-    Ok(resp)
-}
-
-// make sure the token never expires
-pub fn start_auto_refresh(token: Arc<Mutex<Token>>, reauth_tx: std::sync::mpsc::Sender<()>) {
-    std::thread::spawn(move || {
-        loop {
-            // check if token is close to expiring and refresh proactively
-            let should_refresh = {
-                let token_guard = token.lock().unwrap();
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let time_until_expiry = (token_guard.obtained_at + REFRESH_TIME).saturating_sub(now);
-                time_until_expiry <= REFRESH_BUFFER
-            };
-
-            if should_refresh {
-                let mut token_guard = token.lock().unwrap();
-                match refresh_token(&*token_guard) {
-                    Ok(new_token) => {
-                        *token_guard = new_token;
-                    }
-                    Err(_) => {
-                        // refresh failed - refresh token may have expired
-                        drop(token_guard);
-                        let _ = reauth_tx.send(());
-                        std::thread::sleep(std::time::Duration::from_secs(60));
-                        continue;
-                    }
-                }
-            }
-
-            std::thread::sleep(std::time::Duration::from_secs(60));
-        }
-    });
-}
-
-// check if token refresh is needed and attempt it
-pub fn try_refresh_token(token: &Arc<Mutex<Token>>) -> Result<()> {
-    let token_guard = token.lock().unwrap();
-    if token_guard.is_expired() {
-        drop(token_guard);
-        let mut token_guard = token.lock().unwrap();
-        match refresh_token(&*token_guard) {
-            Ok(new_token) => {
-                *token_guard = new_token;
-                Ok(())
-            }
-            Err(e) => Err(e)
-        }
-    } else {
-        Ok(())
-    }
 }
