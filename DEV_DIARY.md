@@ -602,3 +602,15 @@ Once I had a real queue, I added a popup with `SHIFT + Q` that shows the upcomin
 On top of that, the first row shows the previously played song in a greyed out format and the second row shows the currently playing song (highlighted). This makes it super easy to see where you are in the history and what is coming next.
 
 </details>
+
+<details>
+
+<summary><b>Chapter 7: Help Menu</b></summary>
+
+At this point there are enough hotkeys and weird little combos that even I forget them half the time.
+
+In order to maintain the usability of the application, I added a help popup triggered with `SHIFT + H` that lays everything out in a clean table.
+
+![Help](/media/help.png)
+
+</details>
