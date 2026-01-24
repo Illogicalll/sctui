@@ -273,6 +273,9 @@ fn start(
         while event::poll(Duration::from_millis(10))? {
             // poll very frequently for responsiveness (separate from animation tick rate)
             if let Event::Key(key) = event::read()? {
+                if player.is_seeking() {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Esc => return Ok(()), // exit function
                     KeyCode::Tab => {

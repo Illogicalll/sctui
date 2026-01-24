@@ -30,6 +30,7 @@ pub enum PlayerCommand {
 pub struct Player {
     tx: Sender<PlayerCommand>,
     is_playing_flag: Arc<AtomicBool>,
+    is_seeking_flag: Arc<AtomicBool>,
     elapsed_time: Arc<Mutex<Duration>>,
     last_start: Arc<Mutex<Option<Instant>>>,
     current_track: Arc<Mutex<Option<Track>>>,
@@ -40,6 +41,7 @@ impl Player {
     pub fn new(token: Arc<Mutex<Token>>) -> Self {
         let (tx, rx) = mpsc::channel();
         let is_playing_flag = Arc::new(AtomicBool::new(false));
+        let is_seeking_flag = Arc::new(AtomicBool::new(false));
         let sink = Arc::new(Mutex::new(None));
         let elapsed_time = Arc::new(Mutex::new(Duration::ZERO));
         let last_start = Arc::new(Mutex::new(None));
@@ -52,12 +54,14 @@ impl Player {
             let elapsed_clone = Arc::clone(&elapsed_time);
             let last_start_clone = Arc::clone(&last_start);
             let track_clone = Arc::clone(&current_track);
+            let seeking_clone = Arc::clone(&is_seeking_flag);
 
             thread::spawn(move || {
                 player_loop(
                     rx,
                     token_clone,
                     flag_clone,
+                    seeking_clone,
                     sink_clone,
                     elapsed_clone,
                     last_start_clone,
@@ -69,6 +73,7 @@ impl Player {
         Self {
             tx,
             is_playing_flag,
+            is_seeking_flag,
             elapsed_time,
             last_start,
             current_track,
@@ -114,6 +119,10 @@ impl Player {
 
     pub fn is_playing(&self) -> bool {
         self.is_playing_flag.load(Ordering::SeqCst)
+    }
+
+    pub fn is_seeking(&self) -> bool {
+        self.is_seeking_flag.load(Ordering::SeqCst)
     }
 
     pub fn elapsed(&self) -> u64 {
@@ -241,6 +250,7 @@ fn player_loop(
     rx: Receiver<PlayerCommand>,
     token: Arc<Mutex<Token>>,
     is_playing_flag: Arc<AtomicBool>,
+    is_seeking_flag: Arc<AtomicBool>,
     sink_arc: Arc<Mutex<Option<Sink>>>,
     elapsed_time: Arc<Mutex<Duration>>,
     last_start: Arc<Mutex<Option<Instant>>>,
@@ -322,6 +332,9 @@ fn player_loop(
             PlayerCommand::PrevSong => {}
 
             PlayerCommand::FastForward => {
+                if is_seeking_flag.swap(true, Ordering::SeqCst) {
+                    continue;
+                }
                 let current_track_guard = current_track.lock().unwrap();
                 if let Some(track) = current_track_guard.clone() {
                     drop(current_track_guard);
@@ -367,9 +380,13 @@ fn player_loop(
                         );
                     }
                 }
+                is_seeking_flag.store(false, Ordering::SeqCst);
             }
 
             PlayerCommand::Rewind => {
+                if is_seeking_flag.swap(true, Ordering::SeqCst) {
+                    continue;
+                }
                 let current_track_guard = current_track.lock().unwrap();
                 if let Some(track) = current_track_guard.clone() {
                     drop(current_track_guard);
@@ -410,6 +427,7 @@ fn player_loop(
                         &rt,
                     );
                 }
+                is_seeking_flag.store(false, Ordering::SeqCst);
             }
         }
     }
