@@ -328,22 +328,22 @@ fn start(
                                 player.fast_forward();
                             }
                         } else if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            if selected_tab == 0 && selected_subtab == 0 {
-                                // play next song
-                                if let Some(current_idx) = current_playing_index {
-                                    if manual_queue.is_empty() && auto_queue.is_empty() {
-                                        auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
-                                    }
-                                    let next_idx = if let Some(idx) = manual_queue.pop_front() {
-                                        Some(idx)
-                                    } else {
-                                        auto_queue.pop_front()
-                                    };
-                                    if let Some(next_idx) = next_idx {
-                                        if let Some(track) = likes.get(next_idx) {
-                                            playback_history.push(current_idx);
-                                            player.play(track.clone());
-                                            current_playing_index = Some(next_idx);
+                            // play next song
+                            if let Some(current_idx) = current_playing_index {
+                                if manual_queue.is_empty() && auto_queue.is_empty() {
+                                    auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                }
+                                let next_idx = if let Some(idx) = manual_queue.pop_front() {
+                                    Some(idx)
+                                } else {
+                                    auto_queue.pop_front()
+                                };
+                                if let Some(next_idx) = next_idx {
+                                    if let Some(track) = likes.get(next_idx) {
+                                        playback_history.push(current_idx);
+                                        player.play(track.clone());
+                                        current_playing_index = Some(next_idx);
+                                        if selected_tab == 0 && selected_subtab == 0 {
                                             selected_row = next_idx;
                                             likes_state.select(Some(next_idx));
                                         }
@@ -370,17 +370,17 @@ fn start(
                                 player.rewind();
                             }
                         } else if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            if selected_tab == 0 && selected_subtab == 0 {
-                                // play previous song from history
-                                if let Some(current_idx) = current_playing_index {
-                                    if let Some(prev_idx) = playback_history.pop() {
-                                        if let Some(track) = likes.get(prev_idx) {
-                                            player.play(track.clone());
-                                            current_playing_index = Some(prev_idx);
+                            // play previous song from history
+                            if let Some(current_idx) = current_playing_index {
+                                if let Some(prev_idx) = playback_history.pop() {
+                                    if let Some(track) = likes.get(prev_idx) {
+                                        player.play(track.clone());
+                                        current_playing_index = Some(prev_idx);
+                                        if selected_tab == 0 && selected_subtab == 0 {
                                             selected_row = prev_idx;
                                             likes_state.select(Some(prev_idx));
-                                            auto_queue = build_queue(prev_idx, likes.len(), shuffle_enabled);
                                         }
+                                        auto_queue = build_queue(prev_idx, likes.len(), shuffle_enabled);
                                     }
                                 }
                             }
@@ -523,41 +523,43 @@ fn start(
             }
             
             // check if current song has finished and auto-play next song
-            if selected_tab == 0 && selected_subtab == 0 {
-                let current_track = player.current_track();
-                if let Some(current_idx) = current_playing_index {
-                    // check if song has finished (progress >= duration)
-                    // use a small buffer (50ms) to account for timing precision
-                    if progress >= current_track.duration_ms.saturating_sub(50) && current_track.duration_ms > 0 {
-                        if repeat_enabled {
-                            // repeat: play the same song again
-                            if let Some(track) = likes.get(current_idx) {
-                                player.play(track.clone());
+            let current_track = player.current_track();
+            if let Some(current_idx) = current_playing_index {
+                // check if song has finished (progress >= duration)
+                // use a small buffer (50ms) to account for timing precision
+                if progress >= current_track.duration_ms.saturating_sub(50) && current_track.duration_ms > 0 {
+                    if repeat_enabled {
+                        // repeat: play the same song again
+                        if let Some(track) = likes.get(current_idx) {
+                            player.play(track.clone());
+                            if selected_tab == 0 && selected_subtab == 0 {
                                 selected_row = current_idx;
                                 likes_state.select(Some(current_idx));
                             }
+                        }
+                    } else {
+                        if manual_queue.is_empty() && auto_queue.is_empty() {
+                            auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                        }
+                        let next_idx = if let Some(idx) = manual_queue.pop_front() {
+                            Some(idx)
                         } else {
-                            if manual_queue.is_empty() && auto_queue.is_empty() {
-                                auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
-                            }
-                            let next_idx = if let Some(idx) = manual_queue.pop_front() {
-                                Some(idx)
-                            } else {
-                                auto_queue.pop_front()
-                            };
-                            if let Some(next_idx) = next_idx {
-                                if let Some(track) = likes.get(next_idx) {
-                                    playback_history.push(current_idx);
-                                    player.play(track.clone());
-                                    current_playing_index = Some(next_idx);
+                            auto_queue.pop_front()
+                        };
+                        if let Some(next_idx) = next_idx {
+                            if let Some(track) = likes.get(next_idx) {
+                                playback_history.push(current_idx);
+                                player.play(track.clone());
+                                current_playing_index = Some(next_idx);
+                                if selected_tab == 0 && selected_subtab == 0 {
                                     selected_row = next_idx;
                                     likes_state.select(Some(next_idx));
                                 }
-                            } else {
-                                // reached end of list, stop playing
-                                player.pause();
-                                current_playing_index = None;
                             }
+                        } else {
+                            // reached end of list, stop playing
+                            player.pause();
+                            current_playing_index = None;
                         }
                     }
                 }
