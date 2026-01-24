@@ -17,6 +17,7 @@ use std::result::Result::Ok;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use rand::Rng;
 
 use ratatui_image::{
     StatefulImage,
@@ -135,6 +136,9 @@ fn start(
 
     let mut progress = 0;
     let mut current_playing_index: Option<usize> = None;
+    let mut shuffle_enabled = false;
+    let mut repeat_enabled = false;
+    let mut playback_history: Vec<usize> = Vec::new();
 
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
@@ -260,6 +264,8 @@ fn start(
                 player.current_track(),
                 &mut cover_art_async,
                 player.get_volume(),
+                shuffle_enabled,
+                repeat_enabled,
             )
         })?;
 
@@ -281,15 +287,38 @@ fn start(
                             }
                         } else if key.modifiers.contains(KeyModifiers::SHIFT) {
                             if selected_tab == 0 && selected_subtab == 0 {
-                                // play next song in likes list
+                                // play next song
                                 if let Some(current_idx) = current_playing_index {
-                                    let next_idx = current_idx + 1;
-                                    if next_idx < likes.len() {
-                                        if let Some(track) = likes.get(next_idx) {
-                                            player.play(track.clone());
-                                            current_playing_index = Some(next_idx);
-                                            selected_row = next_idx;
-                                            likes_state.select(Some(next_idx));
+                                    if shuffle_enabled {
+                                        // shuffle mode: pick a random song
+                                        if !likes.is_empty() {
+                                            let mut rng = rand::thread_rng();
+                                            let mut next_idx = rng.gen_range(0..likes.len());
+                                            // avoid playing the same song if there's more than one song
+                                            if likes.len() > 1 {
+                                                while next_idx == current_idx {
+                                                    next_idx = rng.gen_range(0..likes.len());
+                                                }
+                                            }
+                                            if let Some(track) = likes.get(next_idx) {
+                                                playback_history.push(current_idx);
+                                                player.play(track.clone());
+                                                current_playing_index = Some(next_idx);
+                                                selected_row = next_idx;
+                                                likes_state.select(Some(next_idx));
+                                            }
+                                        }
+                                    } else {
+                                        // normal mode: play next song sequentially
+                                        let next_idx = current_idx + 1;
+                                        if next_idx < likes.len() {
+                                            if let Some(track) = likes.get(next_idx) {
+                                                playback_history.push(current_idx);
+                                                player.play(track.clone());
+                                                current_playing_index = Some(next_idx);
+                                                selected_row = next_idx;
+                                                likes_state.select(Some(next_idx));
+                                            }
                                         }
                                     }
                                 }
@@ -315,10 +344,9 @@ fn start(
                             }
                         } else if key.modifiers.contains(KeyModifiers::SHIFT) {
                             if selected_tab == 0 && selected_subtab == 0 {
-                                // play previous song in likes list
+                                // play previous song from history
                                 if let Some(current_idx) = current_playing_index {
-                                    if current_idx > 0 {
-                                        let prev_idx = current_idx - 1;
+                                    if let Some(prev_idx) = playback_history.pop() {
                                         if let Some(track) = likes.get(prev_idx) {
                                             player.play(track.clone());
                                             current_playing_index = Some(prev_idx);
@@ -388,16 +416,28 @@ fn start(
                         }
                     }
                     KeyCode::Char(c) => {
-                        if selected_tab == 0 {
-                            if c == ' ' {
-                                if player.is_playing() {
-                                    player.pause();
-                                } else {
-                                    player.resume();
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            match c {
+                                's' | 'S' => {
+                                    shuffle_enabled = !shuffle_enabled;
                                 }
+                                'r' | 'R' => {
+                                    repeat_enabled = !repeat_enabled;
+                                }
+                                _ => {}
                             }
-                        } else if selected_tab == 1 {
-                            query.push(c);
+                        } else {
+                            if selected_tab == 0 {
+                                if c == ' ' {
+                                    if player.is_playing() {
+                                        player.pause();
+                                    } else {
+                                        player.resume();
+                                    }
+                                }
+                            } else if selected_tab == 1 {
+                                query.push(c);
+                            }
                         }
                     }
                     KeyCode::Backspace => {
@@ -408,6 +448,12 @@ fn start(
                     KeyCode::Enter => {
                         if selected_tab == 0 && selected_subtab == 0 {
                             if let Some(track) = likes.get(selected_row) {
+                                // if switching to a new song, add previous to history
+                                if let Some(prev_idx) = current_playing_index {
+                                    if prev_idx != selected_row {
+                                        playback_history.push(prev_idx);
+                                    }
+                                }
                                 player.play(track.clone());
                                 current_playing_index = Some(selected_row);
                             }
@@ -430,21 +476,53 @@ fn start(
             if selected_tab == 0 && selected_subtab == 0 {
                 let current_track = player.current_track();
                 if let Some(current_idx) = current_playing_index {
-                    // Check if song has finished (progress >= duration)
-                    // Use a small buffer (50ms) to account for timing precision
+                    // check if song has finished (progress >= duration)
+                    // use a small buffer (50ms) to account for timing precision
                     if progress >= current_track.duration_ms.saturating_sub(50) && current_track.duration_ms > 0 {
-                        let next_idx = current_idx + 1;
-                        if next_idx < likes.len() {
-                            if let Some(track) = likes.get(next_idx) {
+                        if repeat_enabled {
+                            // repeat: play the same song again
+                            if let Some(track) = likes.get(current_idx) {
                                 player.play(track.clone());
-                                current_playing_index = Some(next_idx);
-                                selected_row = next_idx;
-                                likes_state.select(Some(next_idx));
+                                selected_row = current_idx;
+                                likes_state.select(Some(current_idx));
+                            }
+                        } else if shuffle_enabled {
+                            // shuffle: play a random song from the list
+                            if !likes.is_empty() {
+                                let mut rng = rand::thread_rng();
+                                let mut next_idx = rng.gen_range(0..likes.len());
+                                if likes.len() > 1 {
+                                    while next_idx == current_idx {
+                                        next_idx = rng.gen_range(0..likes.len());
+                                    }
+                                }
+                                if let Some(track) = likes.get(next_idx) {
+                                    playback_history.push(current_idx);
+                                    player.play(track.clone());
+                                    current_playing_index = Some(next_idx);
+                                    selected_row = next_idx;
+                                    likes_state.select(Some(next_idx));
+                                }
+                            } else {
+                                player.pause();
+                                current_playing_index = None;
                             }
                         } else {
-                            // reached end of list, stop playing
-                            player.pause();
-                            current_playing_index = None;
+                            // normal: play next song sequentially
+                            let next_idx = current_idx + 1;
+                            if next_idx < likes.len() {
+                                if let Some(track) = likes.get(next_idx) {
+                                    playback_history.push(current_idx);
+                                    player.play(track.clone());
+                                    current_playing_index = Some(next_idx);
+                                    selected_row = next_idx;
+                                    likes_state.select(Some(next_idx));
+                                }
+                            } else {
+                                // reached end of list, stop playing
+                                player.pause();
+                                current_playing_index = None;
+                            }
                         }
                     }
                 }
@@ -477,6 +555,8 @@ fn start(
                     player.current_track(),
                     &mut cover_art_async,
                     player.get_volume(),
+                    shuffle_enabled,
+                    repeat_enabled,
                 )
             })?;
 
@@ -603,6 +683,8 @@ fn render(
     selected_track: Track,
     cover_art_async: &mut ThreadProtocol,
     current_volume: f32,
+    shuffle_enabled: bool,
+    repeat_enabled: bool,
 ) {
     let width = frame.area().width as usize;
 
@@ -1185,12 +1267,15 @@ fn render(
 
     frame.render_widget(progress_bar, subsubchunks[5]);
 
+    let shuffle_indicator = if shuffle_enabled { "✔︎" } else { "×" };
+    let repeat_indicator = if repeat_enabled { "✔︎" } else { "×" };
+    
     let lines = vec![
         "".to_string(),
         "".to_string(),
-        "shf:   ✔︎".to_string(),
+        format!("shf:   {}", shuffle_indicator),
         format!("vol: {:.1}", current_volume),
-        "rep:   ×".to_string(),
+        format!("rep:   {}", repeat_indicator),
     ];
 
     let text = Text::from(lines.join("\n"));

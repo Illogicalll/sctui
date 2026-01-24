@@ -549,6 +549,23 @@ if seek_position > 0 {
 }
 ```
 
+## Shuffle and Repeat
+
+After getting the basic playback working, I wanted to add shuffle and repeat functionality like most music players have. The implementation was pretty straightforward - just a couple of boolean flags to track state and some logic to handle the different playback modes.
+
+For shuffle, I track a playback history so that when the user presses `SHIFT + Left` to go back, they go to the previously played song (which might be different from the previous index if shuffle was enabled). This history is maintained regardless of whether shuffle is enabled or not, so backward navigation always works intuitively.
+
+When shuffle is enabled:
+- `SHIFT + Right` picks a random song from the list (avoiding the current song)
+- Auto-play when a song finishes also picks a random song
+- The current song is added to history before playing the next one
+
+For repeat, it's even simpler - when enabled, the same song just plays again when it finishes. If both shuffle and repeat are enabled, repeat takes priority (which makes sense - if you want to repeat a song, you probably want to repeat that specific song, not a random one).
+
+The UI indicators in the now playing section show `✔︎` when enabled and `×` when disabled, updating in real-time as you toggle them with `SHIFT + S` (shuffle) and `SHIFT + R` (repeat).
+
+Although now that I think about it the random song choosing might have to be reworked slightly as I want to add a view to see the queue which means it would have to be precalculated. Oh well, shouldn't be too much of a change.
+
 </details>
 
 <details>
