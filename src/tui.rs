@@ -141,7 +141,8 @@ fn start(
     let mut shuffle_enabled = false;
     let mut repeat_enabled = false;
     let mut playback_history: Vec<usize> = Vec::new();
-    let mut queue: VecDeque<usize> = VecDeque::new();
+    let mut manual_queue: VecDeque<usize> = VecDeque::new();
+    let mut auto_queue: VecDeque<usize> = VecDeque::new();
     let mut queue_visible = false;
 
     let get_table_rows_count = |selected_subtab: usize,
@@ -272,7 +273,8 @@ fn start(
                 shuffle_enabled,
                 repeat_enabled,
                 queue_visible,
-                &queue,
+                &manual_queue,
+                &auto_queue,
                 current_playing_index,
                 previous_playing_index,
             )
@@ -301,10 +303,15 @@ fn start(
                             if selected_tab == 0 && selected_subtab == 0 {
                                 // play next song
                                 if let Some(current_idx) = current_playing_index {
-                                    if queue.is_empty() {
-                                        queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                    if manual_queue.is_empty() && auto_queue.is_empty() {
+                                        auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
                                     }
-                                    if let Some(next_idx) = queue.pop_front() {
+                                    let next_idx = if let Some(idx) = manual_queue.pop_front() {
+                                        Some(idx)
+                                    } else {
+                                        auto_queue.pop_front()
+                                    };
+                                    if let Some(next_idx) = next_idx {
                                         if let Some(track) = likes.get(next_idx) {
                                             playback_history.push(current_idx);
                                             player.play(track.clone());
@@ -344,7 +351,7 @@ fn start(
                                             current_playing_index = Some(prev_idx);
                                             selected_row = prev_idx;
                                             likes_state.select(Some(prev_idx));
-                                            queue = build_queue(prev_idx, likes.len(), shuffle_enabled);
+                                            auto_queue = build_queue(prev_idx, likes.len(), shuffle_enabled);
                                         }
                                     }
                                 }
@@ -414,18 +421,23 @@ fn start(
                                 's' | 'S' => {
                                     shuffle_enabled = !shuffle_enabled;
                                     if let Some(current_idx) = current_playing_index {
-                                        queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                        auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
                                     }
                                 }
                                 'r' | 'R' => {
                                     repeat_enabled = !repeat_enabled;
                                 }
+                                'a' | 'A' => {
+                                    if selected_tab == 0 && selected_subtab == 0 {
+                                        manual_queue.push_back(selected_row);
+                                    }
+                                }
                                 'q' | 'Q' => {
                                     queue_visible = !queue_visible;
                                     if queue_visible {
                                         if let Some(current_idx) = current_playing_index {
-                                            if queue.is_empty() {
-                                                queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                                            if auto_queue.is_empty() {
+                                                auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
                                             }
                                         }
                                     }
@@ -462,7 +474,7 @@ fn start(
                                 }
                                 player.play(track.clone());
                                 current_playing_index = Some(selected_row);
-                                queue = build_queue(selected_row, likes.len(), shuffle_enabled);
+                                auto_queue = build_queue(selected_row, likes.len(), shuffle_enabled);
                             }
                         }
                     }
@@ -494,10 +506,15 @@ fn start(
                                 likes_state.select(Some(current_idx));
                             }
                         } else {
-                            if queue.is_empty() {
-                                queue = build_queue(current_idx, likes.len(), shuffle_enabled);
+                            if manual_queue.is_empty() && auto_queue.is_empty() {
+                                auto_queue = build_queue(current_idx, likes.len(), shuffle_enabled);
                             }
-                            if let Some(next_idx) = queue.pop_front() {
+                            let next_idx = if let Some(idx) = manual_queue.pop_front() {
+                                Some(idx)
+                            } else {
+                                auto_queue.pop_front()
+                            };
+                            if let Some(next_idx) = next_idx {
                                 if let Some(track) = likes.get(next_idx) {
                                     playback_history.push(current_idx);
                                     player.play(track.clone());
@@ -546,7 +563,8 @@ fn start(
                     shuffle_enabled,
                     repeat_enabled,
                     queue_visible,
-                    &queue,
+                    &manual_queue,
+                    &auto_queue,
                     current_playing_index,
                     previous_playing_index,
                 )
@@ -713,7 +731,8 @@ fn render(
     shuffle_enabled: bool,
     repeat_enabled: bool,
     queue_visible: bool,
-    queue: &VecDeque<usize>,
+    manual_queue: &VecDeque<usize>,
+    auto_queue: &VecDeque<usize>,
     current_playing_index: Option<usize>,
     previous_playing_index: Option<usize>,
 ) {
@@ -1380,13 +1399,32 @@ fn render(
 
         let max_rows = popup_area.height.saturating_sub(3) as usize;
         let remaining_slots = max_rows.saturating_sub(rows.len());
-        for idx in queue.iter().take(remaining_slots) {
+        let mut remaining = remaining_slots;
+        for idx in manual_queue.iter() {
+            if remaining == 0 {
+                break;
+            }
             if let Some(track) = likes.get(*idx) {
                 rows.push(Row::new(vec![
                     truncate_with_ellipsis(&track.title, title_width),
                     truncate_with_ellipsis(&track.artists, artist_width),
                     track.duration.clone(),
                 ]));
+                remaining -= 1;
+            }
+        }
+
+        for idx in auto_queue.iter() {
+            if remaining == 0 {
+                break;
+            }
+            if let Some(track) = likes.get(*idx) {
+                rows.push(Row::new(vec![
+                    truncate_with_ellipsis(&track.title, title_width),
+                    truncate_with_ellipsis(&track.artists, artist_width),
+                    track.duration.clone(),
+                ]));
+                remaining -= 1;
             }
         }
 
