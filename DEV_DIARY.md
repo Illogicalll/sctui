@@ -527,7 +527,7 @@ sometimes crash so I decided that, given it wasn't a priority, I would come back
 
 I finally got around to properly implementing seeking functionality. In the end, the challenge was that `rodio`'s `Decoder` doesn't support seeking in streaming audio, so I had to work around this limitation.
 
-The solution I came up with was to restart playback from a new position using HTTP Range requests. When the user presses `OPTION + Right` (fast forward) or `OPTION + Left` (rewind), the app:
+The solution I came up with was to restart playback from a new position using HTTP Range requests. When the user presses `OPTION/ALT + Right` (fast forward) or `OPTION/ALT + Left` (rewind), the app:
 
 1. Calculates the new position (±10 seconds)
 2. Stops the current playback
@@ -630,5 +630,13 @@ This resulted in me closing the application when I didn't mean to, which was qui
 To prevent this, I added a small confirmation menu that acts as a safeguard against accidental closing of the application.
 
 ![Confirmation](/media/quit.png)
+
+## Jumping
+
+Previously, the only option to navigate up and down a list of songs, playlists, etc. was to use the arrow keys to go up and down one at a time.
+
+While this worked perfectly fine, long lists such as a large amount of liked songs became a pain to navigate as you had to hold down a key and wait forever to get to where you wanted to be.
+
+To help this issue, I added the `OPTION/ALT + DOWN` / `OPTION/ALT + UP` keys, to jump 10 items at a time. It was honestly crazy how much of a difference this tiny change made to the usability of the application.
 
 </details>

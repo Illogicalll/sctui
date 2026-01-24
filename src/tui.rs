@@ -405,7 +405,29 @@ fn start(
                         }
                     }
                     KeyCode::Down => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        if key.modifiers.contains(KeyModifiers::ALT) {
+                            let max_rows = get_table_rows_count(
+                                selected_subtab,
+                                &likes,
+                                &playlists,
+                                &albums,
+                                &following,
+                            );
+                            let max_info_rows = get_info_table_rows_count();
+                            if selected_tab == 2 && info_pane_selected {
+                                if max_info_rows > 0 {
+                                    selected_info_row =
+                                        (selected_info_row + 10).min(max_info_rows - 1);
+                                }
+                            } else if max_rows > 0 {
+                                selected_row = (selected_row + 10).min(max_rows - 1);
+                                match selected_subtab {
+                                    0 => likes_state.select(Some(selected_row)),
+                                    1 => playlists_state.select(Some(selected_row)),
+                                    _ => {}
+                                }
+                            }
+                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
                             player.volume_down();
                         } else {
                             let max_rows = get_table_rows_count(
@@ -432,7 +454,18 @@ fn start(
                         }
                     }
                     KeyCode::Up => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        if key.modifiers.contains(KeyModifiers::ALT) {
+                            if selected_tab == 2 && info_pane_selected {
+                                selected_info_row = selected_info_row.saturating_sub(10);
+                            } else {
+                                selected_row = selected_row.saturating_sub(10);
+                                match selected_subtab {
+                                    0 => likes_state.select(Some(selected_row)),
+                                    1 => playlists_state.select(Some(selected_row)),
+                                    _ => {}
+                                }
+                            }
+                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
                             player.volume_up();
                         } else {
                             if selected_tab == 2 && info_pane_selected && selected_info_row > 0 {
