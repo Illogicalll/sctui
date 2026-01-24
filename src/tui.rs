@@ -134,6 +134,7 @@ fn start(
     let mut window = [0.0, 20.0];
 
     let mut progress = 0;
+    let mut current_playing_index: Option<usize> = None;
 
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
@@ -273,9 +274,25 @@ fn start(
                         selected_row = 0;
                     }
                     KeyCode::Right => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            if player.is_playing() {
-                                player.next_song();
+                        if key.modifiers.contains(KeyModifiers::ALT) {
+                            // fast forward 10 seconds
+                            if player.is_playing() || current_playing_index.is_some() {
+                                player.fast_forward();
+                            }
+                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            if selected_tab == 0 && selected_subtab == 0 {
+                                // play next song in likes list
+                                if let Some(current_idx) = current_playing_index {
+                                    let next_idx = current_idx + 1;
+                                    if next_idx < likes.len() {
+                                        if let Some(track) = likes.get(next_idx) {
+                                            player.play(track.clone());
+                                            current_playing_index = Some(next_idx);
+                                            selected_row = next_idx;
+                                            likes_state.select(Some(next_idx));
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             if selected_tab == 0 {
@@ -291,9 +308,25 @@ fn start(
                         }
                     }
                     KeyCode::Left => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            if player.is_playing() {
-                                player.prev_song();
+                        if key.modifiers.contains(KeyModifiers::ALT) {
+                            // rewind 10 seconds
+                            if player.is_playing() || current_playing_index.is_some() {
+                                player.rewind();
+                            }
+                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            if selected_tab == 0 && selected_subtab == 0 {
+                                // play previous song in likes list
+                                if let Some(current_idx) = current_playing_index {
+                                    if current_idx > 0 {
+                                        let prev_idx = current_idx - 1;
+                                        if let Some(track) = likes.get(prev_idx) {
+                                            player.play(track.clone());
+                                            current_playing_index = Some(prev_idx);
+                                            selected_row = prev_idx;
+                                            likes_state.select(Some(prev_idx));
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             if selected_tab == 0 {
@@ -376,6 +409,7 @@ fn start(
                         if selected_tab == 0 && selected_subtab == 0 {
                             if let Some(track) = likes.get(selected_row) {
                                 player.play(track.clone());
+                                current_playing_index = Some(selected_row);
                             }
                         }
                     }
@@ -386,10 +420,34 @@ fn start(
 
         // tick playing animation and render
         if last_tick.elapsed() >= tick_rate {
+            progress = player.elapsed();
+            
             if player.is_playing() {
                 on_tick(&mut data, &mut window, &mut signal);
-
-                progress = player.elapsed();
+            }
+            
+            // check if current song has finished and auto-play next song
+            if selected_tab == 0 && selected_subtab == 0 {
+                let current_track = player.current_track();
+                if let Some(current_idx) = current_playing_index {
+                    // Check if song has finished (progress >= duration)
+                    // Use a small buffer (50ms) to account for timing precision
+                    if progress >= current_track.duration_ms.saturating_sub(50) && current_track.duration_ms > 0 {
+                        let next_idx = current_idx + 1;
+                        if next_idx < likes.len() {
+                            if let Some(track) = likes.get(next_idx) {
+                                player.play(track.clone());
+                                current_playing_index = Some(next_idx);
+                                selected_row = next_idx;
+                                likes_state.select(Some(next_idx));
+                            }
+                        } else {
+                            // reached end of list, stop playing
+                            player.pause();
+                            current_playing_index = None;
+                        }
+                    }
+                }
             }
 
             terminal.draw(|frame| {
@@ -1117,10 +1175,12 @@ fn render(
         Style::default().fg(Color::White),
     );
 
+    let ratio = (progress_float / max_time).min(1.0).max(0.0);
+
     let progress_bar = Gauge::default()
         .style(Style::default().bg(Color::LightBlue))
         .gauge_style(Color::Cyan)
-        .ratio(progress_float / max_time)
+        .ratio(ratio)
         .label(label);
 
     frame.render_widget(progress_bar, subsubchunks[5]);

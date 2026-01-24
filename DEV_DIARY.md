@@ -523,6 +523,32 @@ However, this approach would cause me a lot of frustrations when attempting to i
 within a track). In the end I got it _semi_-working but it would either take forever to load after the skip or just
 sometimes crash so I decided that, given it wasn't a priority, I would come back to it later.
 
+## Later
+
+I finally got around to properly implementing seeking functionality. In the end, the challenge was that `rodio`'s `Decoder` doesn't support seeking in streaming audio, so I had to work around this limitation.
+
+The solution I came up with was to restart playback from a new position using HTTP Range requests. When the user presses `OPTION + Right` (fast forward) or `OPTION + Left` (rewind), the app:
+
+1. Calculates the new position (±10 seconds)
+2. Stops the current playback
+3. Estimates the byte position based on time (assuming ~128 kbps = ~16 KB per second)
+4. Sends an HTTP Range header (`bytes={start_byte}-`) to request audio from that position
+5. Restarts playback from the new position
+
+The byte position estimation isn't perfect since it assumes a constant bitrate, but it works well enough for most tracks. The actual audio now seeks forward/backward properly, not just the progress bar.
+
+```rs
+// estimate byte position: assume ~128 kbps = ~16 KB per second
+if seek_position > 0 {
+    let estimated_bytes_per_second = 16_000;
+    let start_byte = (seek_position as u64 / 1000) * estimated_bytes_per_second;
+    let range_header = format!("bytes={}-", start_byte);
+    if let Ok(range_value) = HeaderValue::from_str(&range_header) {
+        headers.insert("Range", range_value);
+    }
+}
+```
+
 </details>
 
 <details>
