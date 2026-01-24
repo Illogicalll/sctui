@@ -605,12 +605,30 @@ On top of that, the first row shows the previously played song in a greyed out f
 
 <details>
 
-<summary><b>Chapter 7: Help Menu</b></summary>
+<summary><b>Chapter 7: Quality of Life</b></summary>
+
+With all these feature changes, I figured it was time to take a step back and consider the user-friendliness of the application as a whole.
+
+This led to me making a few additions that may not necessarily add song playback focused features, but useful ones nonetheless.
+
+## Help Menu
 
 At this point there are enough hotkeys and weird little combos that even I forget them half the time.
 
 In order to maintain the usability of the application, I added a help popup triggered with `SHIFT + H` that lays everything out in a clean table.
 
 ![Help](/media/help.png)
+
+## Quit Confirmation
+
+Right at the start of development, I chose the Escape key as the button to quit the application.
+
+While this makes perfect sense, I found myself pressing it accidentally without a second thought when trying to quit out of the 'Queue' and 'Help' views as a muscle memory reaction.
+
+This resulted in me closing the application when I didn't mean to, which was quite frustrating.
+
+To prevent this, I added a small confirmation menu that acts as a safeguard against accidental closing of the application.
+
+![Confirmation](/media/quit.png)
 
 </details>

@@ -145,6 +145,8 @@ fn start(
     let mut auto_queue: VecDeque<usize> = VecDeque::new();
     let mut queue_visible = false;
     let mut help_visible = false;
+    let mut quit_confirm_visible = false;
+    let mut quit_confirm_selected = 0;
 
     let get_table_rows_count = |selected_subtab: usize,
                                 likes: &Vec<Track>,
@@ -279,6 +281,8 @@ fn start(
                 current_playing_index,
                 previous_playing_index,
                 help_visible,
+                quit_confirm_visible,
+                quit_confirm_selected,
             )
         })?;
 
@@ -286,11 +290,33 @@ fn start(
         while event::poll(Duration::from_millis(10))? {
             // poll very frequently for responsiveness (separate from animation tick rate)
             if let Event::Key(key) = event::read()? {
+                if quit_confirm_visible {
+                    match key.code {
+                        KeyCode::Esc => {
+                            quit_confirm_visible = false;
+                        }
+                        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                            quit_confirm_selected = if quit_confirm_selected == 0 { 1 } else { 0 };
+                        }
+                        KeyCode::Enter => {
+                            if quit_confirm_selected == 0 {
+                                return Ok(());
+                            } else {
+                                quit_confirm_visible = false;
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
                 if player.is_seeking() {
                     continue;
                 }
                 match key.code {
-                    KeyCode::Esc => return Ok(()), // exit function
+                    KeyCode::Esc => {
+                        quit_confirm_visible = true;
+                        quit_confirm_selected = 1;
+                    }
                     KeyCode::Tab => {
                         selected_tab = (selected_tab + 1) % NUM_TABS;
                         selected_row = 0;
@@ -573,6 +599,8 @@ fn start(
                     current_playing_index,
                     previous_playing_index,
                     help_visible,
+                    quit_confirm_visible,
+                    quit_confirm_selected,
                 )
             })?;
 
@@ -742,6 +770,8 @@ fn render(
     current_playing_index: Option<usize>,
     previous_playing_index: Option<usize>,
     help_visible: bool,
+    quit_confirm_visible: bool,
+    quit_confirm_selected: usize,
 ) {
     let width = frame.area().width as usize;
 
@@ -1503,5 +1533,40 @@ fn render(
         .column_spacing(1);
 
         frame.render_widget(table, popup_area);
+    }
+
+    if quit_confirm_visible {
+        let popup_area = centered_rect(25, 10, frame.area());
+        frame.render_widget(Clear, popup_area);
+
+        let yes_style = if quit_confirm_selected == 0 {
+            Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let no_style = if quit_confirm_selected == 1 {
+            Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let line = Text::from(vec![
+            ratatui::text::Line::from("Are you Sure you Want to Quit?"),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(vec![
+                Span::styled("Yes", yes_style),
+                Span::raw("   "),
+                Span::styled("No", no_style),
+            ]),
+        ]);
+
+        let box_widget = Paragraph::new(line)
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            );
+        frame.render_widget(box_widget, popup_area);
     }
 }
