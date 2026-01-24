@@ -1,5 +1,5 @@
 use crate::api::Track;
-use crate::auth::Token;
+use crate::auth::{Token, try_refresh_token};
 use reqwest::header::{HeaderMap, HeaderValue};
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
 use std::sync::{
@@ -182,6 +182,9 @@ fn play_from_position(
         let seek_position = position_ms;
 
         rt.block_on(async move {
+            // try to refresh token if needed before making request
+            let _ = try_refresh_token(&token_clone);
+
             let token_guard = token_clone.lock().unwrap();
             let mut headers = HeaderMap::new();
             let mut header: HeaderValue = format!("OAuth {}", token_guard.access_token)

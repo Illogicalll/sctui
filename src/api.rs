@@ -1,4 +1,4 @@
-use crate::auth::Token;
+use crate::auth::{Token, try_refresh_token};
 use chrono::{DateTime, FixedOffset, Utc};
 use reqwest::blocking::Client;
 use std::sync::{Arc, Mutex};
@@ -112,6 +112,8 @@ impl API {
     }
 
     pub fn get_liked_tracks(&mut self) -> anyhow::Result<Vec<Track>> {
+        let _ = try_refresh_token(&self.token);
+
         let token_guard = self.token.lock().unwrap();
 
         if self.liked_tracks_next_href.is_none() && !self.first_liked_tracks_page_fetched {
@@ -176,6 +178,8 @@ impl API {
     }
 
     pub fn get_playlists(&mut self) -> anyhow::Result<Vec<Playlist>> {
+        let _ = try_refresh_token(&self.token);
+
         let token_guard = self.token.lock().unwrap();
 
         if self.my_playlists_next_href.is_none() && !self.my_first_playlist_page_fetched {
@@ -255,6 +259,8 @@ impl API {
     }
 
     pub fn get_albums(&mut self) -> anyhow::Result<Vec<Album>> {
+        let _ = try_refresh_token(&self.token);
+
         let token_guard = self.token.lock().unwrap();
 
         if self.albums_next_href.is_none() && !self.first_albums_page_fetched {
@@ -312,6 +318,8 @@ impl API {
     }
 
     pub fn get_following(&mut self) -> anyhow::Result<Vec<Artist>> {
+        let _ = try_refresh_token(&self.token);
+
         let token_guard = self.token.lock().unwrap();
 
         if self.following_next_href.is_none() && !self.first_following_page_fetched {
