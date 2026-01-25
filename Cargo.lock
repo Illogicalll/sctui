@@ -2395,6 +2395,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "crossterm 0.29.0",
+ "dasp_sample",
  "dotenvy",
  "futures",
  "image",

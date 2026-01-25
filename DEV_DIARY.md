@@ -765,3 +765,28 @@ The most difficult part of all of these different views was making everything wo
 I ended up storing a richer queue entry that includes its source and a snapshot of the list it came from, so manual items can play without reshaping the queue.
 
 </details>
+
+<details>
+
+<summary><strong>Chapter 9: A Break From Useful Features</strong></summary>
+
+Hooking up all the other Library views was quite a mentally straining process, so once I finished them I figured why not have some fun for a bit with some functionally useless but visually cool features?
+
+## Visualiser
+
+The visualiser started as a simple oscilloscope inspired by [scope-tui](https://github.com/alemidev/scope-tui) but grew into a much bigger UX problem than I expected.
+
+The goal was not scientific accuracy, but to make the waveform feel "alive" and consistent across quiet and loud tracks.
+
+The solution was to tap samples directly from the playback pipeline and then apply a light RMS-based gain with smoothing. That keeps the waveform readable without letting quiet sections blow up or loud peaks dominate the whole screen:
+
+```rs
+let rms = (samples.iter().map(|v| v * v).sum::<f32>() / samples.len() as f32).sqrt();
+let target_gain = (0.9 / rms.max(VOLUME_FLOOR)).min(MAX_GAIN);
+```
+
+![Visualiser](/media/visualiser.gif)
+
+I was a bit concerned about performance but so far in my testing it doesn't seem to have slowed the application down significantly/
+
+</details>

@@ -136,6 +136,7 @@ fn start(
     let mut last_artwork_url: Option<String> = None;
     let mut last_artwork_image: Option<DynamicImage> = None;
 
+    let wave_buffer = player.wave_buffer();
     let tick_rate = Duration::from_millis(200);
     let mut last_tick = Instant::now();
 
@@ -493,6 +494,9 @@ fn start(
                 state.search_popup_visible,
                 &state.search_query,
                 state.search_matches.len(),
+                state.visualizer_mode,
+                &wave_buffer,
+                state.visualizer_view,
             )
         })?;
 
@@ -791,6 +795,9 @@ fn start(
                     state.search_popup_visible,
                     &state.search_query,
                     state.search_matches.len(),
+                    state.visualizer_mode,
+                    &wave_buffer,
+                    state.visualizer_view,
                 )
             })?;
 

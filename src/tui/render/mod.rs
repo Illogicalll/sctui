@@ -2,8 +2,10 @@ mod now_playing;
 mod overlays;
 mod tabs;
 mod utils;
+mod visualizer;
 
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use ratatui::{
     Frame,
@@ -16,6 +18,7 @@ use ratatui_image::thread::ThreadProtocol;
 
 use crate::api::{Album, Artist, Playlist, Track};
 use crate::tui::logic::state::QueuedTrack;
+use crate::tui::render::visualizer::render_visualizer;
 
 pub fn render(
     frame: &mut Frame,
@@ -70,6 +73,9 @@ pub fn render(
     search_popup_visible: bool,
     search_query: &str,
     search_match_count: usize,
+    visualizer_mode: bool,
+    wave_buffer: &Arc<Mutex<VecDeque<f32>>>,
+    visualizer_view: crate::tui::logic::state::VisualizerMode,
 ) {
     let _ = search_match_count;
     let width = frame.area().width as usize;
@@ -85,6 +91,23 @@ pub fn render(
             .as_ref(),
         )
         .split(frame.area());
+
+    if visualizer_mode {
+        render_visualizer(frame, frame.area(), wave_buffer, visualizer_view);
+        overlays::render_overlays(
+            frame,
+            queue_tracks,
+            manual_queue,
+            auto_queue,
+            current_playing_track,
+            previous_playing_track,
+            queue_visible,
+            help_visible,
+            quit_confirm_visible,
+            quit_confirm_selected,
+        );
+        return;
+    }
 
     render_tabs(frame, chunks[0], tab_titles, selected_tab);
 

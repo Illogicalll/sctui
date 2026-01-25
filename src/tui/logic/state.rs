@@ -12,6 +12,11 @@ pub enum PlaybackSource {
     FollowingLikes,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum VisualizerMode {
+    Oscilloscope,
+}
+
 #[derive(Clone)]
 pub struct QueuedTrack {
     pub source: PlaybackSource,
@@ -69,6 +74,8 @@ pub struct AppState {
     pub search_popup_visible: bool,
     pub search_query: String,
     pub search_matches: Vec<usize>,
+    pub visualizer_mode: bool,
+    pub visualizer_view: VisualizerMode,
 }
 
 impl AppState {
@@ -112,6 +119,8 @@ impl AppState {
             search_popup_visible: false,
             search_query: String::new(),
             search_matches: Vec::new(),
+            visualizer_mode: false,
+            visualizer_view: VisualizerMode::Oscilloscope,
         }
     }
 }

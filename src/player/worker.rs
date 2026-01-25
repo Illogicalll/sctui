@@ -1,6 +1,7 @@
 use crate::api::Track;
 use crate::auth::Token;
 use rodio::Sink;
+use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -20,6 +21,7 @@ pub(crate) fn player_loop(
     elapsed_time: Arc<Mutex<Duration>>,
     last_start: Arc<Mutex<Option<Instant>>>,
     current_track: Arc<Mutex<Option<Track>>>,
+    wave_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
     let (rt, stream) = setup_stream();
 
@@ -35,6 +37,7 @@ pub(crate) fn player_loop(
                     &elapsed_time,
                     &last_start,
                     &current_track,
+                    &wave_buffer,
                     &stream,
                     &rt,
                 );
@@ -50,6 +53,7 @@ pub(crate) fn player_loop(
                     &elapsed_time,
                     &last_start,
                     &current_track,
+                    &wave_buffer,
                     &stream,
                     &rt,
                 );
@@ -136,6 +140,7 @@ pub(crate) fn player_loop(
                             &elapsed_time,
                             &last_start,
                             &current_track,
+                            &wave_buffer,
                             &stream,
                             &rt,
                         );
@@ -182,6 +187,7 @@ pub(crate) fn player_loop(
                         &elapsed_time,
                         &last_start,
                         &current_track,
+                        &wave_buffer,
                         &stream,
                         &rt,
                     );

@@ -1,6 +1,7 @@
 use crate::api::Track;
 use crate::auth::Token;
 use rodio::Sink;
+use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -20,6 +21,7 @@ pub struct Player {
     last_start: Arc<Mutex<Option<Instant>>>,
     current_track: Arc<Mutex<Option<Track>>>,
     sink: Arc<Mutex<Option<Sink>>>,
+    wave_buffer: Arc<Mutex<VecDeque<f32>>>,
 }
 
 impl Player {
@@ -31,6 +33,7 @@ impl Player {
         let elapsed_time = Arc::new(Mutex::new(Duration::ZERO));
         let last_start = Arc::new(Mutex::new(None));
         let current_track = Arc::new(Mutex::new(None));
+        let wave_buffer = Arc::new(Mutex::new(VecDeque::new()));
 
         {
             let flag_clone = Arc::clone(&is_playing_flag);
@@ -40,6 +43,7 @@ impl Player {
             let last_start_clone = Arc::clone(&last_start);
             let track_clone = Arc::clone(&current_track);
             let seeking_clone = Arc::clone(&is_seeking_flag);
+            let wave_buffer_clone = Arc::clone(&wave_buffer);
 
             thread::spawn(move || {
                 player_loop(
@@ -51,6 +55,7 @@ impl Player {
                     elapsed_clone,
                     last_start_clone,
                     track_clone,
+                    wave_buffer_clone,
                 );
             });
         }
@@ -63,6 +68,7 @@ impl Player {
             last_start,
             current_track,
             sink,
+            wave_buffer,
         }
     }
 
@@ -143,5 +149,9 @@ impl Player {
         } else {
             1.0
         }
+    }
+
+    pub fn wave_buffer(&self) -> Arc<Mutex<VecDeque<f32>>> {
+        Arc::clone(&self.wave_buffer)
     }
 }

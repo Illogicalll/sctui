@@ -3,8 +3,8 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::player::Player;
 
 use super::state::{
-    AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack, info_table_rows_count,
-    table_rows_count,
+    AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack, VisualizerMode,
+    info_table_rows_count, table_rows_count,
 };
 use crate::tui::logic::utils::{
     build_queue, build_search_matches, play_queued_track, queued_from_current,
@@ -31,6 +31,10 @@ pub fn handle_key_event(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
+    if state.visualizer_mode && key.code == KeyCode::Tab {
+        return InputOutcome::Continue;
+    }
+
     if state.quit_confirm_visible {
         match key.code {
             KeyCode::Esc => {
@@ -737,6 +741,9 @@ pub fn handle_key_event(
                     }
                     'h' | 'H' => {
                         state.help_visible = !state.help_visible;
+                    }
+                    'v' | 'V' => {
+                        state.visualizer_mode = !state.visualizer_mode;
                     }
                     'q' | 'Q' => {
                         state.queue_visible = !state.queue_visible;
