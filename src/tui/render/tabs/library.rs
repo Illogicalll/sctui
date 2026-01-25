@@ -18,6 +18,8 @@ pub fn render_library(
     likes_state: &mut TableState,
     playlists: &Vec<Playlist>,
     playlists_state: &mut TableState,
+    playlist_tracks: &Vec<Track>,
+    playlist_tracks_state: &mut TableState,
     albums: &Vec<Album>,
     albums_state: &mut TableState,
     following: &Vec<Artist>,
@@ -25,6 +27,7 @@ pub fn render_library(
     selected_subtab: usize,
     subtab_titles: &[&str],
     selected_row: usize,
+    selected_playlist_track_row: usize,
     search_popup_visible: bool,
     search_query: &str,
 ) {
@@ -86,9 +89,9 @@ pub fn render_library(
         1 => (
             styled_header(&["Name", "No. Songs", "Duration"]),
             vec![
-                Constraint::Percentage(80),
-                Constraint::Percentage(10),
-                Constraint::Percentage(10),
+                Constraint::Percentage(70),
+                Constraint::Percentage(15),
+                Constraint::Percentage(15),
             ],
         ),
         2 => (
@@ -161,7 +164,12 @@ pub fn render_library(
         .enumerate()
         .map(|(i, row)| {
             if i == selected_row {
-                row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                let style = if selected_subtab == 1 {
+                    Style::default().bg(Color::Gray).fg(Color::Black)
+                } else {
+                    Style::default().bg(Color::LightBlue).fg(Color::White)
+                };
+                row.style(style)
             } else {
                 row
             }
@@ -177,6 +185,67 @@ pub fn render_library(
     };
 
     let table_chunk_idx = if search_popup_visible { 2 } else { 1 };
+    let table_area = subchunks[table_chunk_idx];
+
+    if selected_subtab == 1 {
+        let columns = Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(33), Constraint::Percentage(67)].as_ref())
+            .split(table_area);
+
+        let left_table = Table::new(rows, col_widths)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .column_spacing(1);
+        frame.render_stateful_widget(left_table, columns[0], playlists_state);
+
+        let track_header = styled_header(&["Title", "Artist(s)", "Duration", "Streams"]);
+        let track_width = columns[1].width as usize;
+        let track_col_widths = vec![
+            Constraint::Percentage(55),
+            Constraint::Percentage(25),
+            Constraint::Percentage(10),
+            Constraint::Percentage(10),
+        ];
+        let track_min_widths = calculate_min_widths(&track_col_widths, track_width);
+        let track_rows = playlist_tracks
+            .iter()
+            .map(|track| {
+                Row::new(vec![
+                    truncate_with_ellipsis(&track.title, track_min_widths[0]),
+                    truncate_with_ellipsis(&track.artists, track_min_widths[1]),
+                    truncate_with_ellipsis(&track.duration, track_min_widths[2]),
+                    truncate_with_ellipsis(&track.playback_count, track_min_widths[3]),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let track_rows = track_rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| {
+                if i == selected_playlist_track_row {
+                    row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                } else {
+                    row
+                }
+            })
+            .collect::<Vec<_>>();
+        let right_table = Table::new(track_rows, track_col_widths)
+            .header(track_header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .column_spacing(1);
+        frame.render_stateful_widget(right_table, columns[1], playlist_tracks_state);
+        return;
+    }
+
     let table = Table::new(rows, col_widths)
         .header(header)
         .block(
@@ -185,5 +254,5 @@ pub fn render_library(
                 .border_type(BorderType::Rounded),
         )
         .column_spacing(1);
-    frame.render_stateful_widget(table, subchunks[table_chunk_idx], state);
+    frame.render_stateful_widget(table, table_area, state);
 }

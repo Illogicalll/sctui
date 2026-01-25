@@ -14,7 +14,7 @@ use super::utils::centered_rect;
 
 pub fn render_queue(
     frame: &mut Frame,
-    likes_all: &Vec<Track>,
+    queue_tracks: &Vec<Track>,
     manual_queue: &VecDeque<usize>,
     auto_queue: &VecDeque<usize>,
     current_playing_index: Option<usize>,
@@ -30,7 +30,7 @@ pub fn render_queue(
     let mut rows: Vec<Row> = Vec::new();
 
     if let Some(prev_idx) = previous_playing_index {
-        if let Some(track) = likes_all.get(prev_idx) {
+        if let Some(track) = queue_tracks.get(prev_idx) {
             rows.push(
                 Row::new(vec![
                     truncate_with_ellipsis(&track.title, title_width),
@@ -47,7 +47,7 @@ pub fn render_queue(
     }
 
     if let Some(current_idx) = current_playing_index {
-        if let Some(track) = likes_all.get(current_idx) {
+        if let Some(track) = queue_tracks.get(current_idx) {
             rows.push(
                 Row::new(vec![
                     truncate_with_ellipsis(&track.title, title_width),
@@ -68,7 +68,7 @@ pub fn render_queue(
         if remaining == 0 {
             break;
         }
-        if let Some(track) = likes_all.get(*idx) {
+        if let Some(track) = queue_tracks.get(*idx) {
             rows.push(Row::new(vec![
                 truncate_with_ellipsis(&track.title, title_width),
                 truncate_with_ellipsis(&track.artists, artist_width),
@@ -82,7 +82,7 @@ pub fn render_queue(
         if remaining == 0 {
             break;
         }
-        if let Some(track) = likes_all.get(*idx) {
+        if let Some(track) = queue_tracks.get(*idx) {
             rows.push(Row::new(vec![
                 truncate_with_ellipsis(&track.title, title_width),
                 truncate_with_ellipsis(&track.artists, artist_width),

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::auth::Token;
 
+pub use calls::playlists::fetch_playlist_tracks;
 pub use models::{Album, Artist, Playlist, Track};
 
 pub struct API {
@@ -37,5 +38,9 @@ impl API {
             following_next_href: None,
             first_following_page_fetched: false,
         }
+    }
+
+    pub fn token_clone(&self) -> Arc<Mutex<Token>> {
+        Arc::clone(&self.token)
     }
 }

@@ -3,16 +3,27 @@ use ratatui::widgets::TableState;
 use std::collections::VecDeque;
 use std::sync::mpsc::Receiver;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackSource {
+    Likes,
+    Playlist,
+}
+
 pub struct AppState {
     pub selected_tab: usize,
     pub selected_subtab: usize,
     pub selected_row: usize,
+    pub selected_playlist_row: usize,
     pub query: String,
     pub selected_searchfilter: usize,
     pub info_pane_selected: bool,
     pub selected_info_row: usize,
+    pub selected_playlist_track_row: usize,
+    pub playlist_tracks_request_id: u64,
+    pub playlist_tracks_task: Option<tokio::task::JoinHandle<()>>,
     pub progress: u64,
     pub current_playing_index: Option<usize>,
+    pub playback_source: PlaybackSource,
     pub shuffle_enabled: bool,
     pub repeat_enabled: bool,
     pub playback_history: Vec<usize>,
@@ -33,12 +44,17 @@ impl AppState {
             selected_tab: 0,
             selected_subtab: 0,
             selected_row: 0,
+            selected_playlist_row: 0,
             query: String::new(),
             selected_searchfilter: 0,
             info_pane_selected: false,
             selected_info_row: 0,
+            selected_playlist_track_row: 0,
+            playlist_tracks_request_id: 0,
+            playlist_tracks_task: None,
             progress: 0,
             current_playing_index: None,
+            playback_source: PlaybackSource::Likes,
             shuffle_enabled: false,
             repeat_enabled: false,
             playback_history: Vec::new(),
@@ -60,6 +76,11 @@ pub struct AppData {
     pub likes_state: TableState,
     pub playlists: Vec<Playlist>,
     pub playlists_state: TableState,
+    pub playlist_tracks: Vec<Track>,
+    pub playlist_tracks_state: TableState,
+    pub playlist_tracks_uri: Option<String>,
+    pub playback_tracks: Vec<Track>,
+    pub playback_playlist_uri: Option<String>,
     pub albums: Vec<Album>,
     pub albums_state: TableState,
     pub following: Vec<Artist>,
@@ -76,6 +97,10 @@ impl AppData {
         let mut playlists_state = TableState::default();
         playlists_state.select(Some(selected_row));
 
+        let playlist_tracks: Vec<Track> = Vec::new();
+        let mut playlist_tracks_state = TableState::default();
+        playlist_tracks_state.select(Some(0));
+
         let albums: Vec<Album> = api.get_albums()?.into_iter().collect();
         let mut albums_state = TableState::default();
         albums_state.select(Some(selected_row));
@@ -89,6 +114,11 @@ impl AppData {
             likes_state,
             playlists,
             playlists_state,
+            playlist_tracks,
+            playlist_tracks_state,
+            playlist_tracks_uri: None,
+            playback_tracks: Vec::new(),
+            playback_playlist_uri: None,
             albums,
             albums_state,
             following,
@@ -100,14 +130,22 @@ impl AppData {
         &mut self,
         rx_likes: &Receiver<Vec<Track>>,
         rx_playlists: &Receiver<Vec<Playlist>>,
+        rx_playlist_tracks: &Receiver<(u64, Vec<Track>)>,
         rx_albums: &Receiver<Vec<Album>>,
         rx_following: &Receiver<Vec<Artist>>,
+        playlist_tracks_request_id: u64,
     ) {
         while let Ok(new_likes) = rx_likes.try_recv() {
             self.likes.extend(new_likes);
         }
         while let Ok(new_playlists) = rx_playlists.try_recv() {
             self.playlists.extend(new_playlists);
+        }
+        while let Ok((request_id, new_tracks)) = rx_playlist_tracks.try_recv() {
+            if request_id == playlist_tracks_request_id {
+                self.playlist_tracks = new_tracks;
+                self.playlist_tracks_state.select(Some(0));
+            }
         }
         while let Ok(new_albums) = rx_albums.try_recv() {
             self.albums.extend(new_albums);

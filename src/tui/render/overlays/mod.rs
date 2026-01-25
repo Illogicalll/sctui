@@ -11,7 +11,7 @@ use crate::api::Track;
 
 pub fn render_overlays(
     frame: &mut Frame,
-    likes_all: &Vec<Track>,
+    queue_tracks: &Vec<Track>,
     manual_queue: &VecDeque<usize>,
     auto_queue: &VecDeque<usize>,
     current_playing_index: Option<usize>,
@@ -24,7 +24,7 @@ pub fn render_overlays(
     if queue_visible {
         queue::render_queue(
             frame,
-            likes_all,
+            queue_tracks,
             manual_queue,
             auto_queue,
             current_playing_index,

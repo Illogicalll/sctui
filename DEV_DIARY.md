@@ -696,3 +696,42 @@ After many frustrations, I finally ended up with a structure that turned the 5 f
 I would explain the structure in more detail, but to be honest you can literally just go look for yourself in like 2 clicks if you are reading this so I won't bother. Oh well, glad this nightmare is over though.
 
 </details>
+
+<details>
+
+<summary><b>Chapter 8: The Other Library Sub-Tabs</b></summary>
+
+Up until now, the only actually functional tab in the application was the 'Likes' sub-tab within the 'Library' main tab.
+
+With all the recent progress in that area, I figured it was *finally* time to move on to building out the rest of the application
+
+## Playlists
+
+This sub-tab had originally been blocked-out as a single list similar to 'Likes'.
+
+While I did consider leaving it that way, and making the `ENTER` key open the selected playlist in a new list, I figured this would ultimately be slightly confusing. This was because there would be no obivous way to go back to the main playlist view.
+
+If I could, I wanted to stay away from opening new windows and instead have everything be immediately visible to the user when they switch to the view.
+
+With this in mind, I split the area into two panes: playlists on the left (1/3 width), tracks on the right (2/3 width).
+
+![Playlists](/media/playlists.png)
+
+One challenge to overcome was switching out the queue. Once you can play from a playlist, the user would obviously expect other songs in that playlist to come next (not whatever was playing before). This required a source-aware queue instead of assuming a single list:
+
+```rs
+let active_tracks = match state.playback_source {
+    PlaybackSource::Likes => &data.likes,
+    PlaybackSource::Playlist => &data.playlist_tracks,
+};
+state.auto_queue = build_queue(current_idx, active_tracks.len(), state.shuffle_enabled);
+```
+Another challenge was that there were now two different selectors to control. One for the playlists, and one for songs within those playlists.
+
+In the end I had to shuffle round some of the existing key combinations to make this navigation feel as natural as possible.
+
+- `SHIFT + Up/Down` = select playlists (used to be volume up and down)
+- `Up/Down` = select tracks
+- `OPTION + Up/Down` = jump 10 tracks at a time
+
+</details>

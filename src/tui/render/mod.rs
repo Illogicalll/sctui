@@ -19,10 +19,12 @@ use crate::api::{Album, Artist, Playlist, Track};
 pub fn render(
     frame: &mut Frame,
     likes_view: &Vec<Track>,
-    likes_all: &Vec<Track>,
+    queue_tracks: &Vec<Track>,
     likes_state: &mut TableState,
     playlists: &Vec<Playlist>,
     playlists_state: &mut TableState,
+    playlist_tracks: &Vec<Track>,
+    playlist_tracks_state: &mut TableState,
     albums: &Vec<Album>,
     albums_state: &mut TableState,
     following: &Vec<Artist>,
@@ -32,6 +34,7 @@ pub fn render(
     selected_subtab: usize,
     subtab_titles: &[&str],
     selected_row: usize,
+    selected_playlist_track_row: usize,
     query: &str,
     searchfilters: &[&str],
     selected_searchfilter: usize,
@@ -83,6 +86,8 @@ pub fn render(
             likes_state,
             playlists,
             playlists_state,
+            playlist_tracks,
+            playlist_tracks_state,
             albums,
             albums_state,
             following,
@@ -90,6 +95,7 @@ pub fn render(
             selected_subtab,
             subtab_titles,
             selected_row,
+            selected_playlist_track_row,
             search_popup_visible,
             search_query,
         );
@@ -129,7 +135,7 @@ pub fn render(
 
     overlays::render_overlays(
         frame,
-        likes_all,
+        queue_tracks,
         manual_queue,
         auto_queue,
         current_playing_index,

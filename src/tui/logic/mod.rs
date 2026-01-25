@@ -4,7 +4,7 @@ mod animation;
 mod state;
 mod utils;
 
-use crate::api::API;
+use crate::api::{API, fetch_playlist_tracks};
 use crate::player::Player;
 use ratatui::{
     DefaultTerminal,
@@ -28,7 +28,7 @@ use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::{handle_key_event, InputOutcome};
 use self::animation::{SinSignal, on_tick};
-use self::state::{AppData, AppState};
+use self::state::{AppData, AppState, PlaybackSource};
 use self::utils::build_queue;
 
 const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];
@@ -47,10 +47,10 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player) -> anyhow::Result<()> {
     result
 }
 
-fn spawn_fetch<T, F>(api: Arc<Mutex<API>>, tx: std::sync::mpsc::Sender<Vec<T>>, fetch_fn: F)
+fn spawn_fetch<T, F>(api: Arc<Mutex<API>>, tx: std::sync::mpsc::Sender<T>, fetch_fn: F)
 where
     T: Send + 'static,
-    F: FnOnce(&mut API) -> anyhow::Result<Vec<T>> + Send + 'static,
+    F: FnOnce(&mut API) -> anyhow::Result<T> + Send + 'static,
 {
     std::thread::spawn(move || {
         let result = {
@@ -58,8 +58,8 @@ where
             fetch_fn(&mut api_guard)
         };
 
-        if let Ok(items) = result {
-            let _ = tx.send(items);
+        if let Ok(item) = result {
+            let _ = tx.send(item);
         }
     });
 }
@@ -78,6 +78,7 @@ fn start(
     let mut signal = SinSignal::new(0.1, 2.0, 10.0);
     let mut data_points = signal.by_ref().take(200).collect::<Vec<(f64, f64)>>();
     let mut window = [0.0, 20.0];
+    let async_rt = tokio::runtime::Runtime::new().unwrap();
 
     let (tx_likes, rx_likes): (Sender<Vec<crate::api::Track>>, Receiver<Vec<crate::api::Track>>) =
         mpsc::channel();
@@ -85,12 +86,20 @@ fn start(
         Sender<Vec<crate::api::Playlist>>,
         Receiver<Vec<crate::api::Playlist>>,
     ) = mpsc::channel();
+    let (tx_playlist_tracks, rx_playlist_tracks): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
     let (tx_albums, rx_albums): (Sender<Vec<crate::api::Album>>, Receiver<Vec<crate::api::Album>>) =
         mpsc::channel();
     let (tx_following, rx_following): (
         Sender<Vec<crate::api::Artist>>,
         Receiver<Vec<crate::api::Artist>>,
     ) = mpsc::channel();
+
+    spawn_fetch(Arc::clone(api), tx_playlists.clone(), |api| {
+        api.get_playlists()
+    });
 
     let mut picker = Picker::from_query_stdio()?;
 
@@ -116,7 +125,14 @@ fn start(
     let mut last_tick = Instant::now();
 
     loop {
-        data.apply_updates(&rx_likes, &rx_playlists, &rx_albums, &rx_following);
+        data.apply_updates(
+            &rx_likes,
+            &rx_playlists,
+            &rx_playlist_tracks,
+            &rx_albums,
+            &rx_following,
+            state.playlist_tracks_request_id,
+        );
 
         while let Ok(app_ev) = rx_main.try_recv() {
             match app_ev {
@@ -201,15 +217,67 @@ fn start(
             &data.following
         };
 
+        if state.selected_tab == 0 && state.selected_subtab == 1 {
+            if let Some(selected_playlist) = playlists_ref.get(state.selected_row) {
+                let tracks_uri = selected_playlist.tracks_uri.clone();
+                let needs_fetch = data
+                    .playlist_tracks_uri
+                    .as_deref()
+                    .map(|uri| uri != tracks_uri.as_str())
+                    .unwrap_or(true);
+                if needs_fetch {
+                    if let Some(handle) = state.playlist_tracks_task.take() {
+                        handle.abort();
+                    }
+                    state.playlist_tracks_request_id =
+                        state.playlist_tracks_request_id.wrapping_add(1);
+                    let request_id = state.playlist_tracks_request_id;
+                    let token = {
+                        let api_guard = api.lock().unwrap();
+                        api_guard.token_clone()
+                    };
+                    data.playlist_tracks_uri = Some(tracks_uri.clone());
+                    data.playlist_tracks.clear();
+                    data.playlist_tracks_state.select(Some(0));
+                    state.selected_playlist_track_row = 0;
+                    let tx = tx_playlist_tracks.clone();
+                    state.playlist_tracks_task = Some(async_rt.spawn(async move {
+                        if let Ok(tracks) = fetch_playlist_tracks(token, tracks_uri).await {
+                            let _ = tx.send((request_id, tracks));
+                        }
+                    }));
+                }
+            } else {
+                data.playlist_tracks.clear();
+                data.playlist_tracks_state.select(Some(0));
+                data.playlist_tracks_uri = None;
+                state.selected_playlist_track_row = 0;
+            }
+
+            if !data.playlist_tracks.is_empty()
+                && state.selected_playlist_track_row >= data.playlist_tracks.len()
+            {
+                state.selected_playlist_track_row = data.playlist_tracks.len() - 1;
+                data.playlist_tracks_state
+                    .select(Some(state.selected_playlist_track_row));
+            }
+        }
+
+        let queue_tracks = match state.playback_source {
+            PlaybackSource::Likes => &data.likes,
+            PlaybackSource::Playlist => &data.playback_tracks,
+        };
         let previous_playing_index = state.playback_history.last().copied();
         terminal.draw(|frame| {
             render(
                 frame,
                 likes_ref,
-                &data.likes,
+                queue_tracks,
                 &mut data.likes_state,
                 playlists_ref,
                 &mut data.playlists_state,
+                &data.playlist_tracks,
+                &mut data.playlist_tracks_state,
                 albums_ref,
                 &mut data.albums_state,
                 following_ref,
@@ -219,6 +287,7 @@ fn start(
                 state.selected_subtab,
                 &SUBTAB_TITLES,
                 state.selected_row,
+                state.selected_playlist_track_row,
                 &state.query,
                 &SEARCHFILTERS,
                 state.selected_searchfilter,
@@ -282,17 +351,36 @@ fn start(
                     && current_track.duration_ms > 0
                 {
                     if state.repeat_enabled {
-                        if let Some(track) = data.likes.get(current_idx) {
+                        let active_tracks = match state.playback_source {
+                            PlaybackSource::Likes => &data.likes,
+                            PlaybackSource::Playlist => &data.playback_tracks,
+                        };
+                        if let Some(track) = active_tracks.get(current_idx) {
                             player.play(track.clone());
-                            if state.selected_tab == 0 && state.selected_subtab == 0 {
+                            if state.playback_source == PlaybackSource::Likes
+                                && state.selected_tab == 0
+                                && state.selected_subtab == 0
+                            {
                                 state.selected_row = current_idx;
                                 data.likes_state.select(Some(current_idx));
+                            } else if state.playback_source == PlaybackSource::Playlist
+                                && state.selected_tab == 0
+                                && state.selected_subtab == 1
+                                && data.playback_playlist_uri.is_some()
+                                && data.playback_playlist_uri == data.playlist_tracks_uri
+                            {
+                                state.selected_playlist_track_row = current_idx;
+                                data.playlist_tracks_state.select(Some(current_idx));
                             }
                         }
                     } else {
                         if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
+                            let active_tracks = match state.playback_source {
+                                PlaybackSource::Likes => &data.likes,
+                                PlaybackSource::Playlist => &data.playback_tracks,
+                            };
                             state.auto_queue =
-                                build_queue(current_idx, data.likes.len(), state.shuffle_enabled);
+                                build_queue(current_idx, active_tracks.len(), state.shuffle_enabled);
                         }
                         let next_idx = if let Some(idx) = state.manual_queue.pop_front() {
                             Some(idx)
@@ -300,13 +388,28 @@ fn start(
                             state.auto_queue.pop_front()
                         };
                         if let Some(next_idx) = next_idx {
-                            if let Some(track) = data.likes.get(next_idx) {
+                            let active_tracks = match state.playback_source {
+                                PlaybackSource::Likes => &data.likes,
+                                PlaybackSource::Playlist => &data.playback_tracks,
+                            };
+                            if let Some(track) = active_tracks.get(next_idx) {
                                 state.playback_history.push(current_idx);
                                 player.play(track.clone());
                                 state.current_playing_index = Some(next_idx);
-                                if state.selected_tab == 0 && state.selected_subtab == 0 {
+                                if state.playback_source == PlaybackSource::Likes
+                                    && state.selected_tab == 0
+                                    && state.selected_subtab == 0
+                                {
                                     state.selected_row = next_idx;
                                     data.likes_state.select(Some(next_idx));
+                                } else if state.playback_source == PlaybackSource::Playlist
+                                    && state.selected_tab == 0
+                                    && state.selected_subtab == 1
+                                    && data.playback_playlist_uri.is_some()
+                                    && data.playback_playlist_uri == data.playlist_tracks_uri
+                                {
+                                    state.selected_playlist_track_row = next_idx;
+                                    data.playlist_tracks_state.select(Some(next_idx));
                                 }
                             }
                         } else {
@@ -371,15 +474,21 @@ fn start(
                 &data.following
             };
 
+            let queue_tracks = match state.playback_source {
+                PlaybackSource::Likes => &data.likes,
+                PlaybackSource::Playlist => &data.playback_tracks,
+            };
             let previous_playing_index = state.playback_history.last().copied();
             terminal.draw(|frame| {
                 render(
                     frame,
                     likes_ref,
-                    &data.likes,
+                    queue_tracks,
                     &mut data.likes_state,
                     playlists_ref,
                     &mut data.playlists_state,
+                    &data.playlist_tracks,
+                    &mut data.playlist_tracks_state,
                     albums_ref,
                     &mut data.albums_state,
                     following_ref,
@@ -389,6 +498,7 @@ fn start(
                     state.selected_subtab,
                     &SUBTAB_TITLES,
                     state.selected_row,
+                    state.selected_playlist_track_row,
                     &state.query,
                     &SEARCHFILTERS,
                     state.selected_searchfilter,
