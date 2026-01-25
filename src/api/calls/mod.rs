@@ -1,4 +1,4 @@
-mod albums;
+pub(crate) mod albums;
 mod following;
 mod likes;
 pub(crate) mod playlists;

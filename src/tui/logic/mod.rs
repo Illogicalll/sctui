@@ -4,7 +4,7 @@ mod animation;
 mod state;
 mod utils;
 
-use crate::api::{API, fetch_playlist_tracks};
+use crate::api::{API, fetch_album_tracks, fetch_playlist_tracks};
 use crate::player::Player;
 use ratatui::{
     DefaultTerminal,
@@ -90,6 +90,10 @@ fn start(
         Sender<(u64, Vec<crate::api::Track>)>,
         Receiver<(u64, Vec<crate::api::Track>)>,
     ) = mpsc::channel();
+    let (tx_album_tracks, rx_album_tracks): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
     let (tx_albums, rx_albums): (Sender<Vec<crate::api::Album>>, Receiver<Vec<crate::api::Album>>) =
         mpsc::channel();
     let (tx_following, rx_following): (
@@ -129,9 +133,11 @@ fn start(
             &rx_likes,
             &rx_playlists,
             &rx_playlist_tracks,
+            &rx_album_tracks,
             &rx_albums,
             &rx_following,
             state.playlist_tracks_request_id,
+            state.album_tracks_request_id,
         );
 
         while let Ok(app_ev) = rx_main.try_recv() {
@@ -263,9 +269,55 @@ fn start(
             }
         }
 
+        if state.selected_tab == 0 && state.selected_subtab == 2 {
+            if let Some(selected_album) = albums_ref.get(state.selected_row) {
+                let tracks_uri = selected_album.tracks_uri.clone();
+                let needs_fetch = data
+                    .album_tracks_uri
+                    .as_deref()
+                    .map(|uri| uri != tracks_uri.as_str())
+                    .unwrap_or(true);
+                if needs_fetch {
+                    if let Some(handle) = state.album_tracks_task.take() {
+                        handle.abort();
+                    }
+                    state.album_tracks_request_id =
+                        state.album_tracks_request_id.wrapping_add(1);
+                    let request_id = state.album_tracks_request_id;
+                    let token = {
+                        let api_guard = api.lock().unwrap();
+                        api_guard.token_clone()
+                    };
+                    data.album_tracks_uri = Some(tracks_uri.clone());
+                    data.album_tracks.clear();
+                    data.album_tracks_state.select(Some(0));
+                    state.selected_album_track_row = 0;
+                    let tx = tx_album_tracks.clone();
+                    state.album_tracks_task = Some(async_rt.spawn(async move {
+                        if let Ok(tracks) = fetch_album_tracks(token, tracks_uri).await {
+                            let _ = tx.send((request_id, tracks));
+                        }
+                    }));
+                }
+            } else {
+                data.album_tracks.clear();
+                data.album_tracks_state.select(Some(0));
+                data.album_tracks_uri = None;
+                state.selected_album_track_row = 0;
+            }
+
+            if !data.album_tracks.is_empty()
+                && state.selected_album_track_row >= data.album_tracks.len()
+            {
+                state.selected_album_track_row = data.album_tracks.len() - 1;
+                data.album_tracks_state
+                    .select(Some(state.selected_album_track_row));
+            }
+        }
+
         let queue_tracks = match state.playback_source {
             PlaybackSource::Likes => &data.likes,
-            PlaybackSource::Playlist => &data.playback_tracks,
+            PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
         };
         let previous_playing_index = state.playback_history.last().copied();
         terminal.draw(|frame| {
@@ -278,6 +330,8 @@ fn start(
                 &mut data.playlists_state,
                 &data.playlist_tracks,
                 &mut data.playlist_tracks_state,
+                &data.album_tracks,
+                &mut data.album_tracks_state,
                 albums_ref,
                 &mut data.albums_state,
                 following_ref,
@@ -288,6 +342,7 @@ fn start(
                 &SUBTAB_TITLES,
                 state.selected_row,
                 state.selected_playlist_track_row,
+                state.selected_album_track_row,
                 &state.query,
                 &SEARCHFILTERS,
                 state.selected_searchfilter,
@@ -353,7 +408,7 @@ fn start(
                     if state.repeat_enabled {
                         let active_tracks = match state.playback_source {
                             PlaybackSource::Likes => &data.likes,
-                            PlaybackSource::Playlist => &data.playback_tracks,
+                            PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                         };
                         if let Some(track) = active_tracks.get(current_idx) {
                             player.play(track.clone());
@@ -371,13 +426,21 @@ fn start(
                             {
                                 state.selected_playlist_track_row = current_idx;
                                 data.playlist_tracks_state.select(Some(current_idx));
+                            } else if state.playback_source == PlaybackSource::Album
+                                && state.selected_tab == 0
+                                && state.selected_subtab == 2
+                                && data.playback_album_uri.is_some()
+                                && data.playback_album_uri == data.album_tracks_uri
+                            {
+                                state.selected_album_track_row = current_idx;
+                                data.album_tracks_state.select(Some(current_idx));
                             }
                         }
                     } else {
                         if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
                             let active_tracks = match state.playback_source {
                                 PlaybackSource::Likes => &data.likes,
-                                PlaybackSource::Playlist => &data.playback_tracks,
+                                PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                             };
                             state.auto_queue =
                                 build_queue(current_idx, active_tracks.len(), state.shuffle_enabled);
@@ -390,7 +453,7 @@ fn start(
                         if let Some(next_idx) = next_idx {
                             let active_tracks = match state.playback_source {
                                 PlaybackSource::Likes => &data.likes,
-                                PlaybackSource::Playlist => &data.playback_tracks,
+                                PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                             };
                             if let Some(track) = active_tracks.get(next_idx) {
                                 state.playback_history.push(current_idx);
@@ -410,6 +473,14 @@ fn start(
                                 {
                                     state.selected_playlist_track_row = next_idx;
                                     data.playlist_tracks_state.select(Some(next_idx));
+                                } else if state.playback_source == PlaybackSource::Album
+                                    && state.selected_tab == 0
+                                    && state.selected_subtab == 2
+                                    && data.playback_album_uri.is_some()
+                                    && data.playback_album_uri == data.album_tracks_uri
+                                {
+                                    state.selected_album_track_row = next_idx;
+                                    data.album_tracks_state.select(Some(next_idx));
                                 }
                             }
                         } else {
@@ -476,7 +547,7 @@ fn start(
 
             let queue_tracks = match state.playback_source {
                 PlaybackSource::Likes => &data.likes,
-                PlaybackSource::Playlist => &data.playback_tracks,
+                PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
             };
             let previous_playing_index = state.playback_history.last().copied();
             terminal.draw(|frame| {
@@ -489,6 +560,8 @@ fn start(
                     &mut data.playlists_state,
                     &data.playlist_tracks,
                     &mut data.playlist_tracks_state,
+                    &data.album_tracks,
+                    &mut data.album_tracks_state,
                     albums_ref,
                     &mut data.albums_state,
                     following_ref,
@@ -499,6 +572,7 @@ fn start(
                     &SUBTAB_TITLES,
                     state.selected_row,
                     state.selected_playlist_track_row,
+                    state.selected_album_track_row,
                     &state.query,
                     &SEARCHFILTERS,
                     state.selected_searchfilter,

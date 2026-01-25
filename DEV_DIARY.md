@@ -734,4 +734,22 @@ In the end I had to shuffle round some of the existing key combinations to make 
 - `Up/Down` = select tracks
 - `OPTION + Up/Down` = jump 10 tracks at a time
 
+## Albums
+
+The goal here was the same as with the playlists: keep context visible without forcing the user into a separate screen.
+
+I went with a narrower right pane than playlists as there are a lot more columns to fit all the album metadata than for the playlists. The layout is now 65/35, with the full album table on the left and the album's tracklist on the right.
+
+![Albums](/media/albums.png)
+
+The async track fetching pattern is shared with playlists, including cancellation when the user scrolls quickly through albums.
+This keeps the UI responsive and avoids stacking up requests for albums that are no longer selected:
+
+```rs
+if let Some(handle) = state.album_tracks_task.take() {
+    handle.abort();
+}
+state.album_tracks_request_id = state.album_tracks_request_id.wrapping_add(1);
+```
+
 </details>

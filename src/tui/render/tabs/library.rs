@@ -20,6 +20,8 @@ pub fn render_library(
     playlists_state: &mut TableState,
     playlist_tracks: &Vec<Track>,
     playlist_tracks_state: &mut TableState,
+    album_tracks: &Vec<Track>,
+    album_tracks_state: &mut TableState,
     albums: &Vec<Album>,
     albums_state: &mut TableState,
     following: &Vec<Artist>,
@@ -28,6 +30,7 @@ pub fn render_library(
     subtab_titles: &[&str],
     selected_row: usize,
     selected_playlist_track_row: usize,
+    selected_album_track_row: usize,
     search_popup_visible: bool,
     search_query: &str,
 ) {
@@ -164,7 +167,7 @@ pub fn render_library(
         .enumerate()
         .map(|(i, row)| {
             if i == selected_row {
-                let style = if selected_subtab == 1 {
+                let style = if selected_subtab == 1 || selected_subtab == 2 {
                     Style::default().bg(Color::Gray).fg(Color::Black)
                 } else {
                     Style::default().bg(Color::LightBlue).fg(Color::White)
@@ -243,6 +246,63 @@ pub fn render_library(
             )
             .column_spacing(1);
         frame.render_stateful_widget(right_table, columns[1], playlist_tracks_state);
+        return;
+    }
+
+    if selected_subtab == 2 {
+        let columns = Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)].as_ref())
+            .split(table_area);
+
+        let left_table = Table::new(rows, col_widths)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .column_spacing(1);
+        frame.render_stateful_widget(left_table, columns[0], albums_state);
+
+        let track_header = styled_header(&["Title", "Duration", "Streams"]);
+        let track_width = columns[1].width as usize;
+        let track_col_widths = vec![
+            Constraint::Percentage(55),
+            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+        ];
+        let track_min_widths = calculate_min_widths(&track_col_widths, track_width);
+        let track_rows = album_tracks
+            .iter()
+            .map(|track| {
+                Row::new(vec![
+                    truncate_with_ellipsis(&track.title, track_min_widths[0]),
+                    truncate_with_ellipsis(&track.duration, track_min_widths[1]),
+                    truncate_with_ellipsis(&track.playback_count, track_min_widths[2]),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let track_rows = track_rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| {
+                if i == selected_album_track_row {
+                    row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                } else {
+                    row
+                }
+            })
+            .collect::<Vec<_>>();
+        let right_table = Table::new(track_rows, track_col_widths)
+            .header(track_header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .column_spacing(1);
+        frame.render_stateful_widget(right_table, columns[1], album_tracks_state);
         return;
     }
 

@@ -102,7 +102,7 @@ pub fn handle_key_event(
                 if let Some(current_idx) = state.current_playing_index {
                     let active_tracks = match state.playback_source {
                         PlaybackSource::Likes => &data.likes,
-                        PlaybackSource::Playlist => &data.playback_tracks,
+                        PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                     };
                     if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
                         state.auto_queue = build_queue(
@@ -135,6 +135,14 @@ pub fn handle_key_event(
                             {
                                 state.selected_playlist_track_row = next_idx;
                                 data.playlist_tracks_state.select(Some(next_idx));
+                            } else if state.playback_source == PlaybackSource::Album
+                                && state.selected_tab == 0
+                                && state.selected_subtab == 2
+                                && data.playback_album_uri.is_some()
+                                && data.playback_album_uri == data.album_tracks_uri
+                            {
+                                state.selected_album_track_row = next_idx;
+                                data.album_tracks_state.select(Some(next_idx));
                             }
                         }
                     }
@@ -143,10 +151,16 @@ pub fn handle_key_event(
                 if state.selected_subtab == 1 {
                     state.selected_playlist_row = state.selected_row;
                 }
+                if state.selected_subtab == 2 {
+                    state.selected_album_row = state.selected_row;
+                }
                 state.selected_subtab = (state.selected_subtab + 1) % 4;
                 if state.selected_subtab == 1 {
                     state.selected_row = state.selected_playlist_row;
                     data.playlists_state.select(Some(state.selected_row));
+                } else if state.selected_subtab == 2 {
+                    state.selected_row = state.selected_album_row;
+                    data.albums_state.select(Some(state.selected_row));
                 } else {
                     state.selected_row = 0;
                 }
@@ -166,7 +180,7 @@ pub fn handle_key_event(
                 if let Some(_current_idx) = state.current_playing_index {
                     let active_tracks = match state.playback_source {
                         PlaybackSource::Likes => &data.likes,
-                        PlaybackSource::Playlist => &data.playback_tracks,
+                        PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                     };
                     if let Some(prev_idx) = state.playback_history.pop() {
                         if let Some(track) = active_tracks.get(prev_idx) {
@@ -186,6 +200,14 @@ pub fn handle_key_event(
                             {
                                 state.selected_playlist_track_row = prev_idx;
                                 data.playlist_tracks_state.select(Some(prev_idx));
+                            } else if state.playback_source == PlaybackSource::Album
+                                && state.selected_tab == 0
+                                && state.selected_subtab == 2
+                                && data.playback_album_uri.is_some()
+                                && data.playback_album_uri == data.album_tracks_uri
+                            {
+                                state.selected_album_track_row = prev_idx;
+                                data.album_tracks_state.select(Some(prev_idx));
                             }
                             state.auto_queue = build_queue(
                                 prev_idx,
@@ -199,6 +221,9 @@ pub fn handle_key_event(
                 if state.selected_subtab == 1 {
                     state.selected_playlist_row = state.selected_row;
                 }
+                if state.selected_subtab == 2 {
+                    state.selected_album_row = state.selected_row;
+                }
                 state.selected_subtab = if state.selected_subtab == 0 {
                     3
                 } else {
@@ -207,6 +232,9 @@ pub fn handle_key_event(
                 if state.selected_subtab == 1 {
                     state.selected_row = state.selected_playlist_row;
                     data.playlists_state.select(Some(state.selected_row));
+                } else if state.selected_subtab == 2 {
+                    state.selected_row = state.selected_album_row;
+                    data.albums_state.select(Some(state.selected_row));
                 } else {
                     state.selected_row = 0;
                 }
@@ -243,6 +271,26 @@ pub fn handle_key_event(
                     data.playlist_tracks_state
                         .select(Some(state.selected_playlist_track_row));
                 }
+            } else if state.selected_tab == 0 && state.selected_subtab == 2 {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    if state.selected_row + 1 < data.albums.len() {
+                        state.selected_row += 1;
+                        state.selected_album_row = state.selected_row;
+                        data.albums_state.select(Some(state.selected_row));
+                    }
+                } else if key.modifiers.contains(KeyModifiers::ALT) {
+                    if !data.album_tracks.is_empty() {
+                        state.selected_album_track_row =
+                            (state.selected_album_track_row + 10)
+                                .min(data.album_tracks.len() - 1);
+                        data.album_tracks_state
+                            .select(Some(state.selected_album_track_row));
+                    }
+                } else if state.selected_album_track_row + 1 < data.album_tracks.len() {
+                    state.selected_album_track_row += 1;
+                    data.album_tracks_state
+                        .select(Some(state.selected_album_track_row));
+                }
             } else if key.modifiers.contains(KeyModifiers::ALT) {
                 let max_rows = table_rows_count(state.selected_subtab, data);
                 let max_info_rows = info_table_rows_count();
@@ -256,6 +304,7 @@ pub fn handle_key_event(
                     match state.selected_subtab {
                         0 => data.likes_state.select(Some(state.selected_row)),
                         1 => data.playlists_state.select(Some(state.selected_row)),
+                        2 => data.albums_state.select(Some(state.selected_row)),
                         _ => {}
                     }
                 }
@@ -272,9 +321,13 @@ pub fn handle_key_event(
                     if state.selected_subtab == 1 && state.selected_tab == 0 {
                         state.selected_playlist_row = state.selected_row;
                     }
+                    if state.selected_subtab == 2 && state.selected_tab == 0 {
+                        state.selected_album_row = state.selected_row;
+                    }
                     match state.selected_subtab {
                         0 => data.likes_state.select(Some(state.selected_row)),
                         1 => data.playlists_state.select(Some(state.selected_row)),
+                        2 => data.albums_state.select(Some(state.selected_row)),
                         _ => {}
                     }
                 }
@@ -298,6 +351,23 @@ pub fn handle_key_event(
                     data.playlist_tracks_state
                         .select(Some(state.selected_playlist_track_row));
                 }
+            } else if state.selected_tab == 0 && state.selected_subtab == 2 {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    if state.selected_row > 0 {
+                        state.selected_row -= 1;
+                        state.selected_album_row = state.selected_row;
+                        data.albums_state.select(Some(state.selected_row));
+                    }
+                } else if key.modifiers.contains(KeyModifiers::ALT) {
+                    state.selected_album_track_row =
+                        state.selected_album_track_row.saturating_sub(10);
+                    data.album_tracks_state
+                        .select(Some(state.selected_album_track_row));
+                } else if state.selected_album_track_row > 0 {
+                    state.selected_album_track_row -= 1;
+                    data.album_tracks_state
+                        .select(Some(state.selected_album_track_row));
+                }
             } else if key.modifiers.contains(KeyModifiers::ALT) {
                 if state.selected_tab == 2 && state.info_pane_selected {
                     state.selected_info_row = state.selected_info_row.saturating_sub(10);
@@ -306,6 +376,7 @@ pub fn handle_key_event(
                     match state.selected_subtab {
                         0 => data.likes_state.select(Some(state.selected_row)),
                         1 => data.playlists_state.select(Some(state.selected_row)),
+                        2 => data.albums_state.select(Some(state.selected_row)),
                         _ => {}
                     }
                 }
@@ -316,10 +387,18 @@ pub fn handle_key_event(
                 state.selected_info_row -= 1;
             } else if state.selected_row > 0 {
                 state.selected_row -= 1;
-                    if state.selected_subtab == 1 && state.selected_tab == 0 {
-                        state.selected_playlist_row = state.selected_row;
-                    }
-                data.likes_state.select(Some(state.selected_row));
+                if state.selected_subtab == 1 && state.selected_tab == 0 {
+                    state.selected_playlist_row = state.selected_row;
+                }
+                if state.selected_subtab == 2 && state.selected_tab == 0 {
+                    state.selected_album_row = state.selected_row;
+                }
+                match state.selected_subtab {
+                    0 => data.likes_state.select(Some(state.selected_row)),
+                    1 => data.playlists_state.select(Some(state.selected_row)),
+                    2 => data.albums_state.select(Some(state.selected_row)),
+                    _ => {}
+                }
             }
         }
         KeyCode::Char(c) => {
@@ -336,7 +415,9 @@ pub fn handle_key_event(
                         if let Some(current_idx) = state.current_playing_index {
                             let active_tracks = match state.playback_source {
                                 PlaybackSource::Likes => &data.likes,
-                                PlaybackSource::Playlist => &data.playback_tracks,
+                                PlaybackSource::Playlist | PlaybackSource::Album => {
+                                    &data.playback_tracks
+                                }
                             };
                             state.auto_queue = build_queue(
                                 current_idx,
@@ -385,7 +466,9 @@ pub fn handle_key_event(
                                 if state.auto_queue.is_empty() {
                                     let active_tracks = match state.playback_source {
                                         PlaybackSource::Likes => &data.likes,
-                                        PlaybackSource::Playlist => &data.playback_tracks,
+                                        PlaybackSource::Playlist | PlaybackSource::Album => {
+                                            &data.playback_tracks
+                                        }
                                     };
                                     state.auto_queue = build_queue(
                                         current_idx,
@@ -437,6 +520,8 @@ pub fn handle_key_event(
                         player.play(track.clone());
                         state.playback_source = PlaybackSource::Likes;
                         state.current_playing_index = Some(selected_idx);
+                    data.playback_playlist_uri = None;
+                    data.playback_album_uri = None;
                         state.auto_queue =
                             build_queue(selected_idx, data.likes.len(), state.shuffle_enabled);
                         if !search_active {
@@ -465,6 +550,7 @@ pub fn handle_key_event(
                     state.current_playing_index = Some(state.selected_playlist_track_row);
                     data.playback_tracks = data.playlist_tracks.clone();
                     data.playback_playlist_uri = data.playlist_tracks_uri.clone();
+                    data.playback_album_uri = None;
                     state.auto_queue = build_queue(
                         state.selected_playlist_track_row,
                         data.playback_tracks.len(),
@@ -472,6 +558,33 @@ pub fn handle_key_event(
                     );
                     data.playlist_tracks_state
                         .select(Some(state.selected_playlist_track_row));
+                }
+            } else if state.selected_tab == 0 && state.selected_subtab == 2 {
+                if let Some(track) = data
+                    .album_tracks
+                    .get(state.selected_album_track_row)
+                {
+                    if state.playback_source != PlaybackSource::Album {
+                        state.playback_history.clear();
+                        state.manual_queue.clear();
+                    } else if let Some(prev_idx) = state.current_playing_index {
+                        if prev_idx != state.selected_album_track_row {
+                            state.playback_history.push(prev_idx);
+                        }
+                    }
+                    player.play(track.clone());
+                    state.playback_source = PlaybackSource::Album;
+                    state.current_playing_index = Some(state.selected_album_track_row);
+                    data.playback_tracks = data.album_tracks.clone();
+                    data.playback_playlist_uri = None;
+                    data.playback_album_uri = data.album_tracks_uri.clone();
+                    state.auto_queue = build_queue(
+                        state.selected_album_track_row,
+                        data.playback_tracks.len(),
+                        state.shuffle_enabled,
+                    );
+                    data.album_tracks_state
+                        .select(Some(state.selected_album_track_row));
                 }
             }
         }
