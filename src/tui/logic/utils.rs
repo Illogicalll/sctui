@@ -52,17 +52,28 @@ pub fn build_search_matches(
     }
 }
 
-pub fn build_queue(current_idx: usize, list_len: usize, shuffle_enabled: bool) -> VecDeque<usize> {
-    if list_len == 0 {
+pub fn build_queue(
+    current_idx: usize,
+    tracks: &[Track],
+    shuffle_enabled: bool,
+) -> VecDeque<usize> {
+    if tracks.is_empty() {
         return VecDeque::new();
     }
 
     if shuffle_enabled {
-        let mut indices: Vec<usize> = (0..list_len).filter(|&i| i != current_idx).collect();
+        let mut indices: Vec<usize> = tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, track)| *i != current_idx && track.is_playable())
+            .map(|(i, _)| i)
+            .collect();
         indices.shuffle(&mut rand::thread_rng());
         VecDeque::from(indices)
     } else {
-        let indices: Vec<usize> = (current_idx + 1..list_len).collect();
+        let indices: Vec<usize> = (current_idx + 1..tracks.len())
+            .filter(|&i| tracks[i].is_playable())
+            .collect();
         VecDeque::from(indices)
     }
 }

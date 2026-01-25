@@ -9,6 +9,13 @@ pub struct Track {
     pub playback_count: String,
     pub artwork_url: String,
     pub stream_url: String,
+    pub access: String,
+}
+
+impl Track {
+    pub fn is_playable(&self) -> bool {
+        self.access.is_empty() || self.access == "playable"
+    }
 }
 
 #[derive(Debug, Clone)]

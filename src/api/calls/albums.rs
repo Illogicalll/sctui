@@ -88,8 +88,11 @@ pub async fn fetch_album_tracks(
         if !url.contains("limit=") {
             url.push_str("&limit=200");
         }
+        if !url.contains("access=") {
+            url.push_str("&access=playable,preview,blocked");
+        }
     } else {
-        url.push_str("?linked_partitioning=true&limit=200");
+        url.push_str("?linked_partitioning=true&limit=200&access=playable,preview,blocked");
     }
 
     let resp: serde_json::Value = reqwest::Client::new()
@@ -130,6 +133,7 @@ pub async fn fetch_album_tracks(
 
         let artwork_url = parse_str(&track, "artwork_url");
         let stream_url = parse_str(&track, "stream_url");
+        let access = parse_str(&track, "access");
 
         tracks.push(Track {
             title,
@@ -139,6 +143,7 @@ pub async fn fetch_album_tracks(
             playback_count,
             artwork_url,
             stream_url,
+            access,
         });
     }
 

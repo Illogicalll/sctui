@@ -443,7 +443,7 @@ fn start(
                                 PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                             };
                             state.auto_queue =
-                                build_queue(current_idx, active_tracks.len(), state.shuffle_enabled);
+                                build_queue(current_idx, active_tracks, state.shuffle_enabled);
                         }
                         let next_idx = if let Some(idx) = state.manual_queue.pop_front() {
                             Some(idx)

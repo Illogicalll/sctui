@@ -18,7 +18,8 @@ impl API {
         }
 
         let url = self.liked_tracks_next_href.clone().unwrap_or_else(|| {
-            "https://api.soundcloud.com/me/likes/tracks?limit=40&access=playable&linked_partitioning=true".to_string()
+            "https://api.soundcloud.com/me/likes/tracks?limit=40&access=playable,preview,blocked&linked_partitioning=true"
+                .to_string()
         });
 
         let resp: serde_json::Value = Client::new()
@@ -56,6 +57,7 @@ impl API {
                 let artwork_url = parse_str(track, "artwork_url");
 
                 let stream_url = parse_str(track, "stream_url");
+                let access = parse_str(track, "access");
 
                 tracks.push(Track {
                     title,
@@ -65,6 +67,7 @@ impl API {
                     playback_count,
                     artwork_url,
                     stream_url,
+                    access,
                 });
             }
         }

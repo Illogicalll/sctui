@@ -120,12 +120,16 @@ pub fn render_library(
         0 => likes_view
             .iter()
             .map(|track| {
-                Row::new(vec![
+                let mut row = Row::new(vec![
                     truncate_with_ellipsis(&track.title, col_min_widths[0]),
                     truncate_with_ellipsis(&track.artists, col_min_widths[1]),
                     truncate_with_ellipsis(&track.duration, col_min_widths[2]),
                     truncate_with_ellipsis(&track.playback_count, col_min_widths[3]),
-                ])
+                ]);
+                if !track.is_playable() {
+                    row = row.style(Style::default().fg(Color::DarkGray));
+                }
+                row
             })
             .collect(),
         1 => playlists
@@ -162,6 +166,15 @@ pub fn render_library(
         _ => vec![],
     };
 
+    let selected_unplayable = if selected_subtab == 0 {
+        likes_view
+            .get(selected_row)
+            .map(|track| !track.is_playable())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
     let rows: Vec<_> = rows
         .into_iter()
         .enumerate()
@@ -169,6 +182,8 @@ pub fn render_library(
             if i == selected_row {
                 let style = if selected_subtab == 1 || selected_subtab == 2 {
                     Style::default().bg(Color::Gray).fg(Color::Black)
+                } else if selected_unplayable {
+                    Style::default().bg(Color::DarkGray).fg(Color::Gray)
                 } else {
                     Style::default().bg(Color::LightBlue).fg(Color::White)
                 };
@@ -217,24 +232,25 @@ pub fn render_library(
         let track_min_widths = calculate_min_widths(&track_col_widths, track_width);
         let track_rows = playlist_tracks
             .iter()
-            .map(|track| {
-                Row::new(vec![
+            .enumerate()
+            .map(|(i, track)| {
+                let mut row = Row::new(vec![
                     truncate_with_ellipsis(&track.title, track_min_widths[0]),
                     truncate_with_ellipsis(&track.artists, track_min_widths[1]),
                     truncate_with_ellipsis(&track.duration, track_min_widths[2]),
                     truncate_with_ellipsis(&track.playback_count, track_min_widths[3]),
-                ])
-            })
-            .collect::<Vec<_>>();
-        let track_rows = track_rows
-            .into_iter()
-            .enumerate()
-            .map(|(i, row)| {
-                if i == selected_playlist_track_row {
-                    row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-                } else {
-                    row
+                ]);
+                if !track.is_playable() {
+                    row = row.style(Style::default().fg(Color::DarkGray));
                 }
+                if i == selected_playlist_track_row {
+                    row = if track.is_playable() {
+                        row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                    } else {
+                        row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
+                    };
+                }
+                row
             })
             .collect::<Vec<_>>();
         let right_table = Table::new(track_rows, track_col_widths)
@@ -275,23 +291,24 @@ pub fn render_library(
         let track_min_widths = calculate_min_widths(&track_col_widths, track_width);
         let track_rows = album_tracks
             .iter()
-            .map(|track| {
-                Row::new(vec![
+            .enumerate()
+            .map(|(i, track)| {
+                let mut row = Row::new(vec![
                     truncate_with_ellipsis(&track.title, track_min_widths[0]),
                     truncate_with_ellipsis(&track.duration, track_min_widths[1]),
                     truncate_with_ellipsis(&track.playback_count, track_min_widths[2]),
-                ])
-            })
-            .collect::<Vec<_>>();
-        let track_rows = track_rows
-            .into_iter()
-            .enumerate()
-            .map(|(i, row)| {
-                if i == selected_album_track_row {
-                    row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-                } else {
-                    row
+                ]);
+                if !track.is_playable() {
+                    row = row.style(Style::default().fg(Color::DarkGray));
                 }
+                if i == selected_album_track_row {
+                    row = if track.is_playable() {
+                        row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                    } else {
+                        row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
+                    };
+                }
+                row
             })
             .collect::<Vec<_>>();
         let right_table = Table::new(track_rows, track_col_widths)

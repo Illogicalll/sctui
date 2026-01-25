@@ -105,11 +105,8 @@ pub fn handle_key_event(
                         PlaybackSource::Playlist | PlaybackSource::Album => &data.playback_tracks,
                     };
                     if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
-                        state.auto_queue = build_queue(
-                            current_idx,
-                            active_tracks.len(),
-                            state.shuffle_enabled,
-                        );
+                        state.auto_queue =
+                            build_queue(current_idx, active_tracks, state.shuffle_enabled);
                     }
                     let next_idx = if let Some(idx) = state.manual_queue.pop_front() {
                         Some(idx)
@@ -209,11 +206,8 @@ pub fn handle_key_event(
                                 state.selected_album_track_row = prev_idx;
                                 data.album_tracks_state.select(Some(prev_idx));
                             }
-                            state.auto_queue = build_queue(
-                                prev_idx,
-                                active_tracks.len(),
-                                state.shuffle_enabled,
-                            );
+                            state.auto_queue =
+                                build_queue(prev_idx, active_tracks, state.shuffle_enabled);
                         }
                     }
                 }
@@ -419,11 +413,8 @@ pub fn handle_key_event(
                                     &data.playback_tracks
                                 }
                             };
-                            state.auto_queue = build_queue(
-                                current_idx,
-                                active_tracks.len(),
-                                state.shuffle_enabled,
-                            );
+                            state.auto_queue =
+                                build_queue(current_idx, active_tracks, state.shuffle_enabled);
                         }
                     }
                     'r' | 'R' => {
@@ -435,10 +426,18 @@ pub fn handle_key_event(
                                 state.search_popup_visible && !state.search_query.trim().is_empty();
                             if search_active {
                                 if let Some(&idx) = state.search_matches.get(state.selected_row) {
-                                    state.manual_queue.push_back(idx);
+                                    if let Some(track) = data.likes.get(idx) {
+                                        if track.is_playable() {
+                                            state.manual_queue.push_back(idx);
+                                        }
+                                    }
                                 }
                             } else {
-                                state.manual_queue.push_back(state.selected_row);
+                                if let Some(track) = data.likes.get(state.selected_row) {
+                                    if track.is_playable() {
+                                        state.manual_queue.push_back(state.selected_row);
+                                    }
+                                }
                             }
                         }
                     }
@@ -472,7 +471,7 @@ pub fn handle_key_event(
                                     };
                                     state.auto_queue = build_queue(
                                         current_idx,
-                                        active_tracks.len(),
+                                        active_tracks,
                                         state.shuffle_enabled,
                                     );
                                 }
@@ -509,6 +508,9 @@ pub fn handle_key_event(
                 };
                 if let Some(selected_idx) = selected_idx {
                     if let Some(track) = data.likes.get(selected_idx) {
+                        if !track.is_playable() {
+                            return InputOutcome::Continue;
+                        }
                         if state.playback_source != PlaybackSource::Likes {
                             state.playback_history.clear();
                             state.manual_queue.clear();
@@ -523,7 +525,7 @@ pub fn handle_key_event(
                     data.playback_playlist_uri = None;
                     data.playback_album_uri = None;
                         state.auto_queue =
-                            build_queue(selected_idx, data.likes.len(), state.shuffle_enabled);
+                            build_queue(selected_idx, &data.likes, state.shuffle_enabled);
                         if !search_active {
                             if state.selected_tab == 0 && state.selected_subtab == 0 {
                                 state.selected_row = selected_idx;
@@ -537,6 +539,9 @@ pub fn handle_key_event(
                     .playlist_tracks
                     .get(state.selected_playlist_track_row)
                 {
+                    if !track.is_playable() {
+                        return InputOutcome::Continue;
+                    }
                     if state.playback_source != PlaybackSource::Playlist {
                         state.playback_history.clear();
                         state.manual_queue.clear();
@@ -553,7 +558,7 @@ pub fn handle_key_event(
                     data.playback_album_uri = None;
                     state.auto_queue = build_queue(
                         state.selected_playlist_track_row,
-                        data.playback_tracks.len(),
+                        &data.playback_tracks,
                         state.shuffle_enabled,
                     );
                     data.playlist_tracks_state
@@ -564,6 +569,9 @@ pub fn handle_key_event(
                     .album_tracks
                     .get(state.selected_album_track_row)
                 {
+                    if !track.is_playable() {
+                        return InputOutcome::Continue;
+                    }
                     if state.playback_source != PlaybackSource::Album {
                         state.playback_history.clear();
                         state.manual_queue.clear();
@@ -580,7 +588,7 @@ pub fn handle_key_event(
                     data.playback_album_uri = data.album_tracks_uri.clone();
                     state.auto_queue = build_queue(
                         state.selected_album_track_row,
-                        data.playback_tracks.len(),
+                        &data.playback_tracks,
                         state.shuffle_enabled,
                     );
                     data.album_tracks_state

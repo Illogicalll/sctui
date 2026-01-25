@@ -69,11 +69,15 @@ pub fn render_queue(
             break;
         }
         if let Some(track) = queue_tracks.get(*idx) {
-            rows.push(Row::new(vec![
+            let mut row = Row::new(vec![
                 truncate_with_ellipsis(&track.title, title_width),
                 truncate_with_ellipsis(&track.artists, artist_width),
                 track.duration.clone(),
-            ]));
+            ]);
+            if !track.is_playable() {
+                row = row.style(Style::default().fg(Color::DarkGray));
+            }
+            rows.push(row);
             remaining -= 1;
         }
     }
@@ -83,11 +87,15 @@ pub fn render_queue(
             break;
         }
         if let Some(track) = queue_tracks.get(*idx) {
-            rows.push(Row::new(vec![
+            let mut row = Row::new(vec![
                 truncate_with_ellipsis(&track.title, title_width),
                 truncate_with_ellipsis(&track.artists, artist_width),
                 track.duration.clone(),
-            ]));
+            ]);
+            if !track.is_playable() {
+                row = row.style(Style::default().fg(Color::DarkGray));
+            }
+            rows.push(row);
             remaining -= 1;
         }
     }
