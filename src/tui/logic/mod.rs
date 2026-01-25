@@ -22,6 +22,7 @@ use ratatui_image::{
     thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
 };
 use reqwest;
+use image::DynamicImage;
 
 use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
@@ -91,7 +92,7 @@ fn start(
         Receiver<Vec<crate::api::Artist>>,
     ) = mpsc::channel();
 
-    let picker = Picker::from_query_stdio()?;
+    let mut picker = Picker::from_query_stdio()?;
 
     let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
     let (tx_main, rx_main) = mpsc::channel::<AppEvent>();
@@ -109,6 +110,7 @@ fn start(
 
     let mut cover_art_async = ThreadProtocol::new(tx_worker.clone(), None);
     let mut last_artwork_url: Option<String> = None;
+    let mut last_artwork_image: Option<DynamicImage> = None;
 
     let tick_rate = Duration::from_millis(200);
     let mut last_tick = Instant::now();
@@ -134,11 +136,12 @@ fn start(
             if let Ok(resp) = reqwest::blocking::get(url.as_str()) {
                 if let Ok(bytes) = resp.bytes() {
                     if let Ok(dyn_img) = image::load_from_memory(&bytes) {
-                        let resize_proto = picker.new_resize_protocol(dyn_img);
+                        let resize_proto = picker.new_resize_protocol(dyn_img.clone());
                         cover_art_async =
                             ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
 
                         last_artwork_url = Some(url.clone());
+                        last_artwork_image = Some(dyn_img);
                     }
                 }
             }
@@ -244,12 +247,25 @@ fn start(
         })?;
 
         while event::poll(Duration::from_millis(10))? {
-            if let Event::Key(key) = event::read()? {
-                if let InputOutcome::Quit =
-                    handle_key_event(key, &mut state, &mut data, &player)
-                {
-                    return Ok(());
+            match event::read()? {
+                Event::Key(key) => {
+                    if let InputOutcome::Quit =
+                        handle_key_event(key, &mut state, &mut data, &player)
+                    {
+                        return Ok(());
+                    }
                 }
+                Event::Resize(_, _) => {
+                    picker = Picker::from_query_stdio()?;
+                    if let Some(image) = last_artwork_image.as_ref() {
+                        let resize_proto = picker.new_resize_protocol(image.clone());
+                        cover_art_async =
+                            ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
+                    } else {
+                        cover_art_async.empty_protocol();
+                    }
+                }
+                _ => {}
             }
         }
 

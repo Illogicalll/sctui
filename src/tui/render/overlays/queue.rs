@@ -10,7 +10,7 @@ use ratatui::{
 use crate::api::Track;
 use crate::tui::render::utils::{styled_header, truncate_with_ellipsis};
 
-use super::centered_rect;
+use super::utils::centered_rect;
 
 pub fn render_queue(
     frame: &mut Frame,

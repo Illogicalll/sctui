@@ -6,7 +6,7 @@ use ratatui::{
     text::{Span, Text},
     widgets::{Axis, Block, Chart, Dataset, Gauge, Paragraph},
 };
-use ratatui_image::{StatefulImage, thread::ThreadProtocol};
+use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
 
 use crate::api::Track;
 
@@ -51,7 +51,8 @@ pub fn render_now_playing(
         .borders(ratatui::widgets::Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded);
 
-    frame.render_widget(now_playing, subchunks[1]);
+    frame.render_widget(now_playing.clone(), subchunks[1]);
+    let inner_area = now_playing.inner(subchunks[1]);
 
     let padding = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
@@ -75,15 +76,6 @@ pub fn render_now_playing(
         ])
         .split(padding[1]);
 
-    let image_padding = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(20),
-            Constraint::Percentage(60),
-            Constraint::Percentage(20),
-        ])
-        .split(horizontal_split[1]);
-
     let subsubchunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
@@ -97,7 +89,25 @@ pub fn render_now_playing(
         ])
         .split(horizontal_split[3]);
 
-    frame.render_stateful_widget(StatefulImage::new(), image_padding[1], cover_art_async);
+    let raw_image_area = horizontal_split[1];
+    let x1 = raw_image_area.x.max(inner_area.x);
+    let y1 = raw_image_area.y.max(inner_area.y);
+    let x2 = raw_image_area
+        .x
+        .saturating_add(raw_image_area.width)
+        .min(inner_area.x.saturating_add(inner_area.width));
+    let y2 = raw_image_area
+        .y
+        .saturating_add(raw_image_area.height)
+        .min(inner_area.y.saturating_add(inner_area.height));
+    let image_area = ratatui::layout::Rect {
+        x: x1,
+        y: y1,
+        width: x2.saturating_sub(x1),
+        height: y2.saturating_sub(y1),
+    };
+    let image_widget = StatefulImage::new().resize(Resize::Scale(None));
+    frame.render_stateful_widget(image_widget, image_area, cover_art_async);
 
     let song_name = Paragraph::new(selected_track.title.clone())
         .style(Style::default().add_modifier(Modifier::BOLD))

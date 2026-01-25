@@ -1,13 +1,11 @@
 mod help;
 mod queue;
 mod quit;
+mod utils;
 
 use std::collections::VecDeque;
 
-use ratatui::{
-    Frame,
-    layout::{Constraint, Layout, Rect},
-};
+use ratatui::Frame;
 
 use crate::api::Track;
 
@@ -41,24 +39,4 @@ pub fn render_overlays(
     if quit_confirm_visible {
         quit::render_quit_confirm(frame, quit_confirm_selected);
     }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(vertical[1])[1]
 }

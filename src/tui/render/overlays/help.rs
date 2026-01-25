@@ -6,7 +6,7 @@ use ratatui::{
 
 use crate::tui::render::utils::styled_header;
 
-use super::centered_rect;
+use super::utils::centered_rect;
 
 pub fn render_help(frame: &mut Frame) {
     let popup_area = centered_rect(70, 70, frame.area());

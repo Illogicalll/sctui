@@ -6,10 +6,10 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use super::centered_rect;
+use super::utils::centered_rect_fixed;
 
 pub fn render_quit_confirm(frame: &mut Frame, quit_confirm_selected: usize) {
-    let popup_area = centered_rect(25, 10, frame.area());
+    let popup_area = centered_rect_fixed(40, 5, frame.area());
     frame.render_widget(Clear, popup_area);
 
     let yes_style = if quit_confirm_selected == 0 {
