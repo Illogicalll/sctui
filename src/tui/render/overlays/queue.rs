@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use crate::api::Track;
+use crate::tui::logic::state::QueuedTrack;
 use crate::tui::render::utils::{styled_header, truncate_with_ellipsis};
 
 use super::utils::centered_rect;
@@ -15,10 +16,10 @@ use super::utils::centered_rect;
 pub fn render_queue(
     frame: &mut Frame,
     queue_tracks: &Vec<Track>,
-    manual_queue: &VecDeque<usize>,
+    manual_queue: &VecDeque<QueuedTrack>,
     auto_queue: &VecDeque<usize>,
-    current_playing_index: Option<usize>,
-    previous_playing_index: Option<usize>,
+    current_playing_track: Option<Track>,
+    previous_playing_track: Option<Track>,
 ) {
     let popup_area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, popup_area);
@@ -29,34 +30,30 @@ pub fn render_queue(
 
     let mut rows: Vec<Row> = Vec::new();
 
-    if let Some(prev_idx) = previous_playing_index {
-        if let Some(track) = queue_tracks.get(prev_idx) {
-            rows.push(
-                Row::new(vec![
-                    truncate_with_ellipsis(&track.title, title_width),
-                    truncate_with_ellipsis(&track.artists, artist_width),
-                    track.duration.clone(),
-                ])
-                .style(Style::default().fg(Color::DarkGray)),
-            );
-        }
+    if let Some(track) = previous_playing_track {
+        rows.push(
+            Row::new(vec![
+                truncate_with_ellipsis(&track.title, title_width),
+                truncate_with_ellipsis(&track.artists, artist_width),
+                track.duration.clone(),
+            ])
+            .style(Style::default().fg(Color::DarkGray)),
+        );
     } else {
         rows.push(
             Row::new(vec!["Previous: None", "", ""]).style(Style::default().fg(Color::DarkGray)),
         );
     }
 
-    if let Some(current_idx) = current_playing_index {
-        if let Some(track) = queue_tracks.get(current_idx) {
-            rows.push(
-                Row::new(vec![
-                    truncate_with_ellipsis(&track.title, title_width),
-                    truncate_with_ellipsis(&track.artists, artist_width),
-                    track.duration.clone(),
-                ])
-                .style(Style::default().bg(Color::LightBlue).fg(Color::White)),
-            );
-        }
+    if let Some(track) = current_playing_track {
+        rows.push(
+            Row::new(vec![
+                truncate_with_ellipsis(&track.title, title_width),
+                truncate_with_ellipsis(&track.artists, artist_width),
+                track.duration.clone(),
+            ])
+            .style(Style::default().bg(Color::LightBlue).fg(Color::White)),
+        );
     } else {
         rows.push(Row::new(vec!["Now Playing: None", "", ""]));
     }
@@ -64,22 +61,21 @@ pub fn render_queue(
     let max_rows = popup_area.height.saturating_sub(3) as usize;
     let remaining_slots = max_rows.saturating_sub(rows.len());
     let mut remaining = remaining_slots;
-    for idx in manual_queue.iter() {
+    for queued in manual_queue.iter() {
         if remaining == 0 {
             break;
         }
-        if let Some(track) = queue_tracks.get(*idx) {
-            let mut row = Row::new(vec![
-                truncate_with_ellipsis(&track.title, title_width),
-                truncate_with_ellipsis(&track.artists, artist_width),
-                track.duration.clone(),
-            ]);
-            if !track.is_playable() {
-                row = row.style(Style::default().fg(Color::DarkGray));
-            }
-            rows.push(row);
-            remaining -= 1;
+        let track = &queued.track;
+        let mut row = Row::new(vec![
+            truncate_with_ellipsis(&track.title, title_width),
+            truncate_with_ellipsis(&track.artists, artist_width),
+            track.duration.clone(),
+        ]);
+        if !track.is_playable() {
+            row = row.style(Style::default().fg(Color::DarkGray));
         }
+        rows.push(row);
+        remaining -= 1;
     }
 
     for idx in auto_queue.iter() {

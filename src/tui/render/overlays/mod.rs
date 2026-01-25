@@ -8,14 +8,15 @@ use std::collections::VecDeque;
 use ratatui::Frame;
 
 use crate::api::Track;
+use crate::tui::logic::state::QueuedTrack;
 
 pub fn render_overlays(
     frame: &mut Frame,
     queue_tracks: &Vec<Track>,
-    manual_queue: &VecDeque<usize>,
+    manual_queue: &VecDeque<QueuedTrack>,
     auto_queue: &VecDeque<usize>,
-    current_playing_index: Option<usize>,
-    previous_playing_index: Option<usize>,
+    current_playing_track: Option<Track>,
+    previous_playing_track: Option<Track>,
     queue_visible: bool,
     help_visible: bool,
     quit_confirm_visible: bool,
@@ -27,8 +28,8 @@ pub fn render_overlays(
             queue_tracks,
             manual_queue,
             auto_queue,
-            current_playing_index,
-            previous_playing_index,
+            current_playing_track,
+            previous_playing_track,
         );
     }
 

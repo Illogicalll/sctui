@@ -752,4 +752,16 @@ if let Some(handle) = state.album_tracks_task.take() {
 state.album_tracks_request_id = state.album_tracks_request_id.wrapping_add(1);
 ```
 
+## Following
+
+Following ended up being the most complex sub-tab so far because it has three independent panes and two different track lists.
+
+The layout is now 20/40/40: users on the left, their published tracks in the middle, and their liked tracks on the right. I did really want to add their playlists too, but I couldn't think of a simplistic way to incorporate that feature other than to have a new hotkey to toggle between tracks/liked and playlists/playlist tracks. This could be something to implement in the future, but for now it is not a priority.
+
+![Following](/media/following.png)
+
+The most difficult part of all of these different views was making everything work properly with queueing. A track can be queued from any panel, but playback should continue from the original context.
+
+I ended up storing a richer queue entry that includes its source and a snapshot of the list it came from, so manual items can play without reshaping the queue.
+
 </details>

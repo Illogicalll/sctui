@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use crate::auth::Token;
 
 pub use calls::albums::fetch_album_tracks;
+pub use calls::following::{fetch_following_liked_tracks, fetch_following_tracks};
 pub use calls::playlists::fetch_playlist_tracks;
 pub use models::{Album, Artist, Playlist, Track};
 

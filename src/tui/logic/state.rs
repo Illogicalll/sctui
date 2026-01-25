@@ -8,6 +8,26 @@ pub enum PlaybackSource {
     Likes,
     Playlist,
     Album,
+    FollowingPublished,
+    FollowingLikes,
+}
+
+#[derive(Clone)]
+pub struct QueuedTrack {
+    pub source: PlaybackSource,
+    pub index: usize,
+    pub track: Track,
+    pub tracks_snapshot: Option<Vec<Track>>,
+    pub playlist_uri: Option<String>,
+    pub album_uri: Option<String>,
+    pub following_user_urn: Option<String>,
+    pub user_added: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FollowingTracksFocus {
+    Published,
+    Likes,
 }
 
 pub struct AppState {
@@ -22,18 +42,26 @@ pub struct AppState {
     pub selected_info_row: usize,
     pub selected_playlist_track_row: usize,
     pub selected_album_track_row: usize,
+    pub selected_following_track_row: usize,
+    pub selected_following_like_row: usize,
     pub playlist_tracks_request_id: u64,
     pub album_tracks_request_id: u64,
+    pub following_tracks_request_id: u64,
+    pub following_likes_request_id: u64,
     pub playlist_tracks_task: Option<tokio::task::JoinHandle<()>>,
     pub album_tracks_task: Option<tokio::task::JoinHandle<()>>,
+    pub following_tracks_task: Option<tokio::task::JoinHandle<()>>,
+    pub following_likes_task: Option<tokio::task::JoinHandle<()>>,
     pub progress: u64,
     pub current_playing_index: Option<usize>,
     pub playback_source: PlaybackSource,
     pub shuffle_enabled: bool,
     pub repeat_enabled: bool,
-    pub playback_history: Vec<usize>,
-    pub manual_queue: VecDeque<usize>,
+    pub playback_history: Vec<QueuedTrack>,
+    pub manual_queue: VecDeque<QueuedTrack>,
     pub auto_queue: VecDeque<usize>,
+    pub override_playing: Option<QueuedTrack>,
+    pub following_tracks_focus: FollowingTracksFocus,
     pub queue_visible: bool,
     pub help_visible: bool,
     pub quit_confirm_visible: bool,
@@ -61,6 +89,12 @@ impl AppState {
             selected_album_track_row: 0,
             album_tracks_request_id: 0,
             album_tracks_task: None,
+            selected_following_track_row: 0,
+            selected_following_like_row: 0,
+            following_tracks_request_id: 0,
+            following_likes_request_id: 0,
+            following_tracks_task: None,
+            following_likes_task: None,
             progress: 0,
             current_playing_index: None,
             playback_source: PlaybackSource::Likes,
@@ -69,6 +103,8 @@ impl AppState {
             playback_history: Vec::new(),
             manual_queue: VecDeque::new(),
             auto_queue: VecDeque::new(),
+            override_playing: None,
+            following_tracks_focus: FollowingTracksFocus::Published,
             queue_visible: false,
             help_visible: false,
             quit_confirm_visible: false,
@@ -91,9 +127,16 @@ pub struct AppData {
     pub album_tracks: Vec<Track>,
     pub album_tracks_state: TableState,
     pub album_tracks_uri: Option<String>,
+    pub following_tracks: Vec<Track>,
+    pub following_tracks_state: TableState,
+    pub following_tracks_user_urn: Option<String>,
+    pub following_likes_tracks: Vec<Track>,
+    pub following_likes_state: TableState,
+    pub following_likes_user_urn: Option<String>,
     pub playback_tracks: Vec<Track>,
     pub playback_playlist_uri: Option<String>,
     pub playback_album_uri: Option<String>,
+    pub playback_following_user_urn: Option<String>,
     pub albums: Vec<Album>,
     pub albums_state: TableState,
     pub following: Vec<Artist>,
@@ -122,6 +165,14 @@ impl AppData {
         let mut albums_state = TableState::default();
         albums_state.select(Some(selected_row));
 
+        let following_tracks: Vec<Track> = Vec::new();
+        let mut following_tracks_state = TableState::default();
+        following_tracks_state.select(Some(0));
+
+        let following_likes_tracks: Vec<Track> = Vec::new();
+        let mut following_likes_state = TableState::default();
+        following_likes_state.select(Some(0));
+
         let following: Vec<Artist> = api.get_following()?.into_iter().collect();
         let mut following_state = TableState::default();
         following_state.select(Some(selected_row));
@@ -137,9 +188,16 @@ impl AppData {
             album_tracks,
             album_tracks_state,
             album_tracks_uri: None,
+            following_tracks,
+            following_tracks_state,
+            following_tracks_user_urn: None,
+            following_likes_tracks,
+            following_likes_state,
+            following_likes_user_urn: None,
             playback_tracks: Vec::new(),
             playback_playlist_uri: None,
             playback_album_uri: None,
+            playback_following_user_urn: None,
             albums,
             albums_state,
             following,
@@ -153,10 +211,14 @@ impl AppData {
         rx_playlists: &Receiver<Vec<Playlist>>,
         rx_playlist_tracks: &Receiver<(u64, Vec<Track>)>,
         rx_album_tracks: &Receiver<(u64, Vec<Track>)>,
+        rx_following_tracks: &Receiver<(u64, Vec<Track>)>,
+        rx_following_likes: &Receiver<(u64, Vec<Track>)>,
         rx_albums: &Receiver<Vec<Album>>,
         rx_following: &Receiver<Vec<Artist>>,
         playlist_tracks_request_id: u64,
         album_tracks_request_id: u64,
+        following_tracks_request_id: u64,
+        following_likes_request_id: u64,
     ) {
         while let Ok(new_likes) = rx_likes.try_recv() {
             self.likes.extend(new_likes);
@@ -174,6 +236,18 @@ impl AppData {
             if request_id == album_tracks_request_id {
                 self.album_tracks = new_tracks;
                 self.album_tracks_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, new_tracks)) = rx_following_tracks.try_recv() {
+            if request_id == following_tracks_request_id {
+                self.following_tracks = new_tracks;
+                self.following_tracks_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, new_tracks)) = rx_following_likes.try_recv() {
+            if request_id == following_likes_request_id {
+                self.following_likes_tracks = new_tracks;
+                self.following_likes_state.select(Some(0));
             }
         }
         while let Ok(new_albums) = rx_albums.try_recv() {
