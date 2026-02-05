@@ -6,6 +6,99 @@ use crate::api::{Album, Artist, Playlist, Track};
 use crate::player::Player;
 
 use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
+
+fn fuzzy_score_subsequence(query: &str, candidate: &str) -> Option<i64> {
+    if query.is_empty() || candidate.is_empty() {
+        return None;
+    }
+
+    let q_chars: Vec<char> = query.chars().collect();
+    let c_chars: Vec<char> = candidate.chars().collect();
+
+    if q_chars.len() > c_chars.len() {
+        return None;
+    }
+
+    let mut positions: Vec<usize> = Vec::with_capacity(q_chars.len());
+    let mut qi = 0usize;
+    for (ci, &cc) in c_chars.iter().enumerate() {
+        if cc == q_chars[qi] {
+            positions.push(ci);
+            qi += 1;
+            if qi == q_chars.len() {
+                break;
+            }
+        }
+    }
+
+    if qi != q_chars.len() {
+        return None;
+    }
+
+    let mut score: i64 = 0;
+    let mut prev_pos: Option<usize> = None;
+    for &pos in &positions {
+        score += 10;
+
+        if pos == 0 {
+            score += 15;
+        } else if !c_chars[pos - 1].is_alphanumeric() {
+            score += 10;
+        }
+
+        if let Some(prev) = prev_pos {
+            if pos == prev + 1 {
+                score += 8;
+            } else {
+                score -= (pos - prev - 1) as i64;
+            }
+        }
+        prev_pos = Some(pos);
+    }
+
+    score -= positions[0] as i64;
+
+    if candidate.starts_with(query) {
+        score += 50;
+    } else if candidate.contains(query) {
+        score += 30;
+    }
+
+    score -= (c_chars.len() as i64) / 10;
+
+    Some(score)
+}
+
+fn fuzzy_score_track_tokens(tokens: &[&str], title: &str, artists: &str) -> Option<i64> {
+    let title_lc = title.to_lowercase();
+    let artists_lc = artists.to_lowercase();
+
+    let mut total: i64 = 0;
+    for token in tokens {
+        let title_score = fuzzy_score_subsequence(token, &title_lc).map(|s| s + 25);
+        let artist_score = fuzzy_score_subsequence(token, &artists_lc);
+
+        let best = match (title_score, artist_score) {
+            (Some(a), Some(b)) => a.max(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => return None,
+        };
+        total += best;
+    }
+
+    Some(total)
+}
+
+fn fuzzy_score_single_field_tokens(tokens: &[&str], field: &str) -> Option<i64> {
+    let field_lc = field.to_lowercase();
+    let mut total: i64 = 0;
+    for token in tokens {
+        total += fuzzy_score_subsequence(token, &field_lc)?;
+    }
+    Some(total)
+}
+
 pub fn build_search_matches(
     selected_subtab: usize,
     query: &str,
@@ -19,37 +112,60 @@ pub fn build_search_matches(
         return Vec::new();
     }
 
+    let tokens: Vec<&str> = q.split_whitespace().filter(|t| !t.is_empty()).collect();
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+
     match selected_subtab {
-        0 => likes
-            .iter()
-            .enumerate()
-            .filter(|(_, track)| {
-                track.title.to_lowercase().contains(&q)
-                    || track.artists.to_lowercase().contains(&q)
-            })
-            .map(|(i, _)| i)
-            .collect(),
-        1 => playlists
-            .iter()
-            .enumerate()
-            .filter(|(_, playlist)| playlist.title.to_lowercase().contains(&q))
-            .map(|(i, _)| i)
-            .collect(),
-        2 => albums
-            .iter()
-            .enumerate()
-            .filter(|(_, album)| {
-                album.title.to_lowercase().contains(&q)
-                    || album.artists.to_lowercase().contains(&q)
-            })
-            .map(|(i, _)| i)
-            .collect(),
-        3 => following
-            .iter()
-            .enumerate()
-            .filter(|(_, artist)| artist.name.to_lowercase().contains(&q))
-            .map(|(i, _)| i)
-            .collect(),
+        0 => {
+            let mut scored: Vec<(i64, usize)> = likes
+                .iter()
+                .enumerate()
+                .filter_map(|(i, track)| {
+                    fuzzy_score_track_tokens(&tokens, &track.title, &track.artists)
+                        .map(|s| (s, i))
+                })
+                .collect();
+            scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            scored.into_iter().map(|(_, i)| i).collect()
+        }
+        1 => {
+            let mut scored: Vec<(i64, usize)> = playlists
+                .iter()
+                .enumerate()
+                .filter_map(|(i, playlist)| {
+                    fuzzy_score_single_field_tokens(&tokens, &playlist.title)
+                        .map(|s| (s, i))
+                })
+                .collect();
+            scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            scored.into_iter().map(|(_, i)| i).collect()
+        }
+        2 => {
+            let mut scored: Vec<(i64, usize)> = albums
+                .iter()
+                .enumerate()
+                .filter_map(|(i, album)| {
+                    fuzzy_score_track_tokens(&tokens, &album.title, &album.artists)
+                        .map(|s| (s, i))
+                })
+                .collect();
+            scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            scored.into_iter().map(|(_, i)| i).collect()
+        }
+        3 => {
+            let mut scored: Vec<(i64, usize)> = following
+                .iter()
+                .enumerate()
+                .filter_map(|(i, artist)| {
+                    fuzzy_score_single_field_tokens(&tokens, &artist.name)
+                        .map(|s| (s, i))
+                })
+                .collect();
+            scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            scored.into_iter().map(|(_, i)| i).collect()
+        }
         _ => Vec::new(),
     }
 }

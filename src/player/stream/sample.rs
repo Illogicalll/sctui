@@ -3,7 +3,7 @@ use rodio::Source;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-pub(crate) const WAVE_BUFFER_CAP: usize = 2048;
+pub(crate) const WAVE_BUFFER_CAP: usize = 8192;
 
 pub(crate) struct TapSource<S> {
     inner: S,

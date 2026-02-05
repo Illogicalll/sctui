@@ -4,7 +4,7 @@ use super::InputOutcome;
 use crate::api::Track;
 use crate::player::Player;
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource};
-use crate::tui::logic::utils::build_queue;
+use crate::tui::logic::utils::{build_queue, build_search_matches};
 
 pub(crate) fn handle_tab_switch(state: &mut AppState) -> InputOutcome {
     state.selected_tab = (state.selected_tab + 1) % 3;
@@ -45,6 +45,31 @@ pub(crate) fn handle_right_key(
             data.albums_state.select(Some(state.selected_row));
         } else {
             state.selected_row = 0;
+        }
+
+        if state.search_popup_visible && !state.search_query.trim().is_empty() {
+            state.search_matches = build_search_matches(
+                state.selected_subtab,
+                &state.search_query,
+                &data.likes,
+                &data.playlists,
+                &data.albums,
+                &data.following,
+            );
+            state.selected_row = 0;
+            match state.selected_subtab {
+                0 => data.likes_state.select(Some(0)),
+                1 => {
+                    state.selected_playlist_row = 0;
+                    data.playlists_state.select(Some(0));
+                }
+                2 => {
+                    state.selected_album_row = 0;
+                    data.albums_state.select(Some(0));
+                }
+                3 => data.following_state.select(Some(0)),
+                _ => {}
+            }
         }
     } else if state.selected_tab == 1 {
         state.selected_searchfilter = (state.selected_searchfilter + 1) % 4;
@@ -93,6 +118,31 @@ pub(crate) fn handle_left_key(
             data.albums_state.select(Some(state.selected_row));
         } else {
             state.selected_row = 0;
+        }
+
+        if state.search_popup_visible && !state.search_query.trim().is_empty() {
+            state.search_matches = build_search_matches(
+                state.selected_subtab,
+                &state.search_query,
+                &data.likes,
+                &data.playlists,
+                &data.albums,
+                &data.following,
+            );
+            state.selected_row = 0;
+            match state.selected_subtab {
+                0 => data.likes_state.select(Some(0)),
+                1 => {
+                    state.selected_playlist_row = 0;
+                    data.playlists_state.select(Some(0));
+                }
+                2 => {
+                    state.selected_album_row = 0;
+                    data.albums_state.select(Some(0));
+                }
+                3 => data.following_state.select(Some(0)),
+                _ => {}
+            }
         }
     } else if state.selected_tab == 1 {
         state.selected_searchfilter = if state.selected_searchfilter == 0 {

@@ -17,55 +17,42 @@ pub fn is_filter_active(state: &AppState) -> bool {
 
 pub fn build_filtered_views(state: &AppState, data: &AppData) -> FilteredViews {
     let filter_active = is_filter_active(state);
-    let query = state.search_query.trim().to_lowercase();
 
     let likes = if filter_active && state.selected_subtab == 0 {
-        data.likes
+        state
+            .search_matches
             .iter()
-            .filter(|track| {
-                !query.is_empty()
-                    && (track.title.to_lowercase().contains(&query)
-                        || track.artists.to_lowercase().contains(&query))
-            })
-            .cloned()
+            .filter_map(|&i| data.likes.get(i).cloned())
             .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
 
     let playlists = if filter_active && state.selected_subtab == 1 {
-        data.playlists
+        state
+            .search_matches
             .iter()
-            .filter(|playlist| {
-                !query.is_empty() && playlist.title.to_lowercase().contains(&query)
-            })
-            .cloned()
+            .filter_map(|&i| data.playlists.get(i).cloned())
             .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
 
     let albums = if filter_active && state.selected_subtab == 2 {
-        data.albums
+        state
+            .search_matches
             .iter()
-            .filter(|album| {
-                !query.is_empty()
-                    && (album.title.to_lowercase().contains(&query)
-                        || album.artists.to_lowercase().contains(&query))
-            })
-            .cloned()
+            .filter_map(|&i| data.albums.get(i).cloned())
             .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
 
     let following = if filter_active && state.selected_subtab == 3 {
-        data.following
+        state
+            .search_matches
             .iter()
-            .filter(|artist| {
-                !query.is_empty() && artist.name.to_lowercase().contains(&query)
-            })
-            .cloned()
+            .filter_map(|&i| data.following.get(i).cloned())
             .collect::<Vec<_>>()
     } else {
         Vec::new()

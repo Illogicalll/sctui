@@ -24,10 +24,6 @@ pub fn handle_key_event(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
-    if state.visualizer_mode && key.code == KeyCode::Tab {
-        return InputOutcome::Continue;
-    }
-
     if state.quit_confirm_visible {
         return quit::handle_quit_confirm(key, state);
     }
@@ -36,6 +32,11 @@ pub fn handle_key_event(
         if let Some(outcome) = search::handle_search_input(key, state, data) {
             return outcome;
         }
+    }
+
+    if state.visualizer_mode && key.code == KeyCode::Tab {
+        state.visualizer_view = state.visualizer_view.next();
+        return InputOutcome::Continue;
     }
 
     if player.is_seeking() {

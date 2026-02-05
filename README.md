@@ -24,6 +24,10 @@ a soundcloud client for the terminal
 
 <p align="center">🚧 Feature Coming Soon 🚧</p>
 
+### 🔊 Gapless Playback
+
+<p align="center">Enjoy seamless transitions in your favourite albums without the buffering present on SoundCloud Web</p>
+
 ### 👁️ Audio Visualiser
 
 <p align="center">View the waveforms of your favourite music in an oscilloscope-style visualisation mode</p>

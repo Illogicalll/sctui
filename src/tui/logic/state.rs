@@ -15,6 +15,23 @@ pub enum PlaybackSource {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum VisualizerMode {
     Oscilloscope,
+    SpectrumBars,
+}
+
+impl VisualizerMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Oscilloscope => Self::SpectrumBars,
+            Self::SpectrumBars => Self::Oscilloscope,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Oscilloscope => "Oscilloscope",
+            Self::SpectrumBars => "Cava",
+        }
+    }
 }
 
 #[derive(Clone)]

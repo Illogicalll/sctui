@@ -14,7 +14,7 @@ pub fn render_help(frame: &mut Frame) {
 
     let mut rows: Vec<Row> = vec![
         Row::new(vec!["Esc", "Quit"]),
-        Row::new(vec!["Tab", "Cycle main tabs"]),
+        Row::new(vec!["Tab", "Cycle main tabs / Visualizer view (in visualizer mode)"]),
         Row::new(vec!["Left/Right", "Change sub-tab"]),
         Row::new(vec!["Up/Down", "Move selector"]),
         Row::new(vec!["Space", "Play/Pause"]),
