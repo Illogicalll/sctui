@@ -10,6 +10,7 @@ pub struct Track {
     pub artwork_url: String,
     pub stream_url: String,
     pub access: String,
+    pub track_urn: String,
 }
 
 impl Track {

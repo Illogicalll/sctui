@@ -787,6 +787,6 @@ let target_gain = (0.9 / rms.max(VOLUME_FLOOR)).min(MAX_GAIN);
 
 ![Visualiser](/media/visualiser.gif)
 
-I was a bit concerned about performance but so far in my testing it doesn't seem to have slowed the application down significantly/
+I was a bit concerned about performance but so far in my testing it doesn't seem to have slowed the application down significantly.
 
 </details>

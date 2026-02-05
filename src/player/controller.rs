@@ -108,6 +108,10 @@ impl Player {
         let _ = self.tx.send(PlayerCommand::Rewind);
     }
 
+    pub fn preload_next(&self, track: Track) {
+        let _ = self.tx.send(PlayerCommand::PreloadNext(track));
+    }
+
     pub fn is_playing(&self) -> bool {
         self.is_playing_flag.load(Ordering::SeqCst)
     }
@@ -140,6 +144,7 @@ impl Player {
                 artwork_url: "".to_string(),
                 stream_url: "".to_string(),
                 access: "playable".to_string(),
+                track_urn: "".to_string(),
             })
     }
 

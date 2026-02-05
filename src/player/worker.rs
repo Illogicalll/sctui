@@ -10,7 +10,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use super::commands::PlayerCommand;
-use super::stream::{play_from_position, setup_stream};
+use super::stream::{PlaybackEngine, open_output_stream};
 
 pub(crate) fn player_loop(
     rx: Receiver<PlayerCommand>,
@@ -23,12 +23,13 @@ pub(crate) fn player_loop(
     current_track: Arc<Mutex<Option<Track>>>,
     wave_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
-    let (rt, stream) = setup_stream();
+    let stream = open_output_stream();
+    let mut engine = PlaybackEngine::new(Arc::clone(&stream)).unwrap();
 
     for msg in rx {
         match msg {
             PlayerCommand::Play(track) => {
-                play_from_position(
+                engine.play_from_position(
                     &track,
                     0,
                     &token,
@@ -38,13 +39,11 @@ pub(crate) fn player_loop(
                     &last_start,
                     &current_track,
                     &wave_buffer,
-                    &stream,
-                    &rt,
                 );
             }
 
             PlayerCommand::PlayFromPosition(track, position_ms) => {
-                play_from_position(
+                engine.play_from_position(
                     &track,
                     position_ms,
                     &token,
@@ -54,9 +53,11 @@ pub(crate) fn player_loop(
                     &last_start,
                     &current_track,
                     &wave_buffer,
-                    &stream,
-                    &rt,
                 );
+            }
+
+            PlayerCommand::PreloadNext(track) => {
+                let _ = engine.preload_next_track(&track, &token);
             }
 
             PlayerCommand::Pause => {
@@ -131,7 +132,7 @@ pub(crate) fn player_loop(
                         *last_start.lock().unwrap() = None;
                     } else {
                         let new_position_ms = new_elapsed.as_millis() as u64;
-                        play_from_position(
+                        engine.play_from_position(
                             &track,
                             new_position_ms,
                             &token,
@@ -141,8 +142,6 @@ pub(crate) fn player_loop(
                             &last_start,
                             &current_track,
                             &wave_buffer,
-                            &stream,
-                            &rt,
                         );
                     }
                 }
@@ -178,7 +177,7 @@ pub(crate) fn player_loop(
                     drop(elapsed);
 
                     let new_position_ms = new_elapsed.as_millis() as u64;
-                    play_from_position(
+                    engine.play_from_position(
                         &track,
                         new_position_ms,
                         &token,
@@ -188,8 +187,6 @@ pub(crate) fn player_loop(
                         &last_start,
                         &current_track,
                         &wave_buffer,
-                        &stream,
-                        &rt,
                     );
                 }
                 is_seeking_flag.store(false, Ordering::SeqCst);

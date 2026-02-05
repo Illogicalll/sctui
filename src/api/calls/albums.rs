@@ -134,6 +134,7 @@ pub async fn fetch_album_tracks(
         let artwork_url = parse_str(&track, "artwork_url");
         let stream_url = parse_str(&track, "stream_url");
         let access = parse_str(&track, "access");
+        let track_urn = parse_str(&track, "urn");
 
         tracks.push(Track {
             title,
@@ -144,6 +145,7 @@ pub async fn fetch_album_tracks(
             artwork_url,
             stream_url,
             access,
+            track_urn,
         });
     }
 

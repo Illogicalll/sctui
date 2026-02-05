@@ -76,6 +76,8 @@ pub struct AppState {
     pub search_matches: Vec<usize>,
     pub visualizer_mode: bool,
     pub visualizer_view: VisualizerMode,
+    pub end_handled_track_urn: Option<String>,
+    pub preload_triggered_for_track_urn: Option<String>,
 }
 
 impl AppState {
@@ -121,6 +123,8 @@ impl AppState {
             search_matches: Vec::new(),
             visualizer_mode: false,
             visualizer_view: VisualizerMode::Oscilloscope,
+            end_handled_track_urn: None,
+            preload_triggered_for_track_urn: None,
         }
     }
 }

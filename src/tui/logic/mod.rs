@@ -526,16 +526,64 @@ fn start(
         if last_tick.elapsed() >= tick_rate {
             state.progress = player.elapsed();
 
-            if player.is_playing() {
+            let is_playing = player.is_playing();
+            if is_playing {
                 on_tick(&mut data_points, &mut window, &mut signal);
             }
 
             let current_track = player.current_track();
-            if let Some(current_idx) = state.current_playing_index {
-                if state.progress >= current_track.duration_ms.saturating_sub(50)
-                    && current_track.duration_ms > 0
-                {
-                    if state.repeat_enabled {
+            if is_playing && !current_track.track_urn.is_empty() {
+                let preload_threshold = (current_track.duration_ms as f64 * 0.8) as u64;
+                let should_preload = state.progress >= preload_threshold 
+                    && state.progress < current_track.duration_ms.saturating_sub(100)
+                    && state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str());
+                
+                if should_preload {
+                    if let Some(current_idx) = state.current_playing_index {
+                        let active_tracks = match state.playback_source {
+                            PlaybackSource::Likes => &data.likes,
+                            PlaybackSource::Playlist
+                            | PlaybackSource::Album
+                            | PlaybackSource::FollowingPublished
+                            | PlaybackSource::FollowingLikes => &data.playback_tracks,
+                        };
+
+                        let next_track = if state.repeat_enabled {
+                            active_tracks.get(current_idx).cloned()
+                        } else if let Some(queued) = state.manual_queue.front() {
+                            Some(queued.track.clone())
+                        } else if let Some(&next_idx) = state.auto_queue.front() {
+                            active_tracks.get(next_idx).cloned()
+                        } else {
+                            if state.auto_queue.is_empty() {
+                                state.auto_queue = build_queue(current_idx, active_tracks, state.shuffle_enabled);
+                            }
+                            state.auto_queue.front().and_then(|&idx| active_tracks.get(idx).cloned())
+                        };
+
+                        if let Some(track) = next_track {
+                            if track.track_urn != current_track.track_urn && track.is_playable() {
+                                player.preload_next(track);
+                                state.preload_triggered_for_track_urn = Some(current_track.track_urn.clone());
+                            }
+                        }
+                    }
+                }
+
+                if state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str()) {
+                    state.preload_triggered_for_track_urn = None;
+                }
+
+                let at_end = state.progress >= current_track.duration_ms.saturating_sub(50)
+                    && current_track.duration_ms > 0;
+
+                if !at_end {
+                    state.end_handled_track_urn = None;
+                } else if state.end_handled_track_urn.as_deref() != Some(current_track.track_urn.as_str()) {
+                    state.end_handled_track_urn = Some(current_track.track_urn.clone());
+
+                    if let Some(current_idx) = state.current_playing_index {
+                        if state.repeat_enabled {
                         let active_tracks = match state.playback_source {
                             PlaybackSource::Likes => &data.likes,
                             PlaybackSource::Playlist
@@ -545,6 +593,7 @@ fn start(
                         };
                         if let Some(track) = active_tracks.get(current_idx) {
                             player.play(track.clone());
+                            state.override_playing = None;
                             if state.playback_source == PlaybackSource::Likes
                                 && state.selected_tab == 0
                                 && state.selected_subtab == 0
@@ -586,8 +635,8 @@ fn start(
                                 data.following_likes_state.select(Some(current_idx));
                             }
                         }
-                    } else {
-                        if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
+                        } else {
+                            if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
                             let active_tracks = match state.playback_source {
                                 PlaybackSource::Likes => &data.likes,
                                 PlaybackSource::Playlist
@@ -595,76 +644,80 @@ fn start(
                                 | PlaybackSource::FollowingPublished
                                 | PlaybackSource::FollowingLikes => &data.playback_tracks,
                             };
-                            state.auto_queue =
-                                build_queue(current_idx, active_tracks, state.shuffle_enabled);
-                        }
-                        if let Some(queued) = state.manual_queue.pop_front() {
+                                state.auto_queue =
+                                    build_queue(current_idx, active_tracks, state.shuffle_enabled);
+                            }
+                            if let Some(queued) = state.manual_queue.pop_front() {
                             if let Some(current) = queued_from_current(&state, &data) {
                                 state.playback_history.push(current);
                             }
-                            play_queued_track(queued, &mut state, &mut data, &player, true);
-                        } else if let Some(next_idx) = state.auto_queue.pop_front() {
-                            let active_tracks = match state.playback_source {
+                                play_queued_track(queued, &mut state, &mut data, &player, true);
+                            } else if let Some(next_idx) = state.auto_queue.pop_front() {
+                                let active_tracks = match state.playback_source {
                                 PlaybackSource::Likes => &data.likes,
                                 PlaybackSource::Playlist
                                 | PlaybackSource::Album
                                 | PlaybackSource::FollowingPublished
                                 | PlaybackSource::FollowingLikes => &data.playback_tracks,
-                            };
-                            if let Some(track) = active_tracks.get(next_idx) {
-                                if let Some(current) = queued_from_current(&state, &data) {
-                                    state.playback_history.push(current);
-                                }
-                                player.play(track.clone());
-                                state.current_playing_index = Some(next_idx);
-                                if state.playback_source == PlaybackSource::Likes
+                                };
+                                if let Some(track) = active_tracks.get(next_idx) {
+                                    if let Some(current) = queued_from_current(&state, &data) {
+                                        state.playback_history.push(current);
+                                    }
+                                    player.play(track.clone());
+                                    state.override_playing = None;
+                                    state.current_playing_index = Some(next_idx);
+                                    if state.playback_source == PlaybackSource::Likes
                                     && state.selected_tab == 0
                                     && state.selected_subtab == 0
                                 {
-                                    state.selected_row = next_idx;
-                                    data.likes_state.select(Some(next_idx));
-                                } else if state.playback_source == PlaybackSource::Playlist
-                                    && state.selected_tab == 0
-                                    && state.selected_subtab == 1
-                                    && data.playback_playlist_uri.is_some()
-                                    && data.playback_playlist_uri == data.playlist_tracks_uri
-                                {
-                                    state.selected_playlist_track_row = next_idx;
-                                    data.playlist_tracks_state.select(Some(next_idx));
-                                } else if state.playback_source == PlaybackSource::Album
-                                    && state.selected_tab == 0
-                                    && state.selected_subtab == 2
-                                    && data.playback_album_uri.is_some()
-                                    && data.playback_album_uri == data.album_tracks_uri
-                                {
-                                    state.selected_album_track_row = next_idx;
-                                    data.album_tracks_state.select(Some(next_idx));
-                                } else if state.playback_source == PlaybackSource::FollowingPublished
-                                    && state.selected_tab == 0
-                                    && state.selected_subtab == 3
-                                    && data.playback_following_user_urn.is_some()
-                                    && data.playback_following_user_urn
-                                        == data.following_tracks_user_urn
-                                {
-                                    state.selected_following_track_row = next_idx;
-                                    data.following_tracks_state.select(Some(next_idx));
-                                } else if state.playback_source == PlaybackSource::FollowingLikes
-                                    && state.selected_tab == 0
-                                    && state.selected_subtab == 3
-                                    && data.playback_following_user_urn.is_some()
-                                    && data.playback_following_user_urn
-                                        == data.following_likes_user_urn
-                                {
-                                    state.selected_following_like_row = next_idx;
-                                    data.following_likes_state.select(Some(next_idx));
+                                        state.selected_row = next_idx;
+                                        data.likes_state.select(Some(next_idx));
+                                    } else if state.playback_source == PlaybackSource::Playlist
+                                        && state.selected_tab == 0
+                                        && state.selected_subtab == 1
+                                        && data.playback_playlist_uri.is_some()
+                                        && data.playback_playlist_uri == data.playlist_tracks_uri
+                                    {
+                                        state.selected_playlist_track_row = next_idx;
+                                        data.playlist_tracks_state.select(Some(next_idx));
+                                    } else if state.playback_source == PlaybackSource::Album
+                                        && state.selected_tab == 0
+                                        && state.selected_subtab == 2
+                                        && data.playback_album_uri.is_some()
+                                        && data.playback_album_uri == data.album_tracks_uri
+                                    {
+                                        state.selected_album_track_row = next_idx;
+                                        data.album_tracks_state.select(Some(next_idx));
+                                    } else if state.playback_source == PlaybackSource::FollowingPublished
+                                        && state.selected_tab == 0
+                                        && state.selected_subtab == 3
+                                        && data.playback_following_user_urn.is_some()
+                                        && data.playback_following_user_urn
+                                            == data.following_tracks_user_urn
+                                    {
+                                        state.selected_following_track_row = next_idx;
+                                        data.following_tracks_state.select(Some(next_idx));
+                                    } else if state.playback_source == PlaybackSource::FollowingLikes
+                                        && state.selected_tab == 0
+                                        && state.selected_subtab == 3
+                                        && data.playback_following_user_urn.is_some()
+                                        && data.playback_following_user_urn
+                                            == data.following_likes_user_urn
+                                    {
+                                        state.selected_following_like_row = next_idx;
+                                        data.following_likes_state.select(Some(next_idx));
+                                    }
                                 }
+                            } else {
+                                player.pause();
+                                state.current_playing_index = None;
                             }
-                        } else {
-                            player.pause();
-                            state.current_playing_index = None;
                         }
                     }
                 }
+            } else {
+                state.preload_triggered_for_track_urn = None;
             }
 
             let filter_active = is_filter_active(&state);
