@@ -138,50 +138,6 @@ fn handle_next_track(
                 player.play(track.clone());
                 state.override_playing = None;
                 state.current_playing_index = Some(next_idx);
-                if state.playback_source == PlaybackSource::Likes
-                    && state.selected_tab == 0
-                    && state.selected_subtab == 0
-                {
-                    state.selected_row = next_idx;
-                    data.likes_state.select(Some(state.selected_row));
-                } else if state.playback_source == PlaybackSource::Playlist
-                    && state.selected_tab == 0
-                    && state.selected_subtab == 1
-                    && data.playback_playlist_uri.is_some()
-                    && data.playback_playlist_uri == data.playlist_tracks_uri
-                {
-                    state.selected_playlist_track_row = next_idx;
-                    data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
-                } else if state.playback_source == PlaybackSource::Album
-                    && state.selected_tab == 0
-                    && state.selected_subtab == 2
-                    && data.playback_album_uri.is_some()
-                    && data.playback_album_uri == data.album_tracks_uri
-                {
-                    state.selected_album_track_row = next_idx;
-                    data.album_tracks_state.select(Some(state.selected_album_track_row));
-                } else if state.playback_source
-                    == PlaybackSource::FollowingPublished
-                    && state.selected_tab == 0
-                    && state.selected_subtab == 3
-                    && data.playback_following_user_urn.is_some()
-                    && data.playback_following_user_urn
-                        == data.following_tracks_user_urn
-                {
-                    state.selected_following_track_row = next_idx;
-                    state.following_tracks_focus = crate::tui::logic::state::FollowingTracksFocus::Published;
-                    data.following_tracks_state.select(Some(state.selected_following_track_row));
-                } else if state.playback_source == PlaybackSource::FollowingLikes
-                    && state.selected_tab == 0
-                    && state.selected_subtab == 3
-                    && data.playback_following_user_urn.is_some()
-                    && data.playback_following_user_urn
-                        == data.following_likes_user_urn
-                {
-                    state.selected_following_like_row = next_idx;
-                    state.following_tracks_focus = crate::tui::logic::state::FollowingTracksFocus::Likes;
-                    data.following_likes_state.select(Some(state.selected_following_like_row));
-                }
             }
         }
     }
