@@ -60,20 +60,36 @@ pub struct AppState {
     pub selected_album_row: usize,
     pub query: String,
     pub selected_searchfilter: usize,
+    pub search_needs_fetch: bool,
     pub info_pane_selected: bool,
     pub selected_info_row: usize,
     pub selected_playlist_track_row: usize,
     pub selected_album_track_row: usize,
     pub selected_following_track_row: usize,
     pub selected_following_like_row: usize,
+    pub search_selected_playlist_track_row: usize,
+    pub search_selected_album_track_row: usize,
+    pub search_selected_person_track_row: usize,
+    pub search_selected_person_like_row: usize,
+    pub search_people_tracks_focus: FollowingTracksFocus,
     pub playlist_tracks_request_id: u64,
     pub album_tracks_request_id: u64,
     pub following_tracks_request_id: u64,
     pub following_likes_request_id: u64,
+    pub search_results_request_id: u64,
+    pub search_playlist_tracks_request_id: u64,
+    pub search_album_tracks_request_id: u64,
+    pub search_people_tracks_request_id: u64,
+    pub search_people_likes_request_id: u64,
     pub playlist_tracks_task: Option<tokio::task::JoinHandle<()>>,
     pub album_tracks_task: Option<tokio::task::JoinHandle<()>>,
     pub following_tracks_task: Option<tokio::task::JoinHandle<()>>,
     pub following_likes_task: Option<tokio::task::JoinHandle<()>>,
+    pub search_results_task: Option<tokio::task::JoinHandle<()>>,
+    pub search_playlist_tracks_task: Option<tokio::task::JoinHandle<()>>,
+    pub search_album_tracks_task: Option<tokio::task::JoinHandle<()>>,
+    pub search_people_tracks_task: Option<tokio::task::JoinHandle<()>>,
+    pub search_people_likes_task: Option<tokio::task::JoinHandle<()>>,
     pub progress: u64,
     pub current_playing_index: Option<usize>,
     pub playback_source: PlaybackSource,
@@ -107,6 +123,7 @@ impl AppState {
             selected_album_row: 0,
             query: String::new(),
             selected_searchfilter: 0,
+            search_needs_fetch: false,
             info_pane_selected: false,
             selected_info_row: 0,
             selected_playlist_track_row: 0,
@@ -121,6 +138,21 @@ impl AppState {
             following_likes_request_id: 0,
             following_tracks_task: None,
             following_likes_task: None,
+            search_selected_playlist_track_row: 0,
+            search_selected_album_track_row: 0,
+            search_selected_person_track_row: 0,
+            search_selected_person_like_row: 0,
+            search_people_tracks_focus: FollowingTracksFocus::Published,
+            search_results_request_id: 0,
+            search_playlist_tracks_request_id: 0,
+            search_album_tracks_request_id: 0,
+            search_people_tracks_request_id: 0,
+            search_people_likes_request_id: 0,
+            search_results_task: None,
+            search_playlist_tracks_task: None,
+            search_album_tracks_task: None,
+            search_people_tracks_task: None,
+            search_people_likes_task: None,
             progress: 0,
             current_playing_index: None,
             playback_source: PlaybackSource::Likes,
@@ -171,6 +203,26 @@ pub struct AppData {
     pub albums_state: TableState,
     pub following: Vec<Artist>,
     pub following_state: TableState,
+    pub search_tracks: Vec<Track>,
+    pub search_tracks_state: TableState,
+    pub search_playlists: Vec<Playlist>,
+    pub search_playlists_state: TableState,
+    pub search_playlist_tracks: Vec<Track>,
+    pub search_playlist_tracks_state: TableState,
+    pub search_playlist_tracks_uri: Option<String>,
+    pub search_albums: Vec<Album>,
+    pub search_albums_state: TableState,
+    pub search_album_tracks: Vec<Track>,
+    pub search_album_tracks_state: TableState,
+    pub search_album_tracks_uri: Option<String>,
+    pub search_people: Vec<Artist>,
+    pub search_people_state: TableState,
+    pub search_people_tracks: Vec<Track>,
+    pub search_people_tracks_state: TableState,
+    pub search_people_tracks_user_urn: Option<String>,
+    pub search_people_likes_tracks: Vec<Track>,
+    pub search_people_likes_state: TableState,
+    pub search_people_likes_user_urn: Option<String>,
 }
 
 impl AppData {
@@ -207,6 +259,38 @@ impl AppData {
         let mut following_state = TableState::default();
         following_state.select(Some(selected_row));
 
+        let search_tracks: Vec<Track> = Vec::new();
+        let mut search_tracks_state = TableState::default();
+        search_tracks_state.select(Some(0));
+
+        let search_playlists: Vec<Playlist> = Vec::new();
+        let mut search_playlists_state = TableState::default();
+        search_playlists_state.select(Some(0));
+
+        let search_playlist_tracks: Vec<Track> = Vec::new();
+        let mut search_playlist_tracks_state = TableState::default();
+        search_playlist_tracks_state.select(Some(0));
+
+        let search_albums: Vec<Album> = Vec::new();
+        let mut search_albums_state = TableState::default();
+        search_albums_state.select(Some(0));
+
+        let search_album_tracks: Vec<Track> = Vec::new();
+        let mut search_album_tracks_state = TableState::default();
+        search_album_tracks_state.select(Some(0));
+
+        let search_people: Vec<Artist> = Vec::new();
+        let mut search_people_state = TableState::default();
+        search_people_state.select(Some(0));
+
+        let search_people_tracks: Vec<Track> = Vec::new();
+        let mut search_people_tracks_state = TableState::default();
+        search_people_tracks_state.select(Some(0));
+
+        let search_people_likes_tracks: Vec<Track> = Vec::new();
+        let mut search_people_likes_state = TableState::default();
+        search_people_likes_state.select(Some(0));
+
         Ok(Self {
             likes,
             likes_state,
@@ -232,6 +316,26 @@ impl AppData {
             albums_state,
             following,
             following_state,
+            search_tracks,
+            search_tracks_state,
+            search_playlists,
+            search_playlists_state,
+            search_playlist_tracks,
+            search_playlist_tracks_state,
+            search_playlist_tracks_uri: None,
+            search_albums,
+            search_albums_state,
+            search_album_tracks,
+            search_album_tracks_state,
+            search_album_tracks_uri: None,
+            search_people,
+            search_people_state,
+            search_people_tracks,
+            search_people_tracks_state,
+            search_people_tracks_user_urn: None,
+            search_people_likes_tracks,
+            search_people_likes_state,
+            search_people_likes_user_urn: None,
         })
     }
 

@@ -14,6 +14,14 @@ pub(crate) fn handle_add_to_queue(
             3 => add_following_to_queue(state, data),
             _ => {}
         }
+    } else if state.selected_tab == 1 {
+        match state.selected_searchfilter {
+            0 => add_search_tracks_to_queue(state, data),
+            1 => add_search_album_to_queue(state, data),
+            2 => add_search_playlist_to_queue(state, data),
+            3 => add_search_people_to_queue(state, data),
+            _ => {}
+        }
     }
 }
 
@@ -21,8 +29,8 @@ pub(crate) fn handle_add_next_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
+    let mut queued: Option<QueuedTrack> = None;
     if state.selected_tab == 0 {
-        let mut queued: Option<QueuedTrack> = None;
         match state.selected_subtab {
             0 => queued = get_likes_queued(state, data),
             1 => queued = get_playlist_queued(state, data),
@@ -30,11 +38,218 @@ pub(crate) fn handle_add_next_to_queue(
             3 => queued = get_following_queued(state, data),
             _ => {}
         }
-
-        if let Some(queued) = queued {
-            state.manual_queue.push_front(queued);
+    } else if state.selected_tab == 1 {
+        match state.selected_searchfilter {
+            0 => queued = get_search_tracks_queued(state, data),
+            1 => queued = get_search_album_queued(state, data),
+            2 => queued = get_search_playlist_queued(state, data),
+            3 => queued = get_search_people_queued(state, data),
+            _ => {}
         }
     }
+
+    if let Some(queued) = queued {
+        state.manual_queue.push_front(queued);
+    }
+}
+
+fn add_search_tracks_to_queue(state: &mut AppState, data: &mut AppData) {
+    if let Some(track) = data.search_tracks.get(state.selected_row) {
+        if track.is_playable() {
+            insert_manual_queue(
+                state,
+                QueuedTrack {
+                    source: PlaybackSource::Playlist,
+                    index: state.selected_row,
+                    track: track.clone(),
+                    tracks_snapshot: Some(data.search_tracks.clone()),
+                    playlist_uri: None,
+                    album_uri: None,
+                    following_user_urn: None,
+                    user_added: true,
+                },
+            );
+        }
+    }
+}
+
+fn add_search_playlist_to_queue(state: &mut AppState, data: &mut AppData) {
+    if let Some(track) = data
+        .search_playlist_tracks
+        .get(state.search_selected_playlist_track_row)
+    {
+        if track.is_playable() {
+            insert_manual_queue(
+                state,
+                QueuedTrack {
+                    source: PlaybackSource::Playlist,
+                    index: state.search_selected_playlist_track_row,
+                    track: track.clone(),
+                    tracks_snapshot: Some(data.search_playlist_tracks.clone()),
+                    playlist_uri: data.search_playlist_tracks_uri.clone(),
+                    album_uri: None,
+                    following_user_urn: None,
+                    user_added: true,
+                },
+            );
+        }
+    }
+}
+
+fn add_search_album_to_queue(state: &mut AppState, data: &mut AppData) {
+    if let Some(track) = data
+        .search_album_tracks
+        .get(state.search_selected_album_track_row)
+    {
+        if track.is_playable() {
+            insert_manual_queue(
+                state,
+                QueuedTrack {
+                    source: PlaybackSource::Album,
+                    index: state.search_selected_album_track_row,
+                    track: track.clone(),
+                    tracks_snapshot: Some(data.search_album_tracks.clone()),
+                    playlist_uri: None,
+                    album_uri: data.search_album_tracks_uri.clone(),
+                    following_user_urn: None,
+                    user_added: true,
+                },
+            );
+        }
+    }
+}
+
+fn add_search_people_to_queue(state: &mut AppState, data: &mut AppData) {
+    if state.search_people_tracks_focus == FollowingTracksFocus::Likes {
+        if let Some(track) = data
+            .search_people_likes_tracks
+            .get(state.search_selected_person_like_row)
+        {
+            if track.is_playable() {
+                insert_manual_queue(
+                    state,
+                    QueuedTrack {
+                        source: PlaybackSource::FollowingLikes,
+                        index: state.search_selected_person_like_row,
+                        track: track.clone(),
+                        tracks_snapshot: Some(data.search_people_likes_tracks.clone()),
+                        playlist_uri: None,
+                        album_uri: None,
+                        following_user_urn: data.search_people_likes_user_urn.clone(),
+                        user_added: true,
+                    },
+                );
+            }
+        }
+    } else if let Some(track) = data
+        .search_people_tracks
+        .get(state.search_selected_person_track_row)
+    {
+        if track.is_playable() {
+            insert_manual_queue(
+                state,
+                QueuedTrack {
+                    source: PlaybackSource::FollowingPublished,
+                    index: state.search_selected_person_track_row,
+                    track: track.clone(),
+                    tracks_snapshot: Some(data.search_people_tracks.clone()),
+                    playlist_uri: None,
+                    album_uri: None,
+                    following_user_urn: data.search_people_tracks_user_urn.clone(),
+                    user_added: true,
+                },
+            );
+        }
+    }
+}
+
+fn get_search_tracks_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+    let track = data.search_tracks.get(state.selected_row)?;
+    if !track.is_playable() {
+        return None;
+    }
+    Some(QueuedTrack {
+        source: PlaybackSource::Playlist,
+        index: state.selected_row,
+        track: track.clone(),
+        tracks_snapshot: Some(data.search_tracks.clone()),
+        playlist_uri: None,
+        album_uri: None,
+        following_user_urn: None,
+        user_added: true,
+    })
+}
+
+fn get_search_playlist_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+    let idx = state.search_selected_playlist_track_row;
+    let track = data.search_playlist_tracks.get(idx)?;
+    if !track.is_playable() {
+        return None;
+    }
+    Some(QueuedTrack {
+        source: PlaybackSource::Playlist,
+        index: idx,
+        track: track.clone(),
+        tracks_snapshot: Some(data.search_playlist_tracks.clone()),
+        playlist_uri: data.search_playlist_tracks_uri.clone(),
+        album_uri: None,
+        following_user_urn: None,
+        user_added: true,
+    })
+}
+
+fn get_search_album_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+    let idx = state.search_selected_album_track_row;
+    let track = data.search_album_tracks.get(idx)?;
+    if !track.is_playable() {
+        return None;
+    }
+    Some(QueuedTrack {
+        source: PlaybackSource::Album,
+        index: idx,
+        track: track.clone(),
+        tracks_snapshot: Some(data.search_album_tracks.clone()),
+        playlist_uri: None,
+        album_uri: data.search_album_tracks_uri.clone(),
+        following_user_urn: None,
+        user_added: true,
+    })
+}
+
+fn get_search_people_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+    if state.search_people_tracks_focus == FollowingTracksFocus::Likes {
+        let idx = state.search_selected_person_like_row;
+        let track = data.search_people_likes_tracks.get(idx)?;
+        if !track.is_playable() {
+            return None;
+        }
+        return Some(QueuedTrack {
+            source: PlaybackSource::FollowingLikes,
+            index: idx,
+            track: track.clone(),
+            tracks_snapshot: Some(data.search_people_likes_tracks.clone()),
+            playlist_uri: None,
+            album_uri: None,
+            following_user_urn: data.search_people_likes_user_urn.clone(),
+            user_added: true,
+        });
+    }
+
+    let idx = state.search_selected_person_track_row;
+    let track = data.search_people_tracks.get(idx)?;
+    if !track.is_playable() {
+        return None;
+    }
+    Some(QueuedTrack {
+        source: PlaybackSource::FollowingPublished,
+        index: idx,
+        track: track.clone(),
+        tracks_snapshot: Some(data.search_people_tracks.clone()),
+        playlist_uri: None,
+        album_uri: None,
+        following_user_urn: data.search_people_tracks_user_urn.clone(),
+        user_added: true,
+    })
 }
 
 fn add_likes_to_queue(state: &mut AppState, data: &mut AppData) {

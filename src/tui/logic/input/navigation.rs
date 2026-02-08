@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 use super::InputOutcome;
 use crate::api::Track;
 use crate::player::Player;
-use crate::tui::logic::state::{AppData, AppState, PlaybackSource};
+use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource};
 use crate::tui::logic::utils::{build_queue, build_search_matches};
 
 pub(crate) fn handle_tab_switch(state: &mut AppState) -> InputOutcome {
@@ -75,6 +75,16 @@ pub(crate) fn handle_right_key(
     } else if state.selected_tab == 1 {
         state.selected_searchfilter = (state.selected_searchfilter + 1) % 4;
         state.selected_row = 0;
+        state.search_selected_playlist_track_row = 0;
+        state.search_selected_album_track_row = 0;
+        state.search_selected_person_track_row = 0;
+        state.search_selected_person_like_row = 0;
+        state.search_people_tracks_focus = FollowingTracksFocus::Published;
+        state.search_needs_fetch = true;
+        data.search_tracks_state.select(Some(0));
+        data.search_albums_state.select(Some(0));
+        data.search_playlists_state.select(Some(0));
+        data.search_people_state.select(Some(0));
     } else if state.selected_tab == 2 {
         state.info_pane_selected = !state.info_pane_selected;
     }
@@ -153,6 +163,16 @@ pub(crate) fn handle_left_key(
             state.selected_searchfilter - 1
         };
         state.selected_row = 0;
+        state.search_selected_playlist_track_row = 0;
+        state.search_selected_album_track_row = 0;
+        state.search_selected_person_track_row = 0;
+        state.search_selected_person_like_row = 0;
+        state.search_people_tracks_focus = FollowingTracksFocus::Published;
+        state.search_needs_fetch = true;
+        data.search_tracks_state.select(Some(0));
+        data.search_albums_state.select(Some(0));
+        data.search_playlists_state.select(Some(0));
+        data.search_people_state.select(Some(0));
     } else if state.selected_tab == 2 {
         state.info_pane_selected = !state.info_pane_selected;
     }

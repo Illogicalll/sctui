@@ -29,6 +29,13 @@ pub(crate) fn handle_char(
 pub(crate) fn handle_backspace(state: &mut AppState) -> InputOutcome {
     if state.selected_tab == 1 {
         state.query.pop();
+        state.search_needs_fetch = true;
+        state.selected_row = 0;
+        state.search_selected_playlist_track_row = 0;
+        state.search_selected_album_track_row = 0;
+        state.search_selected_person_track_row = 0;
+        state.search_selected_person_like_row = 0;
+        state.search_people_tracks_focus = FollowingTracksFocus::Published;
     }
     InputOutcome::Continue
 }
@@ -119,6 +126,13 @@ fn handle_shift_char(
                     data.following_likes_state
                         .select(Some(state.selected_following_like_row));
                 }
+            } else if state.selected_tab == 1 && state.selected_searchfilter == 3 {
+                if state.search_selected_person_like_row + 1 < data.search_people_likes_tracks.len() {
+                    state.search_selected_person_like_row += 1;
+                    state.search_people_tracks_focus = FollowingTracksFocus::Likes;
+                    data.search_people_likes_state
+                        .select(Some(state.search_selected_person_like_row));
+                }
             }
         }
         'k' | 'K' => {
@@ -128,6 +142,13 @@ fn handle_shift_char(
                     state.following_tracks_focus = FollowingTracksFocus::Likes;
                     data.following_likes_state
                         .select(Some(state.selected_following_like_row));
+                }
+            } else if state.selected_tab == 1 && state.selected_searchfilter == 3 {
+                if state.search_selected_person_like_row > 0 {
+                    state.search_selected_person_like_row -= 1;
+                    state.search_people_tracks_focus = FollowingTracksFocus::Likes;
+                    data.search_people_likes_state
+                        .select(Some(state.search_selected_person_like_row));
                 }
             }
         }
@@ -149,5 +170,12 @@ fn handle_space(c: char, player: &Player) -> InputOutcome {
 
 fn handle_search_char(c: char, state: &mut AppState) -> InputOutcome {
     state.query.push(c);
+    state.search_needs_fetch = true;
+    state.selected_row = 0;
+    state.search_selected_playlist_track_row = 0;
+    state.search_selected_album_track_row = 0;
+    state.search_selected_person_track_row = 0;
+    state.search_selected_person_like_row = 0;
+    state.search_people_tracks_focus = FollowingTracksFocus::Published;
     InputOutcome::Continue
 }

@@ -6,7 +6,8 @@ mod utils;
 
 use crate::api::{
     API, fetch_album_tracks, fetch_following_liked_tracks, fetch_following_tracks,
-    fetch_playlist_tracks,
+    fetch_playlist_tracks, fetch_search_albums, fetch_search_people, fetch_search_playlists,
+    fetch_search_tracks,
 };
 use crate::player::Player;
 use ratatui::{
@@ -112,6 +113,40 @@ fn start(
         Receiver<(u64, Vec<crate::api::Track>)>,
     ) = mpsc::channel();
 
+    let (tx_search_tracks, rx_search_tracks): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
+    let (tx_search_albums, rx_search_albums): (
+        Sender<(u64, Vec<crate::api::Album>)>,
+        Receiver<(u64, Vec<crate::api::Album>)>,
+    ) = mpsc::channel();
+    let (tx_search_playlists, rx_search_playlists): (
+        Sender<(u64, Vec<crate::api::Playlist>)>,
+        Receiver<(u64, Vec<crate::api::Playlist>)>,
+    ) = mpsc::channel();
+    let (tx_search_people, rx_search_people): (
+        Sender<(u64, Vec<crate::api::Artist>)>,
+        Receiver<(u64, Vec<crate::api::Artist>)>,
+    ) = mpsc::channel();
+
+    let (tx_search_playlist_tracks, rx_search_playlist_tracks): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
+    let (tx_search_album_tracks, rx_search_album_tracks): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
+    let (tx_search_people_tracks, rx_search_people_tracks): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
+    let (tx_search_people_likes, rx_search_people_likes): (
+        Sender<(u64, Vec<crate::api::Track>)>,
+        Receiver<(u64, Vec<crate::api::Track>)>,
+    ) = mpsc::channel();
+
     spawn_fetch(Arc::clone(api), tx_playlists.clone(), |api| {
         api.get_playlists()
     });
@@ -155,6 +190,56 @@ fn start(
             state.following_tracks_request_id,
             state.following_likes_request_id,
         );
+
+        while let Ok((request_id, tracks)) = rx_search_tracks.try_recv() {
+            if request_id == state.search_results_request_id {
+                data.search_tracks = tracks;
+                data.search_tracks_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, albums)) = rx_search_albums.try_recv() {
+            if request_id == state.search_results_request_id {
+                data.search_albums = albums;
+                data.search_albums_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, playlists)) = rx_search_playlists.try_recv() {
+            if request_id == state.search_results_request_id {
+                data.search_playlists = playlists;
+                data.search_playlists_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, people)) = rx_search_people.try_recv() {
+            if request_id == state.search_results_request_id {
+                data.search_people = people;
+                data.search_people_state.select(Some(0));
+            }
+        }
+
+        while let Ok((request_id, tracks)) = rx_search_playlist_tracks.try_recv() {
+            if request_id == state.search_playlist_tracks_request_id {
+                data.search_playlist_tracks = tracks;
+                data.search_playlist_tracks_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, tracks)) = rx_search_album_tracks.try_recv() {
+            if request_id == state.search_album_tracks_request_id {
+                data.search_album_tracks = tracks;
+                data.search_album_tracks_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, tracks)) = rx_search_people_tracks.try_recv() {
+            if request_id == state.search_people_tracks_request_id {
+                data.search_people_tracks = tracks;
+                data.search_people_tracks_state.select(Some(0));
+            }
+        }
+        while let Ok((request_id, tracks)) = rx_search_people_likes.try_recv() {
+            if request_id == state.search_people_likes_request_id {
+                data.search_people_likes_tracks = tracks;
+                data.search_people_likes_state.select(Some(0));
+            }
+        }
 
         while let Ok(app_ev) = rx_main.try_recv() {
             match app_ev {
@@ -422,6 +507,323 @@ fn start(
                     .select(Some(state.selected_following_like_row));
             }
         }
+
+        if state.selected_tab == 1 && state.search_needs_fetch {
+            if let Some(handle) = state.search_results_task.take() {
+                handle.abort();
+            }
+            if let Some(handle) = state.search_playlist_tracks_task.take() {
+                handle.abort();
+            }
+            if let Some(handle) = state.search_album_tracks_task.take() {
+                handle.abort();
+            }
+            if let Some(handle) = state.search_people_tracks_task.take() {
+                handle.abort();
+            }
+            if let Some(handle) = state.search_people_likes_task.take() {
+                handle.abort();
+            }
+
+            state.search_results_request_id = state.search_results_request_id.wrapping_add(1);
+            state.search_playlist_tracks_request_id =
+                state.search_playlist_tracks_request_id.wrapping_add(1);
+            state.search_album_tracks_request_id =
+                state.search_album_tracks_request_id.wrapping_add(1);
+            state.search_people_tracks_request_id =
+                state.search_people_tracks_request_id.wrapping_add(1);
+            state.search_people_likes_request_id =
+                state.search_people_likes_request_id.wrapping_add(1);
+
+            let request_id = state.search_results_request_id;
+            let token = {
+                let api_guard = api.lock().unwrap();
+                api_guard.token_clone()
+            };
+            let query = state.query.clone();
+            let filter = state.selected_searchfilter;
+
+            state.selected_row = 0;
+            state.search_selected_playlist_track_row = 0;
+            state.search_selected_album_track_row = 0;
+            state.search_selected_person_track_row = 0;
+            state.search_selected_person_like_row = 0;
+            state.search_people_tracks_focus = FollowingTracksFocus::Published;
+
+            data.search_tracks.clear();
+            data.search_tracks_state.select(Some(0));
+            data.search_albums.clear();
+            data.search_albums_state.select(Some(0));
+            data.search_playlists.clear();
+            data.search_playlists_state.select(Some(0));
+            data.search_people.clear();
+            data.search_people_state.select(Some(0));
+
+            data.search_playlist_tracks.clear();
+            data.search_playlist_tracks_state.select(Some(0));
+            data.search_playlist_tracks_uri = None;
+
+            data.search_album_tracks.clear();
+            data.search_album_tracks_state.select(Some(0));
+            data.search_album_tracks_uri = None;
+
+            data.search_people_tracks.clear();
+            data.search_people_tracks_state.select(Some(0));
+            data.search_people_tracks_user_urn = None;
+
+            data.search_people_likes_tracks.clear();
+            data.search_people_likes_state.select(Some(0));
+            data.search_people_likes_user_urn = None;
+
+            state.search_needs_fetch = false;
+
+            if !query.trim().is_empty() {
+                let tx_tracks = tx_search_tracks.clone();
+                let tx_albums = tx_search_albums.clone();
+                let tx_playlists = tx_search_playlists.clone();
+                let tx_people = tx_search_people.clone();
+                state.search_results_task = Some(async_rt.spawn(async move {
+                    match filter {
+                        0 => {
+                            if let Ok(tracks) = fetch_search_tracks(token, query).await {
+                                let _ = tx_tracks.send((request_id, tracks));
+                            }
+                        }
+                        1 => {
+                            if let Ok(albums) = fetch_search_albums(token, query).await {
+                                let _ = tx_albums.send((request_id, albums));
+                            }
+                        }
+                        2 => {
+                            if let Ok(playlists) = fetch_search_playlists(token, query).await {
+                                let _ = tx_playlists.send((request_id, playlists));
+                            }
+                        }
+                        3 => {
+                            if let Ok(people) = fetch_search_people(token, query).await {
+                                let _ = tx_people.send((request_id, people));
+                            }
+                        }
+                        _ => {}
+                    }
+                }));
+            }
+        }
+
+        if state.selected_tab == 1 {
+            match state.selected_searchfilter {
+                0 => {
+                    if !data.search_tracks.is_empty() && state.selected_row >= data.search_tracks.len() {
+                        state.selected_row = data.search_tracks.len() - 1;
+                    }
+                    data.search_tracks_state.select(Some(state.selected_row));
+                }
+                1 => {
+                    if !data.search_albums.is_empty() && state.selected_row >= data.search_albums.len() {
+                        state.selected_row = data.search_albums.len() - 1;
+                        data.search_albums_state.select(Some(state.selected_row));
+                    }
+                }
+                2 => {
+                    if !data.search_playlists.is_empty()
+                        && state.selected_row >= data.search_playlists.len()
+                    {
+                        state.selected_row = data.search_playlists.len() - 1;
+                        data.search_playlists_state.select(Some(state.selected_row));
+                    }
+                }
+                3 => {
+                    if !data.search_people.is_empty() && state.selected_row >= data.search_people.len() {
+                        state.selected_row = data.search_people.len() - 1;
+                        data.search_people_state.select(Some(state.selected_row));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if state.selected_tab == 1 && state.selected_searchfilter == 2 {
+            if let Some(selected_playlist) = data.search_playlists.get(state.selected_row) {
+                let tracks_uri = selected_playlist.tracks_uri.clone();
+                let needs_fetch = data
+                    .search_playlist_tracks_uri
+                    .as_deref()
+                    .map(|uri| uri != tracks_uri.as_str())
+                    .unwrap_or(true);
+                if needs_fetch {
+                    if let Some(handle) = state.search_playlist_tracks_task.take() {
+                        handle.abort();
+                    }
+                    state.search_playlist_tracks_request_id =
+                        state.search_playlist_tracks_request_id.wrapping_add(1);
+                    let request_id = state.search_playlist_tracks_request_id;
+                    let token = {
+                        let api_guard = api.lock().unwrap();
+                        api_guard.token_clone()
+                    };
+                    data.search_playlist_tracks_uri = Some(tracks_uri.clone());
+                    data.search_playlist_tracks.clear();
+                    data.search_playlist_tracks_state.select(Some(0));
+                    state.search_selected_playlist_track_row = 0;
+                    let tx = tx_search_playlist_tracks.clone();
+                    state.search_playlist_tracks_task = Some(async_rt.spawn(async move {
+                        if let Ok(tracks) = fetch_playlist_tracks(token, tracks_uri).await {
+                            let _ = tx.send((request_id, tracks));
+                        }
+                    }));
+                }
+            } else {
+                data.search_playlist_tracks.clear();
+                data.search_playlist_tracks_state.select(Some(0));
+                data.search_playlist_tracks_uri = None;
+                state.search_selected_playlist_track_row = 0;
+            }
+
+            if !data.search_playlist_tracks.is_empty()
+                && state.search_selected_playlist_track_row >= data.search_playlist_tracks.len()
+            {
+                state.search_selected_playlist_track_row = data.search_playlist_tracks.len() - 1;
+                data.search_playlist_tracks_state
+                    .select(Some(state.search_selected_playlist_track_row));
+            }
+        }
+
+        if state.selected_tab == 1 && state.selected_searchfilter == 1 {
+            if let Some(selected_album) = data.search_albums.get(state.selected_row) {
+                let tracks_uri = selected_album.tracks_uri.clone();
+                let needs_fetch = data
+                    .search_album_tracks_uri
+                    .as_deref()
+                    .map(|uri| uri != tracks_uri.as_str())
+                    .unwrap_or(true);
+                if needs_fetch {
+                    if let Some(handle) = state.search_album_tracks_task.take() {
+                        handle.abort();
+                    }
+                    state.search_album_tracks_request_id =
+                        state.search_album_tracks_request_id.wrapping_add(1);
+                    let request_id = state.search_album_tracks_request_id;
+                    let token = {
+                        let api_guard = api.lock().unwrap();
+                        api_guard.token_clone()
+                    };
+                    data.search_album_tracks_uri = Some(tracks_uri.clone());
+                    data.search_album_tracks.clear();
+                    data.search_album_tracks_state.select(Some(0));
+                    state.search_selected_album_track_row = 0;
+                    let tx = tx_search_album_tracks.clone();
+                    state.search_album_tracks_task = Some(async_rt.spawn(async move {
+                        if let Ok(tracks) = fetch_album_tracks(token, tracks_uri).await {
+                            let _ = tx.send((request_id, tracks));
+                        }
+                    }));
+                }
+            } else {
+                data.search_album_tracks.clear();
+                data.search_album_tracks_state.select(Some(0));
+                data.search_album_tracks_uri = None;
+                state.search_selected_album_track_row = 0;
+            }
+
+            if !data.search_album_tracks.is_empty()
+                && state.search_selected_album_track_row >= data.search_album_tracks.len()
+            {
+                state.search_selected_album_track_row = data.search_album_tracks.len() - 1;
+                data.search_album_tracks_state
+                    .select(Some(state.search_selected_album_track_row));
+            }
+        }
+
+        if state.selected_tab == 1 && state.selected_searchfilter == 3 {
+            if let Some(selected_artist) = data.search_people.get(state.selected_row) {
+                let user_urn = selected_artist.urn.clone();
+                let user_urn_for_tracks = user_urn.clone();
+                let user_urn_for_likes = user_urn.clone();
+
+                let needs_tracks = data
+                    .search_people_tracks_user_urn
+                    .as_deref()
+                    .map(|urn| urn != user_urn.as_str())
+                    .unwrap_or(true);
+                if needs_tracks {
+                    if let Some(handle) = state.search_people_tracks_task.take() {
+                        handle.abort();
+                    }
+                    state.search_people_tracks_request_id =
+                        state.search_people_tracks_request_id.wrapping_add(1);
+                    let request_id = state.search_people_tracks_request_id;
+                    let token = {
+                        let api_guard = api.lock().unwrap();
+                        api_guard.token_clone()
+                    };
+                    data.search_people_tracks_user_urn = Some(user_urn.clone());
+                    data.search_people_tracks.clear();
+                    data.search_people_tracks_state.select(Some(0));
+                    state.search_selected_person_track_row = 0;
+                    state.search_people_tracks_focus = FollowingTracksFocus::Published;
+                    let tx = tx_search_people_tracks.clone();
+                    state.search_people_tracks_task = Some(async_rt.spawn(async move {
+                        if let Ok(tracks) = fetch_following_tracks(token, user_urn_for_tracks).await {
+                            let _ = tx.send((request_id, tracks));
+                        }
+                    }));
+                }
+
+                let needs_likes = data
+                    .search_people_likes_user_urn
+                    .as_deref()
+                    .map(|urn| urn != user_urn.as_str())
+                    .unwrap_or(true);
+                if needs_likes {
+                    if let Some(handle) = state.search_people_likes_task.take() {
+                        handle.abort();
+                    }
+                    state.search_people_likes_request_id =
+                        state.search_people_likes_request_id.wrapping_add(1);
+                    let request_id = state.search_people_likes_request_id;
+                    let token = {
+                        let api_guard = api.lock().unwrap();
+                        api_guard.token_clone()
+                    };
+                    data.search_people_likes_user_urn = Some(user_urn.clone());
+                    data.search_people_likes_tracks.clear();
+                    data.search_people_likes_state.select(Some(0));
+                    state.search_selected_person_like_row = 0;
+                    let tx = tx_search_people_likes.clone();
+                    state.search_people_likes_task = Some(async_rt.spawn(async move {
+                        if let Ok(tracks) = fetch_following_liked_tracks(token, user_urn_for_likes).await {
+                            let _ = tx.send((request_id, tracks));
+                        }
+                    }));
+                }
+            } else {
+                data.search_people_tracks.clear();
+                data.search_people_tracks_state.select(Some(0));
+                data.search_people_tracks_user_urn = None;
+                data.search_people_likes_tracks.clear();
+                data.search_people_likes_state.select(Some(0));
+                data.search_people_likes_user_urn = None;
+                state.search_selected_person_track_row = 0;
+                state.search_selected_person_like_row = 0;
+                state.search_people_tracks_focus = FollowingTracksFocus::Published;
+            }
+
+            if !data.search_people_tracks.is_empty()
+                && state.search_selected_person_track_row >= data.search_people_tracks.len()
+            {
+                state.search_selected_person_track_row = data.search_people_tracks.len() - 1;
+                data.search_people_tracks_state
+                    .select(Some(state.search_selected_person_track_row));
+            }
+            if !data.search_people_likes_tracks.is_empty()
+                && state.search_selected_person_like_row >= data.search_people_likes_tracks.len()
+            {
+                state.search_selected_person_like_row = data.search_people_likes_tracks.len() - 1;
+                data.search_people_likes_state
+                    .select(Some(state.search_selected_person_like_row));
+            }
+        }
+
         let queue_tracks = match state.playback_source {
             PlaybackSource::Likes => &data.likes,
             PlaybackSource::Playlist
@@ -462,6 +864,22 @@ fn start(
                 &mut data.following_tracks_state,
                 &data.following_likes_tracks,
                 &mut data.following_likes_state,
+                &data.search_tracks,
+                &mut data.search_tracks_state,
+                &data.search_playlists,
+                &mut data.search_playlists_state,
+                &data.search_playlist_tracks,
+                &mut data.search_playlist_tracks_state,
+                &data.search_albums,
+                &mut data.search_albums_state,
+                &data.search_album_tracks,
+                &mut data.search_album_tracks_state,
+                &data.search_people,
+                &mut data.search_people_state,
+                &data.search_people_tracks,
+                &mut data.search_people_tracks_state,
+                &data.search_people_likes_tracks,
+                &mut data.search_people_likes_state,
                 state.selected_tab,
                 &TAB_TITLES,
                 state.selected_subtab,
@@ -475,6 +893,11 @@ fn start(
                 &state.query,
                 &SEARCHFILTERS,
                 state.selected_searchfilter,
+                state.search_selected_playlist_track_row,
+                state.search_selected_album_track_row,
+                state.search_selected_person_track_row,
+                state.search_selected_person_like_row,
+                state.search_people_tracks_focus == FollowingTracksFocus::Likes,
                 state.info_pane_selected,
                 state.selected_info_row,
                 &mut data_points,
@@ -737,6 +1160,22 @@ fn start(
                     &mut data.following_tracks_state,
                     &data.following_likes_tracks,
                     &mut data.following_likes_state,
+                    &data.search_tracks,
+                    &mut data.search_tracks_state,
+                    &data.search_playlists,
+                    &mut data.search_playlists_state,
+                    &data.search_playlist_tracks,
+                    &mut data.search_playlist_tracks_state,
+                    &data.search_albums,
+                    &mut data.search_albums_state,
+                    &data.search_album_tracks,
+                    &mut data.search_album_tracks_state,
+                    &data.search_people,
+                    &mut data.search_people_state,
+                    &data.search_people_tracks,
+                    &mut data.search_people_tracks_state,
+                    &data.search_people_likes_tracks,
+                    &mut data.search_people_likes_state,
                     state.selected_tab,
                     &TAB_TITLES,
                     state.selected_subtab,
@@ -750,6 +1189,11 @@ fn start(
                     &state.query,
                     &SEARCHFILTERS,
                     state.selected_searchfilter,
+                    state.search_selected_playlist_track_row,
+                    state.search_selected_album_track_row,
+                    state.search_selected_person_track_row,
+                    state.search_selected_person_like_row,
+                    state.search_people_tracks_focus == FollowingTracksFocus::Likes,
                     state.info_pane_selected,
                     state.selected_info_row,
                     &mut data_points,
