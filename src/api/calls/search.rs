@@ -177,6 +177,7 @@ pub async fn fetch_search_playlists(
             duration,
             created_at,
             tracks_uri,
+            is_owned: false,
         });
     }
 

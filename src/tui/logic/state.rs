@@ -1,6 +1,6 @@
 use crate::api::{API, Album, Artist, Playlist, Track};
 use ratatui::widgets::TableState;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::mpsc::Receiver;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -52,6 +52,30 @@ pub enum FollowingTracksFocus {
     Likes,
 }
 
+#[derive(Clone)]
+pub enum EngagementAction {
+    LikeTrack { track: Track, track_id: u64 },
+    UnlikeTrack { track_urn: String, track_id: u64 },
+    LikePlaylist { playlist: Playlist, playlist_id: u64 },
+    UnlikePlaylist { tracks_uri: String, playlist_id: u64 },
+    LikeAlbum { album: Album, playlist_id: u64 },
+    UnlikeAlbum { tracks_uri: String, playlist_id: u64 },
+    FollowUser { artist: Artist, user_id: u64 },
+    UnfollowUser { urn: String, user_id: u64 },
+}
+
+#[derive(Clone)]
+pub enum EngagementDone {
+    LikedTrack(Track),
+    UnlikedTrack { track_urn: String },
+    LikedPlaylist(Playlist),
+    UnlikedPlaylist { tracks_uri: String },
+    LikedAlbum(Album),
+    UnlikedAlbum { tracks_uri: String },
+    FollowedUser(Artist),
+    UnfollowedUser { urn: String },
+}
+
 pub struct AppState {
     pub selected_tab: usize,
     pub selected_subtab: usize,
@@ -99,6 +123,7 @@ pub struct AppState {
     pub manual_queue: VecDeque<QueuedTrack>,
     pub auto_queue: VecDeque<usize>,
     pub override_playing: Option<QueuedTrack>,
+    pub engagement_queue: VecDeque<EngagementAction>,
     pub following_tracks_focus: FollowingTracksFocus,
     pub queue_visible: bool,
     pub help_visible: bool,
@@ -162,6 +187,7 @@ impl AppState {
             manual_queue: VecDeque::new(),
             auto_queue: VecDeque::new(),
             override_playing: None,
+            engagement_queue: VecDeque::new(),
             following_tracks_focus: FollowingTracksFocus::Published,
             queue_visible: false,
             help_visible: false,
@@ -181,8 +207,10 @@ impl AppState {
 pub struct AppData {
     pub likes: Vec<Track>,
     pub likes_state: TableState,
+    pub liked_track_urns: HashSet<String>,
     pub playlists: Vec<Playlist>,
     pub playlists_state: TableState,
+    pub liked_playlist_uris: HashSet<String>,
     pub playlist_tracks: Vec<Track>,
     pub playlist_tracks_state: TableState,
     pub playlist_tracks_uri: Option<String>,
@@ -201,8 +229,10 @@ pub struct AppData {
     pub playback_following_user_urn: Option<String>,
     pub albums: Vec<Album>,
     pub albums_state: TableState,
+    pub liked_album_uris: HashSet<String>,
     pub following: Vec<Artist>,
     pub following_state: TableState,
+    pub followed_user_urns: HashSet<String>,
     pub search_tracks: Vec<Track>,
     pub search_tracks_state: TableState,
     pub search_playlists: Vec<Playlist>,
@@ -230,10 +260,17 @@ impl AppData {
         let likes: Vec<Track> = api.get_liked_tracks()?.into_iter().collect();
         let mut likes_state = TableState::default();
         likes_state.select(Some(selected_row));
+        let liked_track_urns: HashSet<String> =
+            likes.iter().map(|t| t.track_urn.clone()).collect();
 
         let playlists: Vec<Playlist> = api.get_playlists()?.into_iter().collect();
         let mut playlists_state = TableState::default();
         playlists_state.select(Some(selected_row));
+        let liked_playlist_uris: HashSet<String> = playlists
+            .iter()
+            .filter(|p| !p.is_owned)
+            .map(|p| p.tracks_uri.clone())
+            .collect();
 
         let playlist_tracks: Vec<Track> = Vec::new();
         let mut playlist_tracks_state = TableState::default();
@@ -246,6 +283,8 @@ impl AppData {
         let albums: Vec<Album> = api.get_albums()?.into_iter().collect();
         let mut albums_state = TableState::default();
         albums_state.select(Some(selected_row));
+        let liked_album_uris: HashSet<String> =
+            albums.iter().map(|a| a.tracks_uri.clone()).collect();
 
         let following_tracks: Vec<Track> = Vec::new();
         let mut following_tracks_state = TableState::default();
@@ -258,6 +297,8 @@ impl AppData {
         let following: Vec<Artist> = api.get_following()?.into_iter().collect();
         let mut following_state = TableState::default();
         following_state.select(Some(selected_row));
+        let followed_user_urns: HashSet<String> =
+            following.iter().map(|a| a.urn.clone()).collect();
 
         let search_tracks: Vec<Track> = Vec::new();
         let mut search_tracks_state = TableState::default();
@@ -294,8 +335,10 @@ impl AppData {
         Ok(Self {
             likes,
             likes_state,
+            liked_track_urns,
             playlists,
             playlists_state,
+            liked_playlist_uris,
             playlist_tracks,
             playlist_tracks_state,
             playlist_tracks_uri: None,
@@ -314,8 +357,10 @@ impl AppData {
             playback_following_user_urn: None,
             albums,
             albums_state,
+            liked_album_uris,
             following,
             following_state,
+            followed_user_urns,
             search_tracks,
             search_tracks_state,
             search_playlists,
@@ -355,9 +400,17 @@ impl AppData {
         following_likes_request_id: u64,
     ) {
         while let Ok(new_likes) = rx_likes.try_recv() {
+            for t in &new_likes {
+                self.liked_track_urns.insert(t.track_urn.clone());
+            }
             self.likes.extend(new_likes);
         }
         while let Ok(new_playlists) = rx_playlists.try_recv() {
+            for p in &new_playlists {
+                if !p.is_owned {
+                    self.liked_playlist_uris.insert(p.tracks_uri.clone());
+                }
+            }
             self.playlists.extend(new_playlists);
         }
         while let Ok((request_id, new_tracks)) = rx_playlist_tracks.try_recv() {
@@ -385,9 +438,15 @@ impl AppData {
             }
         }
         while let Ok(new_albums) = rx_albums.try_recv() {
+            for a in &new_albums {
+                self.liked_album_uris.insert(a.tracks_uri.clone());
+            }
             self.albums.extend(new_albums);
         }
         while let Ok(new_following) = rx_following.try_recv() {
+            for a in &new_following {
+                self.followed_user_urns.insert(a.urn.clone());
+            }
             self.following.extend(new_following);
         }
     }

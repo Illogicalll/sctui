@@ -6,6 +6,7 @@ mod visualizer;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
 
 use ratatui::{
     Frame,
@@ -25,6 +26,10 @@ pub fn render(
     likes_view: &Vec<Track>,
     queue_tracks: &Vec<Track>,
     likes_state: &mut TableState,
+    liked_track_urns: &HashSet<String>,
+    liked_album_uris: &HashSet<String>,
+    liked_playlist_uris: &HashSet<String>,
+    followed_user_urns: &HashSet<String>,
     playlists: &Vec<Playlist>,
     playlists_state: &mut TableState,
     playlist_tracks: &Vec<Track>,
@@ -173,6 +178,10 @@ pub fn render(
             searchfilters,
             selected_searchfilter,
             selected_row,
+            liked_track_urns,
+            liked_album_uris,
+            liked_playlist_uris,
+            followed_user_urns,
             search_tracks,
             search_tracks_state,
             search_playlists,

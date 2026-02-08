@@ -85,6 +85,7 @@ impl API {
                         duration,
                         created_at,
                         tracks_uri,
+                        is_owned: i == 0,
                     });
                 }
             }

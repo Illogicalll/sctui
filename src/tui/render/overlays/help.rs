@@ -32,6 +32,10 @@ pub fn render_help(frame: &mut Frame) {
         Row::new(vec!["Shift + R", "Toggle repeat same song"]),
         Row::new(vec!["Shift + A", "Add selected song to queue"]),
         Row::new(vec!["Shift + N", "Play next (add to front of queue)"]),
+        Row::new(vec![
+            "Shift + L",
+            "Like selected item (or follow selected person)",
+        ]),
         Row::new(vec!["Shift + V", "Toggle visualizer mode"]),
         Row::new(vec!["Shift + F", "Search current view (only works in library)"]),
         Row::new(vec!["Shift + Q", "Toggle queue popup"]),

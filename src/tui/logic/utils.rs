@@ -171,6 +171,66 @@ pub fn build_search_matches(
     }
 }
 
+pub fn soundcloud_id_from_urn(urn: &str) -> Option<u64> {
+    let last = urn.rsplit(':').next()?;
+    last.parse::<u64>().ok()
+}
+
+pub fn soundcloud_playlist_id_from_tracks_uri(tracks_uri: &str) -> Option<u64> {
+    let s = tracks_uri.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    let s = s
+        .strip_prefix("https://api.soundcloud.com")
+        .or_else(|| s.strip_prefix("http://api.soundcloud.com"))
+        .unwrap_or(s);
+
+    let s = s.split('?').next().unwrap_or(s);
+
+    for marker in ["playlists/", "sets/"] {
+        if let Some(idx) = s.find(marker) {
+            let after = &s[idx + marker.len()..];
+            let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !digits.is_empty() {
+                return digits.parse::<u64>().ok();
+            }
+        }
+    }
+
+    let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
+    for (i, part) in parts.iter().enumerate() {
+        if *part == "playlists" || *part == "sets" {
+            let raw = parts.get(i + 1)?;
+            let digits: String = raw.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !digits.is_empty() {
+                return digits.parse::<u64>().ok();
+            }
+        }
+    }
+
+    let mut best: String = String::new();
+    let mut current: String = String::new();
+    for ch in s.chars() {
+        if ch.is_ascii_digit() {
+            current.push(ch);
+        } else {
+            if current.len() > best.len() {
+                best = current.clone();
+            }
+            current.clear();
+        }
+    }
+    if current.len() > best.len() {
+        best = current;
+    }
+    if best.is_empty() {
+        return None;
+    }
+    best.parse::<u64>().ok()
+}
+
 pub fn build_queue(
     current_idx: usize,
     tracks: &[Track],

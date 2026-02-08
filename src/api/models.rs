@@ -26,6 +26,9 @@ pub struct Playlist {
     pub duration: String,
     pub created_at: DateTime<FixedOffset>,
     pub tracks_uri: String,
+    /// True if this playlist comes from `/me/playlists` (owned by the logged-in user).
+    /// False if it comes from `/me/likes/playlists` (liked playlists).
+    pub is_owned: bool,
 }
 
 #[derive(Debug, Clone)]

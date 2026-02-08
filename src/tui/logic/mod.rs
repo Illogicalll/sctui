@@ -7,7 +7,8 @@ mod utils;
 use crate::api::{
     API, fetch_album_tracks, fetch_following_liked_tracks, fetch_following_tracks,
     fetch_playlist_tracks, fetch_search_albums, fetch_search_people, fetch_search_playlists,
-    fetch_search_tracks,
+    fetch_search_tracks, follow_user, like_playlist, like_track, unfollow_user, unlike_playlist,
+    unlike_track,
 };
 use crate::player::Player;
 use ratatui::{
@@ -32,7 +33,7 @@ use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::{handle_key_event, InputOutcome};
 use self::animation::{SinSignal, on_tick};
-use self::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource};
+use self::state::{AppData, AppState, EngagementAction, EngagementDone, FollowingTracksFocus, PlaybackSource};
 use self::utils::{build_queue, play_queued_track, queued_from_current};
 
 const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];
@@ -147,6 +148,9 @@ fn start(
         Receiver<(u64, Vec<crate::api::Track>)>,
     ) = mpsc::channel();
 
+    let (tx_engagement, rx_engagement): (Sender<EngagementDone>, Receiver<EngagementDone>) =
+        mpsc::channel();
+
     spawn_fetch(Arc::clone(api), tx_playlists.clone(), |api| {
         api.get_playlists()
     });
@@ -239,6 +243,159 @@ fn start(
                 data.search_people_likes_tracks = tracks;
                 data.search_people_likes_state.select(Some(0));
             }
+        }
+
+        while let Ok(done) = rx_engagement.try_recv() {
+            match done {
+                EngagementDone::LikedTrack(track) => {
+                    if !data.liked_track_urns.contains(&track.track_urn) {
+                        continue;
+                    }
+                    let exists = data.likes.iter().any(|t| t.track_urn == track.track_urn);
+                    if !exists {
+                        data.likes.insert(0, track);
+                    }
+                }
+                EngagementDone::UnlikedTrack { track_urn } => {
+                    if data.liked_track_urns.contains(&track_urn) {
+                        continue;
+                    }
+                    data.likes.retain(|t| t.track_urn != track_urn);
+                    if state.selected_tab == 0 && state.selected_subtab == 0 {
+                        if data.likes.is_empty() {
+                            state.selected_row = 0;
+                            data.likes_state.select(Some(0));
+                        } else if state.selected_row >= data.likes.len() {
+                            state.selected_row = data.likes.len() - 1;
+                            data.likes_state.select(Some(state.selected_row));
+                        }
+                    }
+                }
+                EngagementDone::LikedPlaylist(playlist) => {
+                    if !data.liked_playlist_uris.contains(&playlist.tracks_uri) {
+                        continue;
+                    }
+                    let exists = data
+                        .playlists
+                        .iter()
+                        .any(|p| p.tracks_uri == playlist.tracks_uri && !p.is_owned);
+                    if !exists {
+                        data.playlists.insert(0, playlist);
+                    }
+                }
+                EngagementDone::UnlikedPlaylist { tracks_uri } => {
+                    if data.liked_playlist_uris.contains(&tracks_uri) {
+                        continue;
+                    }
+                    data.playlists
+                        .retain(|p| !(p.tracks_uri == tracks_uri && !p.is_owned));
+                    if state.selected_tab == 0 && state.selected_subtab == 1 {
+                        if data.playlists.is_empty() {
+                            state.selected_row = 0;
+                            data.playlists_state.select(Some(0));
+                        } else if state.selected_row >= data.playlists.len() {
+                            state.selected_row = data.playlists.len() - 1;
+                            data.playlists_state.select(Some(state.selected_row));
+                        }
+                    }
+                }
+                EngagementDone::LikedAlbum(album) => {
+                    if !data.liked_album_uris.contains(&album.tracks_uri) {
+                        continue;
+                    }
+                    let exists = data.albums.iter().any(|a| a.tracks_uri == album.tracks_uri);
+                    if !exists {
+                        data.albums.insert(0, album);
+                    }
+                }
+                EngagementDone::UnlikedAlbum { tracks_uri } => {
+                    if data.liked_album_uris.contains(&tracks_uri) {
+                        continue;
+                    }
+                    data.albums.retain(|a| a.tracks_uri != tracks_uri);
+                    if state.selected_tab == 0 && state.selected_subtab == 2 {
+                        if data.albums.is_empty() {
+                            state.selected_row = 0;
+                            data.albums_state.select(Some(0));
+                        } else if state.selected_row >= data.albums.len() {
+                            state.selected_row = data.albums.len() - 1;
+                            data.albums_state.select(Some(state.selected_row));
+                        }
+                    }
+                }
+                EngagementDone::FollowedUser(artist) => {
+                    if !data.followed_user_urns.contains(&artist.urn) {
+                        continue;
+                    }
+                    let exists = data.following.iter().any(|a| a.urn == artist.urn);
+                    if !exists {
+                        data.following.insert(0, artist);
+                    }
+                }
+                EngagementDone::UnfollowedUser { urn } => {
+                    if data.followed_user_urns.contains(&urn) {
+                        continue;
+                    }
+                    data.following.retain(|a| a.urn != urn);
+                    if state.selected_tab == 0 && state.selected_subtab == 3 {
+                        if data.following.is_empty() {
+                            state.selected_row = 0;
+                            data.following_state.select(Some(0));
+                        } else if state.selected_row >= data.following.len() {
+                            state.selected_row = data.following.len() - 1;
+                            data.following_state.select(Some(state.selected_row));
+                        }
+                    }
+                }
+            }
+        }
+
+        while let Some(action) = state.engagement_queue.pop_front() {
+            let token = {
+                let api_guard = api.lock().unwrap();
+                api_guard.token_clone()
+            };
+            let tx = tx_engagement.clone();
+            async_rt.spawn(async move {
+                let result: anyhow::Result<EngagementDone> = match action {
+                    EngagementAction::LikeTrack { track, track_id } => like_track(token, track_id)
+                        .await
+                        .map(|_| EngagementDone::LikedTrack(track)),
+                    EngagementAction::UnlikeTrack { track_urn, track_id } => {
+                        unlike_track(token, track_id)
+                            .await
+                            .map(|_| EngagementDone::UnlikedTrack { track_urn })
+                    }
+                    EngagementAction::LikePlaylist {
+                        playlist,
+                        playlist_id,
+                    } => like_playlist(token, playlist_id)
+                        .await
+                        .map(|_| EngagementDone::LikedPlaylist(playlist)),
+                    EngagementAction::UnlikePlaylist { tracks_uri, playlist_id } => {
+                        unlike_playlist(token, playlist_id)
+                            .await
+                            .map(|_| EngagementDone::UnlikedPlaylist { tracks_uri })
+                    }
+                    EngagementAction::LikeAlbum { album, playlist_id } => like_playlist(token, playlist_id)
+                        .await
+                        .map(|_| EngagementDone::LikedAlbum(album)),
+                    EngagementAction::UnlikeAlbum { tracks_uri, playlist_id } => {
+                        unlike_playlist(token, playlist_id)
+                            .await
+                            .map(|_| EngagementDone::UnlikedAlbum { tracks_uri })
+                    }
+                    EngagementAction::FollowUser { artist, user_id } => follow_user(token, user_id)
+                        .await
+                        .map(|_| EngagementDone::FollowedUser(artist)),
+                    EngagementAction::UnfollowUser { urn, user_id } => unfollow_user(token, user_id)
+                        .await
+                        .map(|_| EngagementDone::UnfollowedUser { urn }),
+                };
+                if let Ok(done) = result {
+                    let _ = tx.send(done);
+                }
+            });
         }
 
         while let Ok(app_ev) = rx_main.try_recv() {
@@ -850,6 +1007,10 @@ fn start(
                 likes_ref,
                 queue_tracks,
                 &mut data.likes_state,
+                &data.liked_track_urns,
+                &data.liked_album_uris,
+                &data.liked_playlist_uris,
+                &data.followed_user_urns,
                 playlists_ref,
                 &mut data.playlists_state,
                 playlist_tracks_ref,
@@ -1146,6 +1307,10 @@ fn start(
                     likes_ref,
                     queue_tracks,
                     &mut data.likes_state,
+                    &data.liked_track_urns,
+                    &data.liked_album_uris,
+                    &data.liked_playlist_uris,
+                    &data.followed_user_urns,
                     playlists_ref,
                     &mut data.playlists_state,
                     playlist_tracks_ref,

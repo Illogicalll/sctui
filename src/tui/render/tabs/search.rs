@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::api::{Album, Artist, Playlist, Track};
+use std::collections::HashSet;
 
 use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
 
@@ -20,6 +21,10 @@ pub fn render_search(
     searchfilters: &[&str],
     selected_searchfilter: usize,
     selected_row: usize,
+    liked_track_urns: &HashSet<String>,
+    liked_album_uris: &HashSet<String>,
+    liked_playlist_uris: &HashSet<String>,
+    followed_user_urns: &HashSet<String>,
     search_tracks: &Vec<Track>,
     search_tracks_state: &mut TableState,
     search_playlists: &Vec<Playlist>,
@@ -68,11 +73,12 @@ pub fn render_search(
     let table_area = subchunks[1];
 
     if selected_searchfilter == 0 {
-        let header = styled_header(&["Title", "Artist(s)", "Duration", "Streams"]);
+        let header = styled_header(&["♥", "Title", "Artist(s)", "Duration", "Streams"]);
         let col_widths = vec![
-            Constraint::Percentage(55),
-            Constraint::Percentage(25),
-            Constraint::Percentage(10),
+            Constraint::Length(1),
+            Constraint::Percentage(53),
+            Constraint::Percentage(26),
+            Constraint::Percentage(11),
             Constraint::Percentage(10),
         ];
         let col_min_widths = calculate_min_widths(&col_widths, width);
@@ -86,11 +92,17 @@ pub fn render_search(
             .iter()
             .enumerate()
             .map(|(i, track)| {
+                let liked = if liked_track_urns.contains(&track.track_urn) {
+                    "♥"
+                } else {
+                    ""
+                };
                 let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&track.title, col_min_widths[0]),
-                    truncate_with_ellipsis(&track.artists, col_min_widths[1]),
-                    truncate_with_ellipsis(&track.duration, col_min_widths[2]),
-                    truncate_with_ellipsis(&track.playback_count, col_min_widths[3]),
+                    truncate_with_ellipsis(liked, col_min_widths[0]),
+                    truncate_with_ellipsis(&track.title, col_min_widths[1]),
+                    truncate_with_ellipsis(&track.artists, col_min_widths[2]),
+                    truncate_with_ellipsis(&track.duration, col_min_widths[3]),
+                    truncate_with_ellipsis(&track.playback_count, col_min_widths[4]),
                 ]);
                 if !track.is_playable() {
                     row = row.style(Style::default().fg(Color::DarkGray));
@@ -122,11 +134,12 @@ pub fn render_search(
             .constraints([Constraint::Percentage(33), Constraint::Percentage(67)].as_ref())
             .split(table_area);
 
-        let header = styled_header(&["Name", "No. Songs", "Duration"]);
+        let header = styled_header(&["♥", "Name", "No. Songs", "Duration"]);
         let left_col_widths = vec![
-            Constraint::Percentage(70),
-            Constraint::Percentage(15),
-            Constraint::Percentage(15),
+            Constraint::Length(1),
+            Constraint::Percentage(68),
+            Constraint::Percentage(16),
+            Constraint::Percentage(16),
         ];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
@@ -134,10 +147,16 @@ pub fn render_search(
             .iter()
             .enumerate()
             .map(|(i, playlist)| {
+                let liked = if liked_playlist_uris.contains(&playlist.tracks_uri) {
+                    "♥"
+                } else {
+                    ""
+                };
                 let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&playlist.title, left_min_widths[0]),
-                    truncate_with_ellipsis(&playlist.track_count, left_min_widths[1]),
-                    truncate_with_ellipsis(&playlist.duration, left_min_widths[2]),
+                    truncate_with_ellipsis(liked, left_min_widths[0]),
+                    truncate_with_ellipsis(&playlist.title, left_min_widths[1]),
+                    truncate_with_ellipsis(&playlist.track_count, left_min_widths[2]),
+                    truncate_with_ellipsis(&playlist.duration, left_min_widths[3]),
                 ]);
                 if i == selected_row {
                     row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
@@ -203,13 +222,14 @@ pub fn render_search(
             .constraints([Constraint::Percentage(65), Constraint::Percentage(35)].as_ref())
             .split(table_area);
 
-        let header = styled_header(&["Title", "Artist(s)", "Year", "No. Songs", "Duration"]);
+        let header = styled_header(&["♥", "Title", "Artist(s)", "Year", "No. Songs", "Duration"]);
         let left_col_widths = vec![
-            Constraint::Percentage(50),
-            Constraint::Percentage(20),
+            Constraint::Length(1),
+            Constraint::Percentage(47),
+            Constraint::Percentage(21),
+            Constraint::Percentage(11),
             Constraint::Percentage(10),
-            Constraint::Percentage(10),
-            Constraint::Percentage(10),
+            Constraint::Percentage(11),
         ];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
@@ -217,12 +237,18 @@ pub fn render_search(
             .iter()
             .enumerate()
             .map(|(i, album)| {
+                let liked = if liked_album_uris.contains(&album.tracks_uri) {
+                    "♥"
+                } else {
+                    ""
+                };
                 let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&album.title, left_min_widths[0]),
-                    truncate_with_ellipsis(&album.artists, left_min_widths[1]),
-                    truncate_with_ellipsis(&album.release_year, left_min_widths[2]),
-                    truncate_with_ellipsis(&album.track_count, left_min_widths[3]),
-                    truncate_with_ellipsis(&album.duration, left_min_widths[4]),
+                    truncate_with_ellipsis(liked, left_min_widths[0]),
+                    truncate_with_ellipsis(&album.title, left_min_widths[1]),
+                    truncate_with_ellipsis(&album.artists, left_min_widths[2]),
+                    truncate_with_ellipsis(&album.release_year, left_min_widths[3]),
+                    truncate_with_ellipsis(&album.track_count, left_min_widths[4]),
+                    truncate_with_ellipsis(&album.duration, left_min_widths[5]),
                 ]);
                 if i == selected_row {
                     row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
@@ -290,18 +316,23 @@ pub fn render_search(
             ])
             .split(table_area);
 
-        let header = styled_header(&["Name"]);
-        let left_col_widths = vec![Constraint::Percentage(100)];
+        let header = styled_header(&["♥", "Name"]);
+        let left_col_widths = vec![Constraint::Length(1), Constraint::Percentage(100)];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
         let left_rows = search_people
             .iter()
             .enumerate()
             .map(|(i, artist)| {
-                let mut row = Row::new(vec![truncate_with_ellipsis(
-                    &artist.name,
-                    left_min_widths[0],
-                )]);
+                let liked = if followed_user_urns.contains(&artist.urn) {
+                    "♥"
+                } else {
+                    ""
+                };
+                let mut row = Row::new(vec![
+                    truncate_with_ellipsis(liked, left_min_widths[0]),
+                    truncate_with_ellipsis(&artist.name, left_min_widths[1]),
+                ]);
                 if i == selected_row {
                     row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
                 }
