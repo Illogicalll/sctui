@@ -18,7 +18,7 @@ a soundcloud client for the terminal
 
 <p align="center">Search for Tracks, Albums and Playlists to add to your library, as well as new People to follow</p>
 
-<p align="center">🚧 Feature Coming Soon 🚧</p>
+<p align="center"><img src="./media/search_feature.png" alt="Search" width="480" /></p>
 
 <p align="center">View the activity of everyone you follow to stay up to date with their latest releases or reposts</p>
 
@@ -30,9 +30,11 @@ a soundcloud client for the terminal
 
 ### 👁️ Audio Visualiser
 
-<p align="center">View the waveforms of your favourite music in an oscilloscope-style visualisation mode</p>
+<p align="center">View the waveforms of your favourite music in oscilloscope or audio spectrum visualisation modes</p>
 
 <p align="center"><img src="./media/visualiser.gif" alt="Visualiser" width="480" /></p>
+
+<p align="center"><img src="./media/spectrum.gif" alt="Visualiser 2" width="480" /></p>
 
 <p align="center">(maybe more modes coming soon..)</p>
 
