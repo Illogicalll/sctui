@@ -192,10 +192,10 @@ fn start(
         } else {
             data.likes.len()
         };
-        let playlists_len = if filter_active && state.selected_subtab == 1 {
-            filtered.playlists.len()
+        let playlist_tracks_len = if filter_active && state.selected_subtab == 1 {
+            filtered.playlist_tracks.len()
         } else {
-            data.playlists.len()
+            data.playlist_tracks.len()
         };
         let albums_len = if filter_active && state.selected_subtab == 2 {
             filtered.albums.len()
@@ -213,7 +213,7 @@ fn start(
             &mut data,
             filter_active,
             likes_len,
-            playlists_len,
+            playlist_tracks_len,
             albums_len,
             following_len,
         );
@@ -222,11 +222,6 @@ fn start(
             &filtered.likes
         } else {
             &data.likes
-        };
-        let playlists_ref = if filter_active && state.selected_subtab == 1 {
-            &filtered.playlists
-        } else {
-            &data.playlists
         };
         let albums_ref = if filter_active && state.selected_subtab == 2 {
             &filtered.albums
@@ -240,7 +235,7 @@ fn start(
         };
 
         if state.selected_tab == 0 && state.selected_subtab == 1 {
-            if let Some(selected_playlist) = playlists_ref.get(state.selected_row) {
+            if let Some(selected_playlist) = data.playlists.get(state.selected_row) {
                 let tracks_uri = selected_playlist.tracks_uri.clone();
                 let needs_fetch = data
                     .playlist_tracks_uri
@@ -284,6 +279,13 @@ fn start(
                     .select(Some(state.selected_playlist_track_row));
             }
         }
+
+        let playlists_ref = &data.playlists;
+        let playlist_tracks_ref = if filter_active && state.selected_subtab == 1 {
+            &filtered.playlist_tracks
+        } else {
+            &data.playlist_tracks
+        };
 
         if state.selected_tab == 0 && state.selected_subtab == 2 {
             if let Some(selected_album) = albums_ref.get(state.selected_row) {
@@ -448,7 +450,7 @@ fn start(
                 &mut data.likes_state,
                 playlists_ref,
                 &mut data.playlists_state,
-                &data.playlist_tracks,
+                playlist_tracks_ref,
                 &mut data.playlist_tracks_state,
                 &data.album_tracks,
                 &mut data.album_tracks_state,
@@ -646,10 +648,10 @@ fn start(
             } else {
                 data.likes.len()
             };
-            let playlists_len = if filter_active && state.selected_subtab == 1 {
-                filtered.playlists.len()
+            let playlist_tracks_len = if filter_active && state.selected_subtab == 1 {
+                filtered.playlist_tracks.len()
             } else {
-                data.playlists.len()
+                data.playlist_tracks.len()
             };
             let albums_len = if filter_active && state.selected_subtab == 2 {
                 filtered.albums.len()
@@ -667,7 +669,7 @@ fn start(
                 &mut data,
                 filter_active,
                 likes_len,
-                playlists_len,
+                playlist_tracks_len,
                 albums_len,
                 following_len,
             );
@@ -676,11 +678,6 @@ fn start(
                 &filtered.likes
             } else {
                 &data.likes
-            };
-            let playlists_ref = if filter_active && state.selected_subtab == 1 {
-                &filtered.playlists
-            } else {
-                &data.playlists
             };
             let albums_ref = if filter_active && state.selected_subtab == 2 {
                 &filtered.albums
@@ -691,6 +688,13 @@ fn start(
                 &filtered.following
             } else {
                 &data.following
+            };
+
+            let playlists_ref = &data.playlists;
+            let playlist_tracks_ref = if filter_active && state.selected_subtab == 1 {
+                &filtered.playlist_tracks
+            } else {
+                &data.playlist_tracks
             };
 
             let queue_tracks = match state.playback_source {
@@ -721,7 +725,7 @@ fn start(
                     &mut data.likes_state,
                     playlists_ref,
                     &mut data.playlists_state,
-                    &data.playlist_tracks,
+                    playlist_tracks_ref,
                     &mut data.playlist_tracks_state,
                     &data.album_tracks,
                     &mut data.album_tracks_state,

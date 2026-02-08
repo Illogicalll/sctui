@@ -104,6 +104,7 @@ pub fn build_search_matches(
     query: &str,
     likes: &Vec<Track>,
     playlists: &Vec<Playlist>,
+    playlist_tracks: &Vec<Track>,
     albums: &Vec<Album>,
     following: &Vec<Artist>,
 ) -> Vec<usize> {
@@ -131,11 +132,11 @@ pub fn build_search_matches(
             scored.into_iter().map(|(_, i)| i).collect()
         }
         1 => {
-            let mut scored: Vec<(i64, usize)> = playlists
+            let mut scored: Vec<(i64, usize)> = playlist_tracks
                 .iter()
                 .enumerate()
-                .filter_map(|(i, playlist)| {
-                    fuzzy_score_single_field_tokens(&tokens, &playlist.title)
+                .filter_map(|(i, track)| {
+                    fuzzy_score_track_tokens(&tokens, &track.title, &track.artists)
                         .map(|s| (s, i))
                 })
                 .collect();

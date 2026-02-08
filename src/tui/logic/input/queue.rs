@@ -66,13 +66,26 @@ fn add_likes_to_queue(state: &mut AppState, data: &mut AppData) {
 }
 
 fn add_playlist_to_queue(state: &mut AppState, data: &mut AppData) {
-    if let Some(track) = data.playlist_tracks.get(state.selected_playlist_track_row) {
+    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
+    let selected_idx = if search_active {
+        state
+            .search_matches
+            .get(state.selected_playlist_track_row)
+            .copied()
+    } else {
+        Some(state.selected_playlist_track_row)
+    };
+    if let Some(selected_idx) = selected_idx {
+        let track = match data.playlist_tracks.get(selected_idx) {
+            Some(track) => track,
+            None => return,
+        };
         if track.is_playable() {
             insert_manual_queue(
                 state,
                 QueuedTrack {
                     source: PlaybackSource::Playlist,
-                    index: state.selected_playlist_track_row,
+                    index: selected_idx,
                     track: track.clone(),
                     tracks_snapshot: Some(data.playlist_tracks.clone()),
                     playlist_uri: data.playlist_tracks_uri.clone(),
@@ -176,11 +189,21 @@ fn get_likes_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTr
 }
 
 fn get_playlist_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
-    if let Some(track) = data.playlist_tracks.get(state.selected_playlist_track_row) {
+    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
+    let selected_idx = if search_active {
+        state
+            .search_matches
+            .get(state.selected_playlist_track_row)
+            .copied()
+    } else {
+        Some(state.selected_playlist_track_row)
+    };
+    if let Some(selected_idx) = selected_idx {
+        let track = data.playlist_tracks.get(selected_idx)?;
         if track.is_playable() {
             return Some(QueuedTrack {
                 source: PlaybackSource::Playlist,
-                index: state.selected_playlist_track_row,
+                index: selected_idx,
                 track: track.clone(),
                 tracks_snapshot: Some(data.playlist_tracks.clone()),
                 playlist_uri: data.playlist_tracks_uri.clone(),

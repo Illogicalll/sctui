@@ -68,7 +68,20 @@ fn handle_playlist_enter(
     data: &mut AppData,
     player: &Player,
 ) {
-    if let Some(track) = data.playlist_tracks.get(state.selected_playlist_track_row) {
+    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
+    let selected_idx = if search_active {
+        state
+            .search_matches
+            .get(state.selected_playlist_track_row)
+            .copied()
+    } else {
+        Some(state.selected_playlist_track_row)
+    };
+    if let Some(selected_idx) = selected_idx {
+        let track = match data.playlist_tracks.get(selected_idx) {
+            Some(track) => track,
+            None => return,
+        };
         if !track.is_playable() {
             return;
         }
@@ -76,26 +89,26 @@ fn handle_playlist_enter(
             state.playback_history.clear();
             state.manual_queue.clear();
         } else if let Some(queued) = queued_from_current(state, data) {
-            if !(queued.source == PlaybackSource::Playlist
-                && queued.index == state.selected_playlist_track_row)
-            {
+            if !(queued.source == PlaybackSource::Playlist && queued.index == selected_idx) {
                 state.playback_history.push(queued);
             }
         }
         player.play(track.clone());
         state.playback_source = PlaybackSource::Playlist;
         state.override_playing = None;
-        state.current_playing_index = Some(state.selected_playlist_track_row);
+        state.current_playing_index = Some(selected_idx);
         data.playback_tracks = data.playlist_tracks.clone();
         data.playback_playlist_uri = data.playlist_tracks_uri.clone();
         data.playback_album_uri = None;
         data.playback_following_user_urn = None;
         state.auto_queue = build_queue(
-            state.selected_playlist_track_row,
+            selected_idx,
             &data.playback_tracks,
             state.shuffle_enabled,
         );
-        data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
+        if !search_active {
+            data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
+        }
     }
 }
 

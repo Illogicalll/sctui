@@ -42,6 +42,12 @@ pub(crate) fn handle_up_key(
 }
 
 fn handle_playlist_down(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
+    let filter_active = state.search_popup_visible && !state.search_query.trim().is_empty();
+    let playlist_tracks_len = if filter_active {
+        state.search_matches.len()
+    } else {
+        data.playlist_tracks.len()
+    };
     if key.modifiers.contains(KeyModifiers::SHIFT) {
         if state.selected_row + 1 < data.playlists.len() {
             state.selected_row += 1;
@@ -49,12 +55,12 @@ fn handle_playlist_down(key: KeyEvent, state: &mut AppState, data: &mut AppData)
             data.playlists_state.select(Some(state.selected_row));
         }
     } else if key.modifiers.contains(KeyModifiers::ALT) {
-        if !data.playlist_tracks.is_empty() {
+        if playlist_tracks_len > 0 {
             state.selected_playlist_track_row = (state.selected_playlist_track_row + 10)
-                .min(data.playlist_tracks.len() - 1);
+                .min(playlist_tracks_len - 1);
             data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
         }
-    } else if state.selected_playlist_track_row + 1 < data.playlist_tracks.len() {
+    } else if state.selected_playlist_track_row + 1 < playlist_tracks_len {
         state.selected_playlist_track_row += 1;
         data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
     }
@@ -145,6 +151,12 @@ fn handle_normal_down(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
 }
 
 fn handle_playlist_up(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
+    let filter_active = state.search_popup_visible && !state.search_query.trim().is_empty();
+    let playlist_tracks_len = if filter_active {
+        state.search_matches.len()
+    } else {
+        data.playlist_tracks.len()
+    };
     if key.modifiers.contains(KeyModifiers::SHIFT) {
         if state.selected_row > 0 {
             state.selected_row -= 1;
@@ -152,9 +164,12 @@ fn handle_playlist_up(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
             data.playlists_state.select(Some(state.selected_row));
         }
     } else if key.modifiers.contains(KeyModifiers::ALT) {
-        state.selected_playlist_track_row = state.selected_playlist_track_row.saturating_sub(10);
-        data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
-    } else if state.selected_playlist_track_row > 0 {
+        if playlist_tracks_len > 0 {
+            state.selected_playlist_track_row =
+                state.selected_playlist_track_row.saturating_sub(10);
+            data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
+        }
+    } else if state.selected_playlist_track_row > 0 && playlist_tracks_len > 0 {
         state.selected_playlist_track_row -= 1;
         data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
     }

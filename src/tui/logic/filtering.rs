@@ -5,6 +5,7 @@ use super::state::{AppData, AppState};
 pub struct FilteredViews {
     pub likes: Vec<Track>,
     pub playlists: Vec<Playlist>,
+    pub playlist_tracks: Vec<Track>,
     pub albums: Vec<Album>,
     pub following: Vec<Artist>,
 }
@@ -28,11 +29,13 @@ pub fn build_filtered_views(state: &AppState, data: &AppData) -> FilteredViews {
         Vec::new()
     };
 
-    let playlists = if filter_active && state.selected_subtab == 1 {
+    let playlists = Vec::new();
+
+    let playlist_tracks = if filter_active && state.selected_subtab == 1 {
         state
             .search_matches
             .iter()
-            .filter_map(|&i| data.playlists.get(i).cloned())
+            .filter_map(|&i| data.playlist_tracks.get(i).cloned())
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -61,6 +64,7 @@ pub fn build_filtered_views(state: &AppState, data: &AppData) -> FilteredViews {
     FilteredViews {
         likes,
         playlists,
+        playlist_tracks,
         albums,
         following,
     }
@@ -71,7 +75,7 @@ pub fn clamp_selection(
     data: &mut AppData,
     filter_active: bool,
     likes_len: usize,
-    playlists_len: usize,
+    playlist_tracks_len: usize,
     albums_len: usize,
     following_len: usize,
 ) {
@@ -87,10 +91,11 @@ pub fn clamp_selection(
             data.likes_state.select(Some(state.selected_row));
         }
         1 => {
-            if state.selected_row >= playlists_len && playlists_len > 0 {
-                state.selected_row = playlists_len - 1;
+            if state.selected_playlist_track_row >= playlist_tracks_len && playlist_tracks_len > 0 {
+                state.selected_playlist_track_row = playlist_tracks_len - 1;
             }
-            data.playlists_state.select(Some(state.selected_row));
+            data.playlist_tracks_state
+                .select(Some(state.selected_playlist_track_row));
         }
         2 => {
             if state.selected_row >= albums_len && albums_len > 0 {

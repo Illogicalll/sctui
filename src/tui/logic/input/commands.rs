@@ -78,6 +78,7 @@ fn handle_shift_char(
                     &state.search_query,
                     &data.likes,
                     &data.playlists,
+                    &data.playlist_tracks,
                     &data.albums,
                     &data.following,
                 );

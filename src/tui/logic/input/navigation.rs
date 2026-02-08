@@ -53,6 +53,7 @@ pub(crate) fn handle_right_key(
                 &state.search_query,
                 &data.likes,
                 &data.playlists,
+                &data.playlist_tracks,
                 &data.albums,
                 &data.following,
             );
@@ -60,8 +61,8 @@ pub(crate) fn handle_right_key(
             match state.selected_subtab {
                 0 => data.likes_state.select(Some(0)),
                 1 => {
-                    state.selected_playlist_row = 0;
-                    data.playlists_state.select(Some(0));
+                    state.selected_playlist_track_row = 0;
+                    data.playlist_tracks_state.select(Some(0));
                 }
                 2 => {
                     state.selected_album_row = 0;
@@ -126,6 +127,7 @@ pub(crate) fn handle_left_key(
                 &state.search_query,
                 &data.likes,
                 &data.playlists,
+                &data.playlist_tracks,
                 &data.albums,
                 &data.following,
             );
@@ -133,8 +135,8 @@ pub(crate) fn handle_left_key(
             match state.selected_subtab {
                 0 => data.likes_state.select(Some(0)),
                 1 => {
-                    state.selected_playlist_row = 0;
-                    data.playlists_state.select(Some(0));
+                    state.selected_playlist_track_row = 0;
+                    data.playlist_tracks_state.select(Some(0));
                 }
                 2 => {
                     state.selected_album_row = 0;

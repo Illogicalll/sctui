@@ -5,18 +5,24 @@ use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::build_search_matches;
 
 fn set_primary_selection(state: &mut AppState, data: &mut AppData, row: usize) {
-    state.selected_row = row;
     match state.selected_subtab {
-        0 => data.likes_state.select(Some(row)),
+        0 => {
+            state.selected_row = row;
+            data.likes_state.select(Some(row));
+        }
         1 => {
-            state.selected_playlist_row = row;
-            data.playlists_state.select(Some(row));
+            state.selected_playlist_track_row = row;
+            data.playlist_tracks_state.select(Some(row));
         }
         2 => {
+            state.selected_row = row;
             state.selected_album_row = row;
             data.albums_state.select(Some(row));
         }
-        3 => data.following_state.select(Some(row)),
+        3 => {
+            state.selected_row = row;
+            data.following_state.select(Some(row));
+        }
         _ => {}
     }
 }
@@ -25,7 +31,13 @@ fn selected_original_index(state: &AppState) -> Option<usize> {
     if state.search_query.trim().is_empty() {
         return None;
     }
-    state.search_matches.get(state.selected_row).copied()
+    match state.selected_subtab {
+        1 => state
+            .search_matches
+            .get(state.selected_playlist_track_row)
+            .copied(),
+        _ => state.search_matches.get(state.selected_row).copied(),
+    }
 }
 
 pub(crate) fn handle_search_input(
@@ -43,6 +55,7 @@ pub(crate) fn handle_search_input(
                 &state.search_query,
                 &data.likes,
                 &data.playlists,
+                &data.playlist_tracks,
                 &data.albums,
                 &data.following,
             );
@@ -71,6 +84,7 @@ pub(crate) fn handle_search_input(
                     &state.search_query,
                     &data.likes,
                     &data.playlists,
+                    &data.playlist_tracks,
                     &data.albums,
                     &data.following,
                 );
