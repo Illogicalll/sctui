@@ -99,10 +99,12 @@ pub(crate) fn player_loop(
                     drop(pos);
 
                     if new_elapsed >= max_duration {
+                        // Leave the track in the same state as a natural end-of-track
+                        // (is_playing still true, elapsed == duration) so the TUI tick's
+                        // end-of-track handling advances to the next track.
                         if let Some(ref s) = *sink_arc.lock().unwrap() {
                             s.stop();
                         }
-                        is_playing_flag.store(false, Ordering::SeqCst);
                         let mut pos = position.lock().unwrap();
                         pos.elapsed = max_duration;
                         pos.last_start = None;
