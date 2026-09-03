@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 pub const MAX_POINTS: usize = 512;
 pub const VOLUME_FLOOR: f32 = 0.2;

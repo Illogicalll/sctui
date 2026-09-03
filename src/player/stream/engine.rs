@@ -6,11 +6,12 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
-use url::Url;
+use reqwest::Url;
 
 use crate::api::Track;
 use crate::auth::{Token, try_refresh_token};
-use crate::player::stream::cache::{CachedHls, SegmentCache, SEGMENT_CACHE_CAP};
+use crate::player::Position;
+use crate::player::stream::cache::{CachedHls, SegmentCache};
 use crate::player::stream::hls::{HlsManifest, StreamsResponse};
 use crate::player::stream::downloader::spawn_segment_pump;
 use crate::player::stream::sample::TapSource;
@@ -131,7 +132,7 @@ impl PlaybackEngine {
                 fetched_at: now,
                 manifest: Arc::new(manifest),
                 init_bytes,
-                segment_cache: Arc::new(Mutex::new(SegmentCache::new(SEGMENT_CACHE_CAP))),
+                segment_cache: Arc::new(Mutex::new(SegmentCache::new())),
             });
         }
 
@@ -170,7 +171,7 @@ impl PlaybackEngine {
         let first_segment_bytes = if !manifest.segments.is_empty() {
             match self.download_bytes(&manifest.segments[0].url) {
                 Ok(bytes) => {
-                    let mut cache = SegmentCache::new(SEGMENT_CACHE_CAP);
+                    let mut cache = SegmentCache::new();
                     cache.insert(0, Arc::new(bytes));
                     Some(Arc::new(Mutex::new(cache)))
                 }
@@ -188,7 +189,7 @@ impl PlaybackEngine {
             manifest: Arc::new(manifest),
             init_bytes,
             segment_cache: first_segment_bytes.unwrap_or_else(|| {
-                Arc::new(Mutex::new(SegmentCache::new(SEGMENT_CACHE_CAP)))
+                Arc::new(Mutex::new(SegmentCache::new()))
             }),
         });
 
@@ -202,14 +203,13 @@ impl PlaybackEngine {
         token: &Arc<Mutex<Token>>,
         sink_arc: &Arc<Mutex<Option<Sink>>>,
         is_playing_flag: &Arc<std::sync::atomic::AtomicBool>,
-        elapsed_time: &Arc<Mutex<Duration>>,
-        last_start: &Arc<Mutex<Option<Instant>>>,
-        current_track: &Arc<Mutex<Option<Track>>>,
+        position: &Arc<Mutex<Position>>,
         wave_buffer: &Arc<Mutex<std::collections::VecDeque<f32>>>,
     ) {
-        let old_track_urn = current_track
+        let old_track_urn = position
             .lock()
             .unwrap()
+            .track
             .as_ref()
             .map(|t| t.track_urn.clone());
         let is_seek = old_track_urn.as_deref() == Some(&track.track_urn);
@@ -234,7 +234,7 @@ impl PlaybackEngine {
             Err(_) => {
                 if !is_seek {
                     is_playing_flag.store(false, Ordering::SeqCst);
-                    *last_start.lock().unwrap() = None;
+                    position.lock().unwrap().last_start = None;
                 }
                 return;
             }
@@ -258,7 +258,7 @@ impl PlaybackEngine {
                     Err(_) => {
                         if !is_seek {
                             is_playing_flag.store(false, Ordering::SeqCst);
-                            *last_start.lock().unwrap() = None;
+                            position.lock().unwrap().last_start = None;
                         }
                         return;
                     }
@@ -266,7 +266,7 @@ impl PlaybackEngine {
             }
         };
 
-        let first_bytes = combine_init_and_segment(&init_bytes, &media_bytes);
+        let first_bytes = [init_bytes.as_slice(), media_bytes.as_slice()].concat();
 
         let new_sink = {
             let stream_guard = self.stream.lock().unwrap();
@@ -283,7 +283,7 @@ impl PlaybackEngine {
         ).is_err() {
             if !is_seek {
                 is_playing_flag.store(false, Ordering::SeqCst);
-                *last_start.lock().unwrap() = None;
+                position.lock().unwrap().last_start = None;
             }
             return;
         }
@@ -308,9 +308,12 @@ impl PlaybackEngine {
             crossfade_and_stop(old_sink, target_volume);
         }
 
-        *current_track.lock().unwrap() = Some(track.clone());
-        *elapsed_time.lock().unwrap() = Duration::from_millis(position_ms);
-        *last_start.lock().unwrap() = Some(Instant::now());
+        {
+            let mut pos = position.lock().unwrap();
+            pos.track = Some(track.clone());
+            pos.elapsed = Duration::from_millis(position_ms);
+            pos.last_start = Some(Instant::now());
+        }
         is_playing_flag.store(true, Ordering::SeqCst);
 
         use crate::player::stream::downloader::SegmentPumpParams;
@@ -325,17 +328,9 @@ impl PlaybackEngine {
             sink_arc: Arc::clone(sink_arc),
             wave_buffer: Arc::clone(wave_buffer),
             is_playing_flag: Arc::clone(is_playing_flag),
-            elapsed_time: Arc::clone(elapsed_time),
-            last_start: Arc::clone(last_start),
+            position: Arc::clone(position),
         });
     }
-}
-
-fn combine_init_and_segment(init_bytes: &[u8], segment_bytes: &[u8]) -> Vec<u8> {
-    let mut combined = Vec::with_capacity(init_bytes.len() + segment_bytes.len());
-    combined.extend_from_slice(init_bytes);
-    combined.extend_from_slice(segment_bytes);
-    combined
 }
 
 fn append_segment_to_sink(
@@ -360,12 +355,11 @@ fn append_segment_to_sink(
 }
 
 fn crossfade_and_stop(old_sink: Sink, target_volume: f32) {
-    let steps = CROSSFADE_STEPS.max(1);
-    let total_ms = CROSSFADE_DURATION.as_millis().max(1) as u64;
-    let step_ms = (total_ms / steps as u64).max(1);
+    let total_ms = CROSSFADE_DURATION.as_millis() as u64;
+    let step_ms = (total_ms / CROSSFADE_STEPS as u64).max(1);
 
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
+    for i in 0..=CROSSFADE_STEPS {
+        let t = i as f32 / CROSSFADE_STEPS as f32;
         old_sink.set_volume(target_volume * (1.0 - t));
         std::thread::sleep(Duration::from_millis(step_ms));
     }

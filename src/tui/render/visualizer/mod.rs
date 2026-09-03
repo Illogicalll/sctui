@@ -22,7 +22,7 @@ pub fn render_visualizer(
     };
 
     match mode {
-        VisualizerMode::Oscilloscope => oscilloscope::render_oscilloscope(frame, area, &samples, mode),
-        VisualizerMode::SpectrumBars => spectrum::render_spectrum_bars(frame, area, &samples, mode),
+        VisualizerMode::Oscilloscope => oscilloscope::render_oscilloscope(frame, area, &samples),
+        VisualizerMode::SpectrumBars => spectrum::render_spectrum_bars(frame, area, &samples),
     }
 }

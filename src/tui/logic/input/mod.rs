@@ -4,7 +4,7 @@ use crate::player::Player;
 
 use crate::tui::logic::state::{AppData, AppState};
 
-mod helpers;
+pub(crate) mod helpers;
 mod quit;
 mod search;
 mod navigation;

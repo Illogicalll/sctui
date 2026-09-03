@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use rodio::{Decoder, Sink};
 
+use crate::player::Position;
 use crate::player::stream::cache::SegmentCache;
 use crate::player::stream::hls::HlsManifest;
 use crate::player::stream::sample::TapSource;
@@ -24,8 +25,7 @@ pub(crate) struct SegmentPumpParams {
     pub sink_arc: Arc<Mutex<Option<Sink>>>,
     pub wave_buffer: Arc<Mutex<std::collections::VecDeque<f32>>>,
     pub is_playing_flag: Arc<std::sync::atomic::AtomicBool>,
-    pub elapsed_time: Arc<Mutex<Duration>>,
-    pub last_start: Arc<Mutex<Option<std::time::Instant>>>,
+    pub position: Arc<Mutex<Position>>,
 }
 
 pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
@@ -41,8 +41,7 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             sink_arc,
             wave_buffer,
             is_playing_flag,
-            elapsed_time,
-            last_start,
+            position,
         } = params;
 
         let mut next_index = start_segment_index.saturating_add(1);
@@ -52,9 +51,10 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             }
 
             let approx_pos_ms = {
-                let base = *elapsed_time.lock().unwrap();
+                let pos = position.lock().unwrap();
+                let base = pos.elapsed;
                 if is_playing_flag.load(Ordering::SeqCst) {
-                    if let Some(start) = *last_start.lock().unwrap() {
+                    if let Some(start) = pos.last_start {
                         (base + start.elapsed()).as_millis() as u64
                     } else {
                         base.as_millis() as u64
@@ -93,7 +93,7 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                 }
             };
 
-            let combined = combine_init_and_segment(&init_bytes, &media_bytes);
+            let combined = [init_bytes.as_slice(), media_bytes.as_slice()].concat();
             let decoder = match Decoder::new(Cursor::new(combined)) {
                 Ok(d) => d,
                 Err(_) => break,
@@ -116,11 +116,4 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             next_index += 1;
         }
     });
-}
-
-fn combine_init_and_segment(init_bytes: &[u8], segment_bytes: &[u8]) -> Vec<u8> {
-    let mut combined = Vec::with_capacity(init_bytes.len() + segment_bytes.len());
-    combined.extend_from_slice(init_bytes);
-    combined.extend_from_slice(segment_bytes);
-    combined
 }

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use rand::seq::SliceRandom;
 
-use crate::api::{Album, Artist, Playlist, Track};
+use crate::api::{Album, Artist, Track};
 use crate::player::Player;
 
 use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
@@ -103,7 +103,6 @@ pub fn build_search_matches(
     selected_subtab: usize,
     query: &str,
     likes: &Vec<Track>,
-    playlists: &Vec<Playlist>,
     playlist_tracks: &Vec<Track>,
     albums: &Vec<Album>,
     following: &Vec<Artist>,
@@ -347,76 +346,45 @@ pub fn play_queued_track(
     }
 }
 
+pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Track] {
+    match state.playback_source {
+        PlaybackSource::Likes => &data.likes,
+        PlaybackSource::Playlist
+        | PlaybackSource::Album
+        | PlaybackSource::FollowingPublished
+        | PlaybackSource::FollowingLikes => &data.playback_tracks,
+    }
+}
+
 pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if let Some(override_track) = state.override_playing.as_ref() {
         return Some(override_track.clone());
     }
     let idx = state.current_playing_index?;
-    match state.playback_source {
-        PlaybackSource::Likes => {
-            let track = data.likes.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::Likes,
-                index: idx,
-                track,
-                tracks_snapshot: None,
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: None,
-                user_added: false,
-            })
-        }
-        PlaybackSource::Playlist => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::Playlist,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: data.playback_playlist_uri.clone(),
-                album_uri: None,
-                following_user_urn: None,
-                user_added: false,
-            })
-        }
-        PlaybackSource::Album => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::Album,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: None,
-                album_uri: data.playback_album_uri.clone(),
-                following_user_urn: None,
-                user_added: false,
-            })
-        }
-        PlaybackSource::FollowingPublished => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::FollowingPublished,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: data.playback_following_user_urn.clone(),
-                user_added: false,
-            })
-        }
-        PlaybackSource::FollowingLikes => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::FollowingLikes,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: data.playback_following_user_urn.clone(),
-                user_added: false,
-            })
-        }
-    }
+    let source = state.playback_source;
+    let track = active_tracks(state, data).get(idx)?;
+    let (tracks_snapshot, playlist_uri, album_uri, following_user_urn) = match source {
+        PlaybackSource::Likes => (None, None, None, None),
+        PlaybackSource::Playlist => (
+            Some(&data.playback_tracks),
+            data.playback_playlist_uri.clone(),
+            None,
+            None,
+        ),
+        PlaybackSource::Album => (
+            Some(&data.playback_tracks),
+            None,
+            data.playback_album_uri.clone(),
+            None,
+        ),
+        PlaybackSource::FollowingPublished | PlaybackSource::FollowingLikes => (
+            Some(&data.playback_tracks),
+            None,
+            None,
+            data.playback_following_user_urn.clone(),
+        ),
+    };
+    Some(QueuedTrack::new(
+        source, idx, track, tracks_snapshot, playlist_uri, album_uri, following_user_urn, false,
+    ))
 }

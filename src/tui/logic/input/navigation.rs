@@ -1,10 +1,10 @@
 use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
 use super::InputOutcome;
-use crate::api::Track;
+use super::helpers::reset_search_rows;
 use crate::player::Player;
-use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource};
-use crate::tui::logic::utils::{build_queue, build_search_matches};
+use crate::tui::logic::state::{AppData, AppState};
+use crate::tui::logic::utils::{active_tracks, build_queue, build_search_matches};
 
 pub(crate) fn handle_tab_switch(state: &mut AppState) -> InputOutcome {
     state.selected_tab = (state.selected_tab + 1) % 3;
@@ -52,7 +52,6 @@ pub(crate) fn handle_right_key(
                 state.selected_subtab,
                 &state.search_query,
                 &data.likes,
-                &data.playlists,
                 &data.playlist_tracks,
                 &data.albums,
                 &data.following,
@@ -74,12 +73,7 @@ pub(crate) fn handle_right_key(
         }
     } else if state.selected_tab == 1 {
         state.selected_searchfilter = (state.selected_searchfilter + 1) % 4;
-        state.selected_row = 0;
-        state.search_selected_playlist_track_row = 0;
-        state.search_selected_album_track_row = 0;
-        state.search_selected_person_track_row = 0;
-        state.search_selected_person_like_row = 0;
-        state.search_people_tracks_focus = FollowingTracksFocus::Published;
+        reset_search_rows(state);
         state.search_needs_fetch = true;
         data.search_tracks_state.select(Some(0));
         data.search_albums_state.select(Some(0));
@@ -136,7 +130,6 @@ pub(crate) fn handle_left_key(
                 state.selected_subtab,
                 &state.search_query,
                 &data.likes,
-                &data.playlists,
                 &data.playlist_tracks,
                 &data.albums,
                 &data.following,
@@ -162,12 +155,7 @@ pub(crate) fn handle_left_key(
         } else {
             state.selected_searchfilter - 1
         };
-        state.selected_row = 0;
-        state.search_selected_playlist_track_row = 0;
-        state.search_selected_album_track_row = 0;
-        state.search_selected_person_track_row = 0;
-        state.search_selected_person_like_row = 0;
-        state.search_people_tracks_focus = FollowingTracksFocus::Published;
+        reset_search_rows(state);
         state.search_needs_fetch = true;
         data.search_tracks_state.select(Some(0));
         data.search_albums_state.select(Some(0));
@@ -186,13 +174,7 @@ fn handle_next_track(
     player: &Player,
 ) -> InputOutcome {
     if let Some(current_idx) = state.current_playing_index {
-        let active_tracks = match state.playback_source {
-            PlaybackSource::Likes => &data.likes,
-            PlaybackSource::Playlist
-            | PlaybackSource::Album
-            | PlaybackSource::FollowingPublished
-            | PlaybackSource::FollowingLikes => &data.playback_tracks,
-        };
+        let active_tracks = active_tracks(state, data);
         if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
             state.auto_queue =
                 build_queue(current_idx, active_tracks, state.shuffle_enabled);

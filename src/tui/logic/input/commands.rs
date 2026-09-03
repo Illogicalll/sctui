@@ -1,12 +1,13 @@
 use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
 use super::InputOutcome;
-use crate::tui::logic::state::{AppData, AppState, EngagementAction, FollowingTracksFocus, PlaybackSource};
+use crate::tui::logic::state::{AppData, AppState, EngagementAction, FollowingTracksFocus};
 use crate::player::Player;
-use crate::tui::logic::utils::build_queue;
+use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::build_search_matches;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
+use super::helpers::{filtered_row, reset_search_rows};
 use super::queue::{handle_add_to_queue, handle_add_next_to_queue};
 
 pub(crate) fn handle_char(
@@ -18,8 +19,13 @@ pub(crate) fn handle_char(
 ) -> InputOutcome {
     if key.modifiers.contains(KeyModifiers::SHIFT) {
         handle_shift_char(c, state, data, player)
-    } else if state.selected_tab == 0 {
-        handle_space(c, player)
+    } else if state.selected_tab == 0 && c == ' ' {
+        if player.is_playing() {
+            player.pause();
+        } else {
+            player.resume();
+        }
+        InputOutcome::Continue
     } else if state.selected_tab == 1 {
         handle_search_char(c, state)
     } else {
@@ -31,12 +37,7 @@ pub(crate) fn handle_backspace(state: &mut AppState) -> InputOutcome {
     if state.selected_tab == 1 {
         state.query.pop();
         state.search_needs_fetch = true;
-        state.selected_row = 0;
-        state.search_selected_playlist_track_row = 0;
-        state.search_selected_album_track_row = 0;
-        state.search_selected_person_track_row = 0;
-        state.search_selected_person_like_row = 0;
-        state.search_people_tracks_focus = FollowingTracksFocus::Published;
+        reset_search_rows(state);
     }
     InputOutcome::Continue
 }
@@ -57,15 +58,8 @@ fn handle_shift_char(
         's' | 'S' => {
             state.shuffle_enabled = !state.shuffle_enabled;
             if let Some(current_idx) = state.current_playing_index {
-                let active_tracks = match state.playback_source {
-                    PlaybackSource::Likes => &data.likes,
-                    PlaybackSource::Playlist
-                    | PlaybackSource::Album
-                    | PlaybackSource::FollowingPublished
-                    | PlaybackSource::FollowingLikes => &data.playback_tracks,
-                };
                 state.auto_queue =
-                    build_queue(current_idx, active_tracks, state.shuffle_enabled);
+                    build_queue(current_idx, active_tracks(state, data), state.shuffle_enabled);
             }
         }
         'r' | 'R' => {
@@ -88,7 +82,6 @@ fn handle_shift_char(
                     state.selected_subtab,
                     &state.search_query,
                     &data.likes,
-                    &data.playlists,
                     &data.playlist_tracks,
                     &data.albums,
                     &data.following,
@@ -106,16 +99,9 @@ fn handle_shift_char(
             if state.queue_visible {
                 if let Some(current_idx) = state.current_playing_index {
                     if state.auto_queue.is_empty() {
-                        let active_tracks = match state.playback_source {
-                            PlaybackSource::Likes => &data.likes,
-                            PlaybackSource::Playlist
-                            | PlaybackSource::Album
-                            | PlaybackSource::FollowingPublished
-                            | PlaybackSource::FollowingLikes => &data.playback_tracks,
-                        };
                         state.auto_queue = build_queue(
                             current_idx,
-                            active_tracks,
+                            active_tracks(state, data),
                             state.shuffle_enabled,
                         );
                     }
@@ -165,13 +151,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
     if state.selected_tab == 0 {
         match state.selected_subtab {
             0 => {
-                let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-                let selected_idx = if search_active {
-                    state.search_matches.get(state.selected_row).copied()
-                } else {
-                    Some(state.selected_row)
-                };
-                let track = selected_idx.and_then(|idx| data.likes.get(idx));
+                let track = filtered_row(state, state.selected_row).and_then(|idx| data.likes.get(idx));
                 if let Some(track) = track {
                     if let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) {
                         data.liked_track_urns.remove(&track.track_urn);
@@ -211,13 +191,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                 }
             }
             2 => {
-                let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-                let selected_idx = if search_active {
-                    state.search_matches.get(state.selected_row).copied()
-                } else {
-                    Some(state.selected_row)
-                };
-                let album = selected_idx.and_then(|idx| data.albums.get(idx));
+                let album = filtered_row(state, state.selected_row).and_then(|idx| data.albums.get(idx));
                 if let Some(album) = album {
                     if let Some(playlist_id) =
                         soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri)
@@ -231,13 +205,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                 }
             }
             3 => {
-                let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-                let selected_idx = if search_active {
-                    state.search_matches.get(state.selected_row).copied()
-                } else {
-                    Some(state.selected_row)
-                };
-                let artist = selected_idx.and_then(|idx| data.following.get(idx));
+                let artist = filtered_row(state, state.selected_row).and_then(|idx| data.following.get(idx));
                 if let Some(artist) = artist {
                     if let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
                         data.followed_user_urns.remove(&artist.urn);
@@ -343,25 +311,9 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
     }
 }
 
-fn handle_space(c: char, player: &Player) -> InputOutcome {
-    if c == ' ' {
-        if player.is_playing() {
-            player.pause();
-        } else {
-            player.resume();
-        }
-    }
-    InputOutcome::Continue
-}
-
 fn handle_search_char(c: char, state: &mut AppState) -> InputOutcome {
     state.query.push(c);
     state.search_needs_fetch = true;
-    state.selected_row = 0;
-    state.search_selected_playlist_track_row = 0;
-    state.search_selected_album_track_row = 0;
-    state.search_selected_person_track_row = 0;
-    state.search_selected_person_like_row = 0;
-    state.search_people_tracks_focus = FollowingTracksFocus::Published;
+    reset_search_rows(state);
     InputOutcome::Continue
 }

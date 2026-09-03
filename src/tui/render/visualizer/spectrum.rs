@@ -8,8 +8,6 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear},
 };
 
-use crate::tui::logic::state::VisualizerMode;
-
 use rustfft::{FftPlanner, num_complex::Complex, num_traits::Zero};
 
 const FFT_SIZE: usize = 2048;
@@ -50,9 +48,6 @@ fn fft_plan() -> &'static Arc<dyn rustfft::Fft<f32>> {
 
 fn hann_window() -> &'static [f32] {
     HANN_WINDOW.get_or_init(|| {
-        if FFT_SIZE <= 1 {
-            return vec![1.0];
-        }
         (0..FFT_SIZE)
             .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (FFT_SIZE - 1) as f32).cos()))
             .collect()
@@ -63,7 +58,7 @@ fn spectrum_state() -> &'static Mutex<SpectrumState> {
     SPECTRUM_STATE.get_or_init(|| Mutex::new(SpectrumState::default()))
 }
 
-pub fn render_spectrum_bars(frame: &mut Frame, area: Rect, samples: &[f32], mode: VisualizerMode) {
+pub fn render_spectrum_bars(frame: &mut Frame, area: Rect, samples: &[f32]) {
     let block = Block::default()
         .title("sctui")
         .title_alignment(ratatui::layout::Alignment::Center)

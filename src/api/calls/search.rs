@@ -3,57 +3,14 @@ use reqwest;
 
 use crate::auth::{Token, try_refresh_token};
 
-use super::super::utils::{format_duration, format_playback_count, parse_str, parse_u64};
+use super::super::utils::{format_duration, parse_str, parse_track, parse_u64, response_items};
 use crate::api::{Album, Artist, Playlist, Track};
 use std::sync::{Arc, Mutex};
-
-fn parse_track(obj: &serde_json::Value) -> Track {
-    let title = parse_str(obj, "title");
-
-    let artists = parse_str(obj, "metadata_artist");
-    let artists = if !artists.is_empty() {
-        artists
-    } else {
-        parse_str(obj.get("user").unwrap_or(&serde_json::Value::Null), "username")
-    };
-
-    let duration_ms = parse_u64(obj, "duration");
-    let duration = format_duration(duration_ms);
-
-    let playback_count = format_playback_count(parse_u64(obj, "playback_count"));
-
-    let artwork_url = parse_str(obj, "artwork_url");
-    let stream_url = parse_str(obj, "stream_url");
-    let access = parse_str(obj, "access");
-    let track_urn = parse_str(obj, "urn");
-
-    Track {
-        title,
-        artists,
-        duration,
-        duration_ms,
-        playback_count,
-        artwork_url,
-        stream_url,
-        access,
-        track_urn,
-    }
-}
 
 fn parse_created_at(value: &str) -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339(value)
         .or_else(|_| DateTime::parse_from_str(value, "%Y/%m/%d %H:%M:%S %z"))
         .unwrap_or_else(|_| Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()))
-}
-
-fn response_items(resp: &serde_json::Value) -> Vec<serde_json::Value> {
-    if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
-        collection.clone()
-    } else if let Some(array) = resp.as_array() {
-        array.clone()
-    } else {
-        Vec::new()
-    }
 }
 
 pub async fn fetch_search_tracks(

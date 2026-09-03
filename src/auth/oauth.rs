@@ -3,20 +3,16 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{Rng, distributions::Alphanumeric};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Response, Server};
-use url::Url;
+use reqwest::Url;
 
 use super::token::Token;
 
-static CODE_VERIFIER_LEN: usize = 64;
-static STATE_LEN: usize = 56;
-
-fn generate_code_verifier() -> String {
+fn random_alnum(n: usize) -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(CODE_VERIFIER_LEN)
+        .take(n)
         .map(char::from)
         .collect()
 }
@@ -26,22 +22,14 @@ fn generate_code_challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(hash)
 }
 
-fn generate_state() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(STATE_LEN)
-        .map(char::from)
-        .collect()
-}
-
 pub fn authenticate() -> Result<Token> {
     dotenvy::dotenv().ok();
     let client_id = std::env::var("SOUNDCLOUD_CLIENT_ID")?;
     let client_secret = std::env::var("SOUNDCLOUD_CLIENT_SECRET")?;
     let redirect_uri = "http://127.0.0.1:8080/callback";
-    let code_verifier = generate_code_verifier();
+    let code_verifier = random_alnum(64);
     let code_challenge = generate_code_challenge(&code_verifier);
-    let state = generate_state();
+    let state = random_alnum(56);
     let auth_url = format!(
         "https://secure.soundcloud.com/authorize?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&code_challenge={code_challenge}&code_challenge_method=S256&state={state}",
         client_id = client_id,
@@ -58,7 +46,7 @@ pub fn authenticate() -> Result<Token> {
         )
     })?;
 
-    let received_data = Arc::new(Mutex::new(None));
+    let mut received_code = None;
     for request in server.incoming_requests() {
         let url_str = format!("http://127.0.0.1:8080{}", request.url());
         let parsed = Url::parse(&url_str)?;
@@ -79,10 +67,7 @@ pub fn authenticate() -> Result<Token> {
                     request.respond(response)?;
                     return Err(anyhow!("CSRF state mismatch"));
                 }
-                {
-                    let mut data = received_data.lock().unwrap();
-                    *data = Some(code.clone());
-                }
+                received_code = Some(code);
                 let response =
                     Response::from_string("Authentication successful! You can close this window.");
                 request.respond(response)?;
@@ -98,11 +83,7 @@ pub fn authenticate() -> Result<Token> {
         }
     }
 
-    let code = {
-        let data = received_data.lock().unwrap();
-        data.clone()
-            .ok_or_else(|| anyhow!("No authorization code received"))?
-    };
+    let code = received_code.ok_or_else(|| anyhow!("No authorization code received"))?;
     let params = [
         ("client_id", client_id.as_str()),
         ("client_secret", client_secret.as_str()),
