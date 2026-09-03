@@ -56,7 +56,6 @@ pub(crate) fn parse_track(obj: &serde_json::Value) -> Track {
     let playback_count = format_playback_count(parse_u64(obj, "playback_count"));
 
     let artwork_url = parse_str(obj, "artwork_url");
-    let stream_url = parse_str(obj, "stream_url");
     let access = parse_str(obj, "access");
     let track_urn = parse_str(obj, "urn");
 
@@ -67,7 +66,6 @@ pub(crate) fn parse_track(obj: &serde_json::Value) -> Track {
         duration_ms,
         playback_count,
         artwork_url,
-        stream_url,
         access,
         track_urn,
     }

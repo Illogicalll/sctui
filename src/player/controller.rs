@@ -133,7 +133,6 @@ impl Player {
                 duration_ms: 1,
                 playback_count: "0".to_string(),
                 artwork_url: "".to_string(),
-                stream_url: "".to_string(),
                 access: "playable".to_string(),
                 track_urn: "".to_string(),
             })

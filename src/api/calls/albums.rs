@@ -1,11 +1,10 @@
 use reqwest::blocking::Client;
 use reqwest;
 
-use crate::auth::{Token, try_refresh_token};
+use crate::auth::try_refresh_token;
 
 use super::super::utils::{format_duration, parse_str, parse_u64};
-use crate::api::{API, Album, Page, Track, fetch_playlist_tracks};
-use std::sync::{Arc, Mutex};
+use crate::api::{API, Album, Page};
 
 impl API {
     pub fn get_albums(&mut self) -> anyhow::Result<Vec<Album>> {
@@ -61,11 +60,4 @@ impl API {
 
         Ok(albums)
     }
-}
-
-pub async fn fetch_album_tracks(
-    token: Arc<Mutex<Token>>,
-    tracks_uri: String,
-) -> anyhow::Result<Vec<Track>> {
-    fetch_playlist_tracks(token, tracks_uri).await
 }

@@ -1,10 +1,9 @@
-use crate::api::{Album, Artist, Playlist, Track};
+use crate::api::{Album, Artist, Track};
 
 use super::state::{AppData, AppState};
 
 pub struct FilteredViews {
     pub likes: Vec<Track>,
-    pub playlists: Vec<Playlist>,
     pub playlist_tracks: Vec<Track>,
     pub albums: Vec<Album>,
     pub following: Vec<Artist>,
@@ -28,8 +27,6 @@ pub fn build_filtered_views(state: &AppState, data: &AppData) -> FilteredViews {
     } else {
         Vec::new()
     };
-
-    let playlists = Vec::new();
 
     let playlist_tracks = if filter_active && state.selected_subtab == 1 {
         state
@@ -63,7 +60,6 @@ pub fn build_filtered_views(state: &AppState, data: &AppData) -> FilteredViews {
 
     FilteredViews {
         likes,
-        playlists,
         playlist_tracks,
         albums,
         following,

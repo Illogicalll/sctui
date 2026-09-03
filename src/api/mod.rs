@@ -6,11 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::auth::Token;
 
-pub use calls::albums::fetch_album_tracks;
-pub use calls::engagement::{
-    follow_user, like_playlist, like_track, unfollow_user, unlike_playlist, unlike_track,
-};
-pub use calls::following::{fetch_following_liked_tracks, fetch_following_tracks};
+pub(crate) use calls::engagement::engage;
+pub(crate) use calls::following::fetch_user_tracks;
 pub use calls::playlists::fetch_playlist_tracks;
 pub use calls::search::{
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,

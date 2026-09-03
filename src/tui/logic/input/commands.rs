@@ -1,7 +1,7 @@
 use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
 use super::InputOutcome;
-use crate::tui::logic::state::{AppData, AppState, EngagementAction, FollowingTracksFocus};
+use crate::tui::logic::state::{AppData, AppState, Engagement, FollowingTracksFocus};
 use crate::player::Player;
 use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::build_search_matches;
@@ -157,7 +157,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         data.liked_track_urns.remove(&track.track_urn);
                         state
                             .engagement_queue
-                            .push_back(EngagementAction::UnlikeTrack {
+                            .push_back(Engagement::UnlikeTrack {
                                 track_urn: track.track_urn.clone(),
                                 track_id,
                             });
@@ -172,7 +172,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         let is_liked = data.liked_playlist_uris.contains(&playlist.tracks_uri);
                         if is_liked {
                             data.liked_playlist_uris.remove(&playlist.tracks_uri);
-                            state.engagement_queue.push_back(EngagementAction::UnlikePlaylist {
+                            state.engagement_queue.push_back(Engagement::UnlikePlaylist {
                                 tracks_uri: playlist.tracks_uri.clone(),
                                 playlist_id,
                             });
@@ -182,7 +182,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                             liked_playlist.is_owned = false;
                             state
                                 .engagement_queue
-                                .push_back(EngagementAction::LikePlaylist {
+                                .push_back(Engagement::LikePlaylist {
                                 playlist: liked_playlist,
                                     playlist_id,
                                 });
@@ -197,7 +197,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri)
                     {
                         data.liked_album_uris.remove(&album.tracks_uri);
-                        state.engagement_queue.push_back(EngagementAction::UnlikeAlbum {
+                        state.engagement_queue.push_back(Engagement::UnlikeAlbum {
                             tracks_uri: album.tracks_uri.clone(),
                             playlist_id,
                         });
@@ -209,7 +209,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                 if let Some(artist) = artist {
                     if let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
                         data.followed_user_urns.remove(&artist.urn);
-                        state.engagement_queue.push_back(EngagementAction::UnfollowUser {
+                        state.engagement_queue.push_back(Engagement::UnfollowUser {
                             urn: artist.urn.clone(),
                             user_id,
                         });
@@ -226,13 +226,13 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         let is_liked = data.liked_track_urns.contains(&track.track_urn);
                         if is_liked {
                             data.liked_track_urns.remove(&track.track_urn);
-                            state.engagement_queue.push_back(EngagementAction::UnlikeTrack {
+                            state.engagement_queue.push_back(Engagement::UnlikeTrack {
                                 track_urn: track.track_urn.clone(),
                                 track_id,
                             });
                         } else {
                             data.liked_track_urns.insert(track.track_urn.clone());
-                            state.engagement_queue.push_back(EngagementAction::LikeTrack {
+                            state.engagement_queue.push_back(Engagement::LikeTrack {
                                 track: track.clone(),
                                 track_id,
                             });
@@ -248,13 +248,13 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         let is_liked = data.liked_album_uris.contains(&album.tracks_uri);
                         if is_liked {
                             data.liked_album_uris.remove(&album.tracks_uri);
-                            state.engagement_queue.push_back(EngagementAction::UnlikeAlbum {
+                            state.engagement_queue.push_back(Engagement::UnlikeAlbum {
                                 tracks_uri: album.tracks_uri.clone(),
                                 playlist_id,
                             });
                         } else {
                             data.liked_album_uris.insert(album.tracks_uri.clone());
-                            state.engagement_queue.push_back(EngagementAction::LikeAlbum {
+                            state.engagement_queue.push_back(Engagement::LikeAlbum {
                                 album: album.clone(),
                                 playlist_id,
                             });
@@ -270,7 +270,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         let is_liked = data.liked_playlist_uris.contains(&playlist.tracks_uri);
                         if is_liked {
                             data.liked_playlist_uris.remove(&playlist.tracks_uri);
-                            state.engagement_queue.push_back(EngagementAction::UnlikePlaylist {
+                            state.engagement_queue.push_back(Engagement::UnlikePlaylist {
                                 tracks_uri: playlist.tracks_uri.clone(),
                                 playlist_id,
                             });
@@ -278,7 +278,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                             data.liked_playlist_uris.insert(playlist.tracks_uri.clone());
                             state
                                 .engagement_queue
-                                .push_back(EngagementAction::LikePlaylist {
+                                .push_back(Engagement::LikePlaylist {
                                     playlist: playlist.clone(),
                                     playlist_id,
                                 });
@@ -292,13 +292,13 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                         let is_followed = data.followed_user_urns.contains(&artist.urn);
                         if is_followed {
                             data.followed_user_urns.remove(&artist.urn);
-                            state.engagement_queue.push_back(EngagementAction::UnfollowUser {
+                            state.engagement_queue.push_back(Engagement::UnfollowUser {
                                 urn: artist.urn.clone(),
                                 user_id,
                             });
                         } else {
                             data.followed_user_urns.insert(artist.urn.clone());
-                            state.engagement_queue.push_back(EngagementAction::FollowUser {
+                            state.engagement_queue.push_back(Engagement::FollowUser {
                                 artist: artist.clone(),
                                 user_id,
                             });

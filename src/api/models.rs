@@ -8,7 +8,6 @@ pub struct Track {
     pub duration_ms: u64,
     pub playback_count: String,
     pub artwork_url: String,
-    pub stream_url: String,
     pub access: String,
     pub track_urn: String,
 }

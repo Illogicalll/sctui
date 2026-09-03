@@ -53,7 +53,8 @@ fn build_user_tracks_url(user_urn: &str, suffix: &str) -> String {
     )
 }
 
-async fn fetch_user_tracks(
+/// `suffix` is `"tracks"` for a user's uploads or `"likes/tracks"` for their likes.
+pub(crate) async fn fetch_user_tracks(
     token: Arc<Mutex<Token>>,
     user_urn: String,
     suffix: &str,
@@ -73,18 +74,4 @@ async fn fetch_user_tracks(
         .await?;
 
     Ok(response_items(&resp).into_iter().map(|v| parse_track(&v)).collect())
-}
-
-pub async fn fetch_following_tracks(
-    token: Arc<Mutex<Token>>,
-    user_urn: String,
-) -> anyhow::Result<Vec<Track>> {
-    fetch_user_tracks(token, user_urn, "tracks").await
-}
-
-pub async fn fetch_following_liked_tracks(
-    token: Arc<Mutex<Token>>,
-    user_urn: String,
-) -> anyhow::Result<Vec<Track>> {
-    fetch_user_tracks(token, user_urn, "likes/tracks").await
 }
