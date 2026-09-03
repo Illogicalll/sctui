@@ -115,6 +115,7 @@ pub struct AppState {
     pub search_people_tracks_task: Option<tokio::task::JoinHandle<()>>,
     pub search_people_likes_task: Option<tokio::task::JoinHandle<()>>,
     pub progress: u64,
+    pub tick: f64,
     pub current_playing_index: Option<usize>,
     pub playback_source: PlaybackSource,
     pub shuffle_enabled: bool,
@@ -179,6 +180,7 @@ impl AppState {
             search_people_tracks_task: None,
             search_people_likes_task: None,
             progress: 0,
+            tick: 0.0,
             current_playing_index: None,
             playback_source: PlaybackSource::Likes,
             shuffle_enabled: false,
@@ -465,3 +467,7 @@ pub fn table_rows_count(selected_subtab: usize, data: &AppData) -> usize {
 pub fn info_table_rows_count() -> usize {
     2
 }
+
+pub const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];
+pub const SUBTAB_TITLES: [&str; 4] = ["Likes", "Playlists", "Albums", "Following"];
+pub const SEARCHFILTERS: [&str; 4] = ["Tracks", "Albums", "Playlists", "People"];

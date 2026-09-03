@@ -6,7 +6,9 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
 };
 
-use crate::api::{Album, Artist, Playlist, Track};
+use crate::api::Track;
+use crate::tui::logic::filtering::{FilteredViews, is_filter_active};
+use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, SUBTAB_TITLES};
 
 use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
 
@@ -33,33 +35,36 @@ pub fn render_library(
     frame: &mut Frame,
     area: Rect,
     width: usize,
-    likes_view: &Vec<Track>,
-    likes_state: &mut TableState,
-    playlists: &Vec<Playlist>,
-    playlists_state: &mut TableState,
-    playlist_tracks: &Vec<Track>,
-    playlist_tracks_state: &mut TableState,
-    album_tracks: &Vec<Track>,
-    album_tracks_state: &mut TableState,
-    albums: &Vec<Album>,
-    albums_state: &mut TableState,
-    following: &Vec<Artist>,
-    following_state: &mut TableState,
-    following_tracks: &Vec<Track>,
-    following_tracks_state: &mut TableState,
-    following_likes_tracks: &Vec<Track>,
-    following_likes_state: &mut TableState,
-    selected_subtab: usize,
-    subtab_titles: &[&str],
-    selected_row: usize,
-    selected_playlist_track_row: usize,
-    selected_album_track_row: usize,
-    selected_following_track_row: usize,
-    selected_following_like_row: usize,
-    following_focus_is_likes: bool,
-    search_popup_visible: bool,
-    search_query: &str,
+    state: &AppState,
+    data: &mut AppData,
+    views: &FilteredViews,
 ) {
+    let filter_active = is_filter_active(state);
+    let selected_subtab = state.selected_subtab;
+    let selected_row = state.selected_row;
+    let search_popup_visible = state.search_popup_visible;
+    let likes_view = if filter_active && selected_subtab == 0 {
+        &views.likes
+    } else {
+        &data.likes
+    };
+    let playlist_tracks = if filter_active && selected_subtab == 1 {
+        &views.playlist_tracks
+    } else {
+        &data.playlist_tracks
+    };
+    let albums = if filter_active && selected_subtab == 2 {
+        &views.albums
+    } else {
+        &data.albums
+    };
+    let following = if filter_active && selected_subtab == 3 {
+        &views.following
+    } else {
+        &data.following
+    };
+    let following_focus_is_likes = state.following_tracks_focus == FollowingTracksFocus::Likes;
+
     let subchunks = if search_popup_visible {
         Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -76,7 +81,7 @@ pub fn render_library(
             .split(area)
     };
 
-    let subtabs: Vec<_> = subtab_titles.iter().map(|t| Span::raw(*t)).collect();
+    let subtabs: Vec<_> = SUBTAB_TITLES.iter().map(|t| Span::raw(*t)).collect();
     let subtabs_widget = Tabs::new(subtabs)
         .block(
             Block::default()
@@ -93,7 +98,7 @@ pub fn render_library(
     frame.render_widget(subtabs_widget, subchunks[0]);
 
     if search_popup_visible {
-        let input = Paragraph::new(search_query.to_string())
+        let input = Paragraph::new(state.search_query.to_string())
             .block(
                 Block::default()
                     .title("search")
@@ -112,7 +117,7 @@ pub fn render_library(
         track_table(
             frame,
             table_area,
-            likes_state,
+            &mut data.likes_state,
             None,
             TRACK_HEADER,
             &TRACK_WIDTHS,
@@ -153,7 +158,7 @@ pub fn render_library(
     let col_min_widths = calculate_min_widths(&col_widths, width);
 
     let rows = match selected_subtab {
-        1 => playlists
+        1 => data.playlists
             .iter()
             .map(|playlist| {
                 Row::new(vec![
@@ -213,18 +218,18 @@ pub fn render_library(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], playlists_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.playlists_state);
 
         track_table(
             frame,
             columns[1],
-            playlist_tracks_state,
+            &mut data.playlist_tracks_state,
             None,
             TRACK_HEADER,
             &TRACK_WIDTHS,
             playlist_tracks,
             track_cells,
-            selected_playlist_track_row,
+            state.selected_playlist_track_row,
             true,
         );
         return;
@@ -244,18 +249,18 @@ pub fn render_library(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], albums_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.albums_state);
 
         track_table(
             frame,
             columns[1],
-            album_tracks_state,
+            &mut data.album_tracks_state,
             None,
             SHORT_TRACK_HEADER,
             &ALBUM_TRACK_WIDTHS,
-            album_tracks,
+            &data.album_tracks,
             short_track_cells,
-            selected_album_track_row,
+            state.selected_album_track_row,
             true,
         );
         return;
@@ -279,31 +284,31 @@ pub fn render_library(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], following_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.following_state);
 
         track_table(
             frame,
             columns[1],
-            following_tracks_state,
+            &mut data.following_tracks_state,
             Some("tracks"),
             SHORT_TRACK_HEADER,
             &PUBLISHED_TRACK_WIDTHS,
-            following_tracks,
+            &data.following_tracks,
             short_track_cells,
-            selected_following_track_row,
+            state.selected_following_track_row,
             !following_focus_is_likes,
         );
 
         track_table(
             frame,
             columns[2],
-            following_likes_state,
+            &mut data.following_likes_state,
             Some("liked"),
             TRACK_HEADER,
             &TRACK_WIDTHS,
-            following_likes_tracks,
+            &data.following_likes_tracks,
             track_cells,
-            selected_following_like_row,
+            state.selected_following_like_row,
             following_focus_is_likes,
         );
         return;
@@ -317,7 +322,7 @@ pub fn render_library(
                 .border_type(BorderType::Rounded),
         )
         .column_spacing(1);
-    frame.render_stateful_widget(table, table_area, likes_state);
+    frame.render_stateful_widget(table, table_area, &mut data.likes_state);
 }
 
 pub(super) fn track_cells(t: &Track) -> Vec<&str> {

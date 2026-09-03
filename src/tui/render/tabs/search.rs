@@ -3,11 +3,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, Tabs},
 };
 
-use crate::api::{Album, Artist, Playlist, Track};
-use std::collections::HashSet;
+use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, SEARCHFILTERS};
 
 use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
 
@@ -22,36 +21,12 @@ pub fn render_search(
     frame: &mut Frame,
     area: Rect,
     width: usize,
-    query: &str,
-    searchfilters: &[&str],
-    selected_searchfilter: usize,
-    selected_row: usize,
-    liked_track_urns: &HashSet<String>,
-    liked_album_uris: &HashSet<String>,
-    liked_playlist_uris: &HashSet<String>,
-    followed_user_urns: &HashSet<String>,
-    search_tracks: &Vec<Track>,
-    search_tracks_state: &mut TableState,
-    search_playlists: &Vec<Playlist>,
-    search_playlists_state: &mut TableState,
-    search_playlist_tracks: &Vec<Track>,
-    search_playlist_tracks_state: &mut TableState,
-    search_albums: &Vec<Album>,
-    search_albums_state: &mut TableState,
-    search_album_tracks: &Vec<Track>,
-    search_album_tracks_state: &mut TableState,
-    search_people: &Vec<Artist>,
-    search_people_state: &mut TableState,
-    search_people_tracks: &Vec<Track>,
-    search_people_tracks_state: &mut TableState,
-    search_people_likes_tracks: &Vec<Track>,
-    search_people_likes_state: &mut TableState,
-    selected_playlist_track_row: usize,
-    selected_album_track_row: usize,
-    selected_person_track_row: usize,
-    selected_person_like_row: usize,
-    people_focus_is_likes: bool,
+    state: &AppState,
+    data: &mut AppData,
 ) {
+    let selected_searchfilter = state.selected_searchfilter;
+    let selected_row = state.selected_row;
+    let people_focus_is_likes = state.search_people_tracks_focus == FollowingTracksFocus::Likes;
     let subchunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(
@@ -64,7 +39,7 @@ pub fn render_search(
         )
         .split(area);
 
-    let input = Paragraph::new(query.to_string())
+    let input = Paragraph::new(state.query.to_string())
         .block(
             Block::default()
                 .title("search")
@@ -81,7 +56,7 @@ pub fn render_search(
         track_table(
             frame,
             table_area,
-            search_tracks_state,
+            &mut data.search_tracks_state,
             None,
             &["♥", "Title", "Artist(s)", "Duration", "Streams"],
             &[
@@ -91,9 +66,9 @@ pub fn render_search(
                 Constraint::Percentage(11),
                 Constraint::Percentage(10),
             ],
-            search_tracks,
+            &data.search_tracks,
             |t| {
-                let liked = if liked_track_urns.contains(&t.track_urn) {
+                let liked = if data.liked_track_urns.contains(&t.track_urn) {
                     "♥"
                 } else {
                     ""
@@ -124,11 +99,11 @@ pub fn render_search(
         ];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let left_rows = search_playlists
+        let left_rows = data.search_playlists
             .iter()
             .enumerate()
             .map(|(i, playlist)| {
-                let liked = if liked_playlist_uris.contains(&playlist.tracks_uri) {
+                let liked = if data.liked_playlist_uris.contains(&playlist.tracks_uri) {
                     "♥"
                 } else {
                     ""
@@ -154,18 +129,18 @@ pub fn render_search(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], search_playlists_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.search_playlists_state);
 
         track_table(
             frame,
             columns[1],
-            search_playlist_tracks_state,
+            &mut data.search_playlist_tracks_state,
             None,
             TRACK_HEADER,
             &TRACK_WIDTHS,
-            search_playlist_tracks,
+            &data.search_playlist_tracks,
             track_cells,
-            selected_playlist_track_row,
+            state.search_selected_playlist_track_row,
             true,
         );
     } else if selected_searchfilter == 1 {
@@ -185,11 +160,11 @@ pub fn render_search(
         ];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let left_rows = search_albums
+        let left_rows = data.search_albums
             .iter()
             .enumerate()
             .map(|(i, album)| {
-                let liked = if liked_album_uris.contains(&album.tracks_uri) {
+                let liked = if data.liked_album_uris.contains(&album.tracks_uri) {
                     "♥"
                 } else {
                     ""
@@ -217,18 +192,18 @@ pub fn render_search(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], search_albums_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.search_albums_state);
 
         track_table(
             frame,
             columns[1],
-            search_album_tracks_state,
+            &mut data.search_album_tracks_state,
             None,
             SHORT_TRACK_HEADER,
             &ALBUM_TRACK_WIDTHS,
-            search_album_tracks,
+            &data.search_album_tracks,
             short_track_cells,
-            selected_album_track_row,
+            state.search_selected_album_track_row,
             true,
         );
     } else if selected_searchfilter == 3 {
@@ -245,11 +220,11 @@ pub fn render_search(
         let left_col_widths = vec![Constraint::Length(1), Constraint::Percentage(100)];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let left_rows = search_people
+        let left_rows = data.search_people
             .iter()
             .enumerate()
             .map(|(i, artist)| {
-                let liked = if followed_user_urns.contains(&artist.urn) {
+                let liked = if data.followed_user_urns.contains(&artist.urn) {
                     "♥"
                 } else {
                     ""
@@ -273,31 +248,31 @@ pub fn render_search(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], search_people_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.search_people_state);
 
         track_table(
             frame,
             columns[1],
-            search_people_tracks_state,
+            &mut data.search_people_tracks_state,
             Some("tracks"),
             SHORT_TRACK_HEADER,
             &PUBLISHED_TRACK_WIDTHS,
-            search_people_tracks,
+            &data.search_people_tracks,
             short_track_cells,
-            selected_person_track_row,
+            state.search_selected_person_track_row,
             !people_focus_is_likes,
         );
 
         track_table(
             frame,
             columns[2],
-            search_people_likes_state,
+            &mut data.search_people_likes_state,
             Some("liked"),
             TRACK_HEADER,
             &TRACK_WIDTHS,
-            search_people_likes_tracks,
+            &data.search_people_likes_tracks,
             track_cells,
-            selected_person_like_row,
+            state.search_selected_person_like_row,
             people_focus_is_likes,
         );
     } else {
@@ -320,7 +295,7 @@ pub fn render_search(
         format!("{}{}{}", " ".repeat(padding), text, " ".repeat(padding))
     }
 
-    let searchfilter: Vec<Span<'static>> = searchfilters
+    let searchfilter: Vec<Span<'static>> = SEARCHFILTERS
         .iter()
         .map(|filter| Span::raw(center_text_in_width(filter, tab_width)))
         .collect();

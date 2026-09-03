@@ -3,41 +3,42 @@ mod queue;
 mod quit;
 mod utils;
 
-use std::collections::VecDeque;
-
 use ratatui::Frame;
 
-use crate::api::Track;
-use crate::tui::logic::state::QueuedTrack;
+use crate::tui::logic::state::{AppData, AppState};
+use crate::tui::logic::utils::active_tracks;
 
-pub fn render_overlays(
-    frame: &mut Frame,
-    queue_tracks: &Vec<Track>,
-    manual_queue: &VecDeque<QueuedTrack>,
-    auto_queue: &VecDeque<usize>,
-    current_playing_track: Option<Track>,
-    previous_playing_track: Option<Track>,
-    queue_visible: bool,
-    help_visible: bool,
-    quit_confirm_visible: bool,
-    quit_confirm_selected: usize,
-) {
-    if queue_visible {
+pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
+    if state.queue_visible {
+        let queue_tracks = active_tracks(state, data);
+        let previous_playing_track = state
+            .playback_history
+            .last()
+            .map(|queued| queued.track.clone());
+        let current_playing_track = state
+            .override_playing
+            .as_ref()
+            .map(|queued| queued.track.clone())
+            .or_else(|| {
+                state
+                    .current_playing_index
+                    .and_then(|idx| queue_tracks.get(idx).cloned())
+            });
         queue::render_queue(
             frame,
             queue_tracks,
-            manual_queue,
-            auto_queue,
+            &state.manual_queue,
+            &state.auto_queue,
             current_playing_track,
             previous_playing_track,
         );
     }
 
-    if help_visible {
+    if state.help_visible {
         help::render_help(frame);
     }
 
-    if quit_confirm_visible {
-        quit::render_quit_confirm(frame, quit_confirm_selected);
+    if state.quit_confirm_visible {
+        quit::render_quit_confirm(frame, state.quit_confirm_selected);
     }
 }

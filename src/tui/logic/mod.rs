@@ -1,8 +1,7 @@
-mod filtering;
+pub(crate) mod filtering;
 mod input;
-mod animation;
 pub(crate) mod state;
-mod utils;
+pub(crate) mod utils;
 
 use crate::api::{
     API, fetch_album_tracks, fetch_following_liked_tracks, fetch_following_tracks,
@@ -32,13 +31,8 @@ use image::DynamicImage;
 use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::{handle_key_event, InputOutcome};
-use self::animation::{SinSignal, on_tick};
 use self::state::{AppData, AppState, EngagementAction, EngagementDone, FollowingTracksFocus, PlaybackSource};
 use self::utils::{build_queue, play_queued_track, queued_from_current};
-
-const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];
-const SUBTAB_TITLES: [&str; 4] = ["Likes", "Playlists", "Albums", "Following"];
-const SEARCHFILTERS: [&str; 4] = ["Tracks", "Albums", "Playlists", "People"];
 
 enum AppEvent {
     Redraw(Result<ResizeResponse, Errors>),
@@ -80,9 +74,6 @@ fn start(
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;
     drop(api_guard);
 
-    let mut signal = SinSignal::new(0.1, 2.0, 10.0);
-    let mut data_points = signal.by_ref().take(200).collect::<Vec<(f64, f64)>>();
-    let mut window = [0.0, 20.0];
     let async_rt = tokio::runtime::Runtime::new().unwrap();
 
     let (tx_likes, rx_likes): (Sender<Vec<crate::api::Track>>, Receiver<Vec<crate::api::Track>>) =
@@ -460,11 +451,6 @@ fn start(
             following_len,
         );
 
-        let likes_ref = if filter_active && state.selected_subtab == 0 {
-            &filtered.likes
-        } else {
-            &data.likes
-        };
         let albums_ref = if filter_active && state.selected_subtab == 2 {
             &filtered.albums
         } else {
@@ -521,13 +507,6 @@ fn start(
                     .select(Some(state.selected_playlist_track_row));
             }
         }
-
-        let playlists_ref = &data.playlists;
-        let playlist_tracks_ref = if filter_active && state.selected_subtab == 1 {
-            &filtered.playlist_tracks
-        } else {
-            &data.playlist_tracks
-        };
 
         if state.selected_tab == 0 && state.selected_subtab == 2 {
             if let Some(selected_album) = albums_ref.get(state.selected_row) {
@@ -981,108 +960,15 @@ fn start(
             }
         }
 
-        let queue_tracks = match state.playback_source {
-            PlaybackSource::Likes => &data.likes,
-            PlaybackSource::Playlist
-            | PlaybackSource::Album
-            | PlaybackSource::FollowingPublished
-            | PlaybackSource::FollowingLikes => &data.playback_tracks,
-        };
-        let previous_playing_track = state
-            .playback_history
-            .last()
-            .map(|queued| queued.track.clone());
-        let current_playing_track = state
-            .override_playing
-            .as_ref()
-            .map(|queued| queued.track.clone())
-            .or_else(|| {
-                state
-                    .current_playing_index
-                    .and_then(|idx| queue_tracks.get(idx).cloned())
-            });
         terminal.draw(|frame| {
             render(
                 frame,
-                likes_ref,
-                queue_tracks,
-                &mut data.likes_state,
-                &data.liked_track_urns,
-                &data.liked_album_uris,
-                &data.liked_playlist_uris,
-                &data.followed_user_urns,
-                playlists_ref,
-                &mut data.playlists_state,
-                playlist_tracks_ref,
-                &mut data.playlist_tracks_state,
-                &data.album_tracks,
-                &mut data.album_tracks_state,
-                albums_ref,
-                &mut data.albums_state,
-                following_ref,
-                &mut data.following_state,
-                &data.following_tracks,
-                &mut data.following_tracks_state,
-                &data.following_likes_tracks,
-                &mut data.following_likes_state,
-                &data.search_tracks,
-                &mut data.search_tracks_state,
-                &data.search_playlists,
-                &mut data.search_playlists_state,
-                &data.search_playlist_tracks,
-                &mut data.search_playlist_tracks_state,
-                &data.search_albums,
-                &mut data.search_albums_state,
-                &data.search_album_tracks,
-                &mut data.search_album_tracks_state,
-                &data.search_people,
-                &mut data.search_people_state,
-                &data.search_people_tracks,
-                &mut data.search_people_tracks_state,
-                &data.search_people_likes_tracks,
-                &mut data.search_people_likes_state,
-                state.selected_tab,
-                &TAB_TITLES,
-                state.selected_subtab,
-                &SUBTAB_TITLES,
-                state.selected_row,
-                state.selected_playlist_track_row,
-                state.selected_album_track_row,
-                state.selected_following_track_row,
-                state.selected_following_like_row,
-                state.following_tracks_focus == FollowingTracksFocus::Likes,
-                &state.query,
-                &SEARCHFILTERS,
-                state.selected_searchfilter,
-                state.search_selected_playlist_track_row,
-                state.search_selected_album_track_row,
-                state.search_selected_person_track_row,
-                state.search_selected_person_like_row,
-                state.search_people_tracks_focus == FollowingTracksFocus::Likes,
-                state.info_pane_selected,
-                state.selected_info_row,
-                &mut data_points,
-                &mut window,
-                &mut state.progress,
-                player.current_track(),
+                &state,
+                &mut data,
+                &filtered,
+                &player,
                 &mut cover_art_async,
-                player.get_volume(),
-                state.shuffle_enabled,
-                state.repeat_enabled,
-                state.queue_visible,
-                &state.manual_queue,
-                &state.auto_queue,
-                current_playing_track.clone(),
-                previous_playing_track.clone(),
-                state.help_visible,
-                state.quit_confirm_visible,
-                state.quit_confirm_selected,
-                state.search_popup_visible,
-                &state.search_query,
-                state.search_matches.len(),
-                state.visualizer_mode,
                 &wave_buffer,
-                state.visualizer_view,
             )
         })?;
 
@@ -1114,7 +1000,7 @@ fn start(
 
             let is_playing = player.is_playing();
             if is_playing {
-                on_tick(&mut data_points, &mut window, &mut signal);
+                state.tick += 1.0;
             }
 
             let current_track = player.current_track();
@@ -1258,131 +1144,15 @@ fn start(
                 following_len,
             );
 
-            let likes_ref = if filter_active && state.selected_subtab == 0 {
-                &filtered.likes
-            } else {
-                &data.likes
-            };
-            let albums_ref = if filter_active && state.selected_subtab == 2 {
-                &filtered.albums
-            } else {
-                &data.albums
-            };
-            let following_ref = if filter_active && state.selected_subtab == 3 {
-                &filtered.following
-            } else {
-                &data.following
-            };
-
-            let playlists_ref = &data.playlists;
-            let playlist_tracks_ref = if filter_active && state.selected_subtab == 1 {
-                &filtered.playlist_tracks
-            } else {
-                &data.playlist_tracks
-            };
-
-            let queue_tracks = match state.playback_source {
-                PlaybackSource::Likes => &data.likes,
-                PlaybackSource::Playlist
-                | PlaybackSource::Album
-                | PlaybackSource::FollowingPublished
-                | PlaybackSource::FollowingLikes => &data.playback_tracks,
-            };
-            let previous_playing_track = state
-                .playback_history
-                .last()
-                .map(|queued| queued.track.clone());
-            let current_playing_track = state
-                .override_playing
-                .as_ref()
-                .map(|queued| queued.track.clone())
-                .or_else(|| {
-                    state
-                        .current_playing_index
-                        .and_then(|idx| queue_tracks.get(idx).cloned())
-                });
             terminal.draw(|frame| {
                 render(
                     frame,
-                    likes_ref,
-                    queue_tracks,
-                    &mut data.likes_state,
-                    &data.liked_track_urns,
-                    &data.liked_album_uris,
-                    &data.liked_playlist_uris,
-                    &data.followed_user_urns,
-                    playlists_ref,
-                    &mut data.playlists_state,
-                    playlist_tracks_ref,
-                    &mut data.playlist_tracks_state,
-                    &data.album_tracks,
-                    &mut data.album_tracks_state,
-                    albums_ref,
-                    &mut data.albums_state,
-                    following_ref,
-                    &mut data.following_state,
-                    &data.following_tracks,
-                    &mut data.following_tracks_state,
-                    &data.following_likes_tracks,
-                    &mut data.following_likes_state,
-                    &data.search_tracks,
-                    &mut data.search_tracks_state,
-                    &data.search_playlists,
-                    &mut data.search_playlists_state,
-                    &data.search_playlist_tracks,
-                    &mut data.search_playlist_tracks_state,
-                    &data.search_albums,
-                    &mut data.search_albums_state,
-                    &data.search_album_tracks,
-                    &mut data.search_album_tracks_state,
-                    &data.search_people,
-                    &mut data.search_people_state,
-                    &data.search_people_tracks,
-                    &mut data.search_people_tracks_state,
-                    &data.search_people_likes_tracks,
-                    &mut data.search_people_likes_state,
-                    state.selected_tab,
-                    &TAB_TITLES,
-                    state.selected_subtab,
-                    &SUBTAB_TITLES,
-                    state.selected_row,
-                    state.selected_playlist_track_row,
-                    state.selected_album_track_row,
-                    state.selected_following_track_row,
-                    state.selected_following_like_row,
-                    state.following_tracks_focus == FollowingTracksFocus::Likes,
-                    &state.query,
-                    &SEARCHFILTERS,
-                    state.selected_searchfilter,
-                    state.search_selected_playlist_track_row,
-                    state.search_selected_album_track_row,
-                    state.search_selected_person_track_row,
-                    state.search_selected_person_like_row,
-                    state.search_people_tracks_focus == FollowingTracksFocus::Likes,
-                    state.info_pane_selected,
-                    state.selected_info_row,
-                    &mut data_points,
-                    &mut window,
-                    &mut state.progress,
-                    player.current_track(),
+                    &state,
+                    &mut data,
+                    &filtered,
+                    &player,
                     &mut cover_art_async,
-                    player.get_volume(),
-                    state.shuffle_enabled,
-                    state.repeat_enabled,
-                    state.queue_visible,
-                    &state.manual_queue,
-                    &state.auto_queue,
-                    current_playing_track,
-                    previous_playing_track,
-                    state.help_visible,
-                    state.quit_confirm_visible,
-                    state.quit_confirm_selected,
-                    state.search_popup_visible,
-                    &state.search_query,
-                    state.search_matches.len(),
-                    state.visualizer_mode,
                     &wave_buffer,
-                    state.visualizer_view,
                 )
             })?;
 

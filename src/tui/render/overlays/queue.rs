@@ -15,7 +15,7 @@ use super::utils::centered_rect;
 
 pub fn render_queue(
     frame: &mut Frame,
-    queue_tracks: &Vec<Track>,
+    queue_tracks: &[Track],
     manual_queue: &VecDeque<QueuedTrack>,
     auto_queue: &VecDeque<usize>,
     current_playing_track: Option<Track>,
