@@ -48,6 +48,10 @@ a soundcloud client for the terminal
 
 - Due to the SoundCloud API Terms of Use, the download and offline playback of tracks is not supported
 
+## Privacy
+
+sctui talks to SoundCloud directly for everything except login. Login and hourly token refresh go through a small relay (source in [`worker/`](./worker)) that adds the app secret and passes SoundCloud's reply straight back without reading or storing it. Your password never leaves soundcloud.com. You can revoke sctui's access at any time from your SoundCloud settings.
+
 ## Dev Diary
 
 find the dev diary to follow along the development ~~struggle~~ process [here](./DEV_DIARY.md)

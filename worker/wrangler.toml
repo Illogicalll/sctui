@@ -1,0 +1,16 @@
+name = "sctui-auth"
+main = "src/index.js"
+compatibility_date = "2025-12-01"
+
+# Served only at this hostname. Cloudflare manages the DNS record and certificate.
+workers_dev = false
+routes = [{ pattern = "sctui.w-murphy.com", custom_domain = true }]
+
+# No request/response logging. Tokens pass through this Worker and must not be recorded.
+[observability]
+enabled = false
+
+# Secrets (set once with `wrangler secret put <NAME>`, never in this file):
+#   SOUNDCLOUD_CLIENT_ID
+#   SOUNDCLOUD_CLIENT_SECRET
+# GIT_SHA is passed at deploy time by .github/workflows/deploy-worker.yml.

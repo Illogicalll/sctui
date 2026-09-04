@@ -6,9 +6,10 @@ mod tui;
 use player::Player;
 
 fn main() -> anyhow::Result<()> {
-    // try to load token, else start auth
+    // stored token if still valid; refresh it if expired; browser login only as last resort
     let token = match auth::load_token() {
-        Some(token) => token,
+        Some(token) if !token.is_expired() => token,
+        Some(token) => auth::refresh_token(&token).or_else(|_| auth::authenticate())?,
         None => auth::authenticate()?,
     };
 

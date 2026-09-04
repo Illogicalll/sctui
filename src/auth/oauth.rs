@@ -2,12 +2,17 @@ use anyhow::{Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::{Rng, distributions::Alphanumeric};
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Response, Server};
 use reqwest::Url;
 
+use super::relay_post;
 use super::token::Token;
+
+/// Public OAuth client identifier. It names the app, not any account, and is useless without the
+/// client secret, which only the auth relay holds. It is visible in every user's browser URL bar.
+const CLIENT_ID: &str = "XTV3fHQiqa6P4CVB5JH9Y452wVTGFyvu";
+/// Must match `REDIRECT_URI` in `worker/src/index.js`.
+const REDIRECT_URI: &str = "http://127.0.0.1:8080/callback";
 
 fn random_alnum(n: usize) -> String {
     rand::thread_rng()
@@ -23,19 +28,11 @@ fn generate_code_challenge(verifier: &str) -> String {
 }
 
 pub fn authenticate() -> Result<Token> {
-    dotenvy::dotenv().ok();
-    let client_id = std::env::var("SOUNDCLOUD_CLIENT_ID")?;
-    let client_secret = std::env::var("SOUNDCLOUD_CLIENT_SECRET")?;
-    let redirect_uri = "http://127.0.0.1:8080/callback";
     let code_verifier = random_alnum(64);
     let code_challenge = generate_code_challenge(&code_verifier);
     let state = random_alnum(56);
     let auth_url = format!(
-        "https://secure.soundcloud.com/authorize?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&code_challenge={code_challenge}&code_challenge_method=S256&state={state}",
-        client_id = client_id,
-        redirect_uri = redirect_uri,
-        code_challenge = code_challenge,
-        state = state
+        "https://secure.soundcloud.com/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&code_challenge={code_challenge}&code_challenge_method=S256&state={state}"
     );
     webbrowser::open(&auth_url)?;
 
@@ -84,23 +81,6 @@ pub fn authenticate() -> Result<Token> {
     }
 
     let code = received_code.ok_or_else(|| anyhow!("No authorization code received"))?;
-    let params = [
-        ("client_id", client_id.as_str()),
-        ("client_secret", client_secret.as_str()),
-        ("redirect_uri", redirect_uri),
-        ("grant_type", "authorization_code"),
-        ("code", &code),
-        ("code_verifier", &code_verifier),
-    ];
-    let mut resp = reqwest::blocking::Client::new()
-        .post("https://secure.soundcloud.com/oauth/token")
-        .form(&params)
-        .send()?
-        .error_for_status()?
-        .json::<Token>()?;
-
-    resp.obtained_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    fs::write("token.json", serde_json::to_string_pretty(&resp)?)?;
-
-    Ok(resp)
+    // The relay adds client_id, client_secret, grant_type and redirect_uri.
+    relay_post("/token", &[("code", &code), ("code_verifier", &code_verifier)])
 }
