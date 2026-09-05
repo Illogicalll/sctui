@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
+use ratatui_image::{FilterType, Resize, StatefulImage, thread::ThreadProtocol};
 
 use crate::api::{Track, format_duration};
 
@@ -62,7 +62,7 @@ pub fn render_now_playing(
             height: art_h,
         };
         frame.render_stateful_widget(
-            StatefulImage::new().resize(Resize::Scale(None)),
+            StatefulImage::new().resize(Resize::Scale(Some(FilterType::Lanczos3))),
             art_rect,
             cover_art,
         );

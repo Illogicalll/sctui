@@ -80,7 +80,9 @@ pub(crate) fn parse_track(obj: &serde_json::Value) -> Track {
 
     let playback_count = format_playback_count(parse_u64(obj, "playback_count"));
 
-    let artwork_url = parse_str(obj, "artwork_url");
+    // SoundCloud hands out the 100x100 "-large" thumbnail; the CDN also serves
+    // 500x500 under "-t500x500", which is what the big cover-art views need.
+    let artwork_url = parse_str(obj, "artwork_url").replace("-large.", "-t500x500.");
     let access = parse_str(obj, "access");
     let track_urn = parse_str(obj, "urn");
 
