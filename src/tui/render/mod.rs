@@ -45,7 +45,13 @@ pub fn render(
         .split(frame.area());
 
     if state.visualizer_mode {
-        render_visualizer(frame, frame.area(), wave_buffer, state.visualizer_view);
+        render_visualizer(
+            frame,
+            frame.area(),
+            wave_buffer,
+            state.visualizer_view,
+            &player.current_track(),
+        );
         overlays::render_overlays(frame, state, data);
         return;
     }

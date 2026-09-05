@@ -21,11 +21,14 @@ pub enum VisualizerMode {
 }
 
 impl VisualizerMode {
+    pub const ALL: [Self; 2] = [
+        Self::Oscilloscope,
+        Self::SpectrumBars,
+    ];
+
     pub fn next(self) -> Self {
-        match self {
-            Self::Oscilloscope => Self::SpectrumBars,
-            Self::SpectrumBars => Self::Oscilloscope,
-        }
+        let i = Self::ALL.iter().position(|m| *m == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
     }
 }
 
