@@ -12,6 +12,7 @@ use crate::tui::logic::state::VisualizerMode;
 mod common;
 mod oscilloscope;
 mod spectrum;
+mod radial;
 mod mirror;
 
 pub fn render_visualizer(
@@ -30,6 +31,7 @@ pub fn render_visualizer(
         VisualizerMode::Oscilloscope => oscilloscope::render_oscilloscope(frame, area, &samples),
         VisualizerMode::SpectrumBars => spectrum::render_spectrum_bars(frame, area, &samples),
         VisualizerMode::MirrorSpectrum => mirror::render_mirror_spectrum(frame, area, &samples),
+        VisualizerMode::RadialSpectrum => radial::render_radial_spectrum(frame, area, &samples),
         // ADD_MODE
     }
 
