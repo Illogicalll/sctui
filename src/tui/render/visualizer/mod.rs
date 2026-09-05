@@ -12,6 +12,7 @@ use crate::tui::logic::state::VisualizerMode;
 mod common;
 mod oscilloscope;
 mod spectrum;
+mod seismograph;
 mod rings;
 mod ridgeline;
 mod led;
@@ -40,6 +41,7 @@ pub fn render_visualizer(
         VisualizerMode::LedMatrix => led::render_led_matrix(frame, area, &samples),
         VisualizerMode::Ridgeline => ridgeline::render_ridgeline(frame, area, &samples),
         VisualizerMode::SpectrumRings => rings::render_spectrum_rings(frame, area, &samples),
+        VisualizerMode::Seismograph => seismograph::render_seismograph(frame, area, &samples),
         // ADD_MODE
     }
 
