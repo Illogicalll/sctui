@@ -6,6 +6,7 @@
 # Environment:
 #   SCTUI_VERSION=v0.1.0      install a specific release (default: latest)
 #   SCTUI_INSTALL_DIR=<dir>   where to put the binary (default: ~/.local/bin)
+#   SCTUI_BASE_URL=<url>      download archives from here instead of GitHub Releases (CI smoke tests)
 set -eu
 
 REPO="Illogicalll/sctui"
@@ -41,7 +42,7 @@ if [ -z "$version" ]; then
 fi
 
 name="sctui-$target"
-base="https://github.com/$REPO/releases/download/$version"
+base="${SCTUI_BASE_URL:-https://github.com/$REPO/releases/download/$version}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

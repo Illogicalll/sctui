@@ -5,6 +5,7 @@
 # Environment:
 #   $env:SCTUI_VERSION = "v0.1.0"        install a specific release (default: latest)
 #   $env:SCTUI_INSTALL_DIR = "C:\..."    where to put sctui.exe (default: %LOCALAPPDATA%\sctui\bin)
+#   $env:SCTUI_BASE_URL = "http://..."   download archives from here instead of GitHub Releases (CI smoke tests)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
@@ -25,7 +26,7 @@ if (-not $version) {
 }
 
 $name = "sctui-$target"
-$base = "https://github.com/$repo/releases/download/$version"
+$base = if ($env:SCTUI_BASE_URL) { $env:SCTUI_BASE_URL } else { "https://github.com/$repo/releases/download/$version" }
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("sctui-" + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
