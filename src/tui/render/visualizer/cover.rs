@@ -14,7 +14,7 @@ use super::common::frame_block;
 const PAD: u16 = 2;
 const MIN_WIDTH_FOR_ART: u16 = 30;
 const ART_MAX_WIDTH_FRACTION: f32 = 0.9; // of the left half
-const ART_HEIGHT_FRACTION: f32 = 0.65;
+const ART_HEIGHT_FRACTION: f32 = 0.5;
 const INFO_WIDTH_FRACTION: u16 = 3; // info block is 3/4 of the text column
 const DIM: Color = Color::Rgb(70, 70, 85);
 const GREY: Color = Color::Rgb(160, 160, 176);
@@ -51,7 +51,7 @@ pub fn render_now_playing(
     };
 
     if let Some(half) = art_half {
-        // Art is a square: a cell is ~2:1, so width = 2 × height. Takes 65% of
+        // Art is a square: a cell is ~2:1, so width = 2 × height. Takes 50% of
         // the height so it sits inset rather than touching the frame.
         let art_w = ((half.height as f32 * ART_HEIGHT_FRACTION) as u16 * 2)
             .min((half.width as f32 * ART_MAX_WIDTH_FRACTION) as u16)
