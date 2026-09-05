@@ -62,3 +62,95 @@ fn render_now_playing_overlay(frame: &mut Frame, area: Rect, track: &Track) {
         Rect::new(x, y, (area.width - 4).min(max as u16), 1),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn synthetic_samples() -> Vec<f32> {
+        let sr = 44_100.0_f32;
+        (0..4096)
+            .flat_map(|i| {
+                let t = i as f32 / sr;
+                let bass = (2.0 * std::f32::consts::PI * 110.0 * t).sin() * 0.5;
+                let mid = (2.0 * std::f32::consts::PI * 1000.0 * t).sin() * 0.2;
+                let hi = (2.0 * std::f32::consts::PI * 6000.0 * t).sin() * 0.08;
+                [bass + mid + hi, bass * 0.8 + mid + hi * 1.5]
+            })
+            .collect()
+    }
+
+    fn track() -> Track {
+        Track {
+            title: "Track Title".into(),
+            artists: "Artist".into(),
+            duration: String::new(),
+            duration_ms: 0,
+            playback_count: String::new(),
+            artwork_url: String::new(),
+            access: String::new(),
+            track_urn: "soundcloud:tracks:1".into(),
+        }
+    }
+
+    fn render_all(width: u16, height: u16, frames: usize, show: bool) {
+        let wave = Arc::new(Mutex::new(VecDeque::from(synthetic_samples())));
+        let track = track();
+        for mode in VisualizerMode::ALL {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            for _ in 0..frames {
+                if show {
+                    // Let the history/simulation modes accumulate real time.
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                }
+                terminal
+                    .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track))
+                    .unwrap();
+            }
+            if show {
+                let buf = terminal.backend().buffer();
+                println!("\n== {:?} ({}x{})", mode, width, height);
+                for y in 0..height {
+                    let row: String =
+                        (0..width).map(|x| buf[(x, y)].symbol().to_string()).collect();
+                    println!("{row}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_mode_renders_at_every_size() {
+        render_all(80, 24, 12, std::env::var("SHOW_VIS").is_ok());
+        render_all(200, 60, 3, false);
+        render_all(21, 7, 3, false);
+        render_all(3, 3, 2, false);
+        render_all(0, 0, 1, false);
+    }
+
+    #[test]
+    fn every_mode_renders_silence() {
+        let wave = Arc::new(Mutex::new(VecDeque::new()));
+        let track = Track {
+            track_urn: String::new(),
+            ..track()
+        };
+        for mode in VisualizerMode::ALL {
+            let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
+            terminal
+                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn tab_cycles_through_all_modes_and_wraps() {
+        let mut m = VisualizerMode::default();
+        for expected in VisualizerMode::ALL.iter().skip(1) {
+            m = m.next();
+            assert_eq!(m, *expected);
+        }
+        assert_eq!(m.next(), VisualizerMode::Oscilloscope);
+    }
+}

@@ -354,3 +354,14 @@ mod tests {
         assert_eq!(spectrum_bands(&[], 8).len(), 8);
     }
 }
+
+/// Seconds since the previous call for this state, clamped so a stalled frame
+/// (tabbed away, resize) never makes a simulation explode.
+pub fn tick_dt(last: &mut Option<std::time::Instant>) -> f32 {
+    let now = std::time::Instant::now();
+    let dt = last
+        .map(|l| now.duration_since(l).as_secs_f32())
+        .unwrap_or(0.0);
+    *last = Some(now);
+    dt.min(0.05)
+}
