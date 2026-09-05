@@ -12,6 +12,7 @@ use crate::tui::logic::state::VisualizerMode;
 mod common;
 mod oscilloscope;
 mod spectrum;
+mod interference;
 mod fountain;
 mod stacked;
 mod seismograph;
@@ -46,6 +47,7 @@ pub fn render_visualizer(
         VisualizerMode::Seismograph => seismograph::render_seismograph(frame, area, &samples),
         VisualizerMode::StackedScope => stacked::render_stacked_scope(frame, area, &samples),
         VisualizerMode::ParticleFountain => fountain::render_particle_fountain(frame, area, &samples),
+        VisualizerMode::InterferenceField => interference::render_interference_field(frame, area, &samples),
         // ADD_MODE
     }
 
