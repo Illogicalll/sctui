@@ -22,19 +22,21 @@ a soundcloud client for the terminal
 
 <p align="center">View the activity of everyone you follow to stay up to date with their latest releases or reposts</p>
 
+<p align="center"><img src="./media/feed_feature.png" alt="Feed" width="480" /></p>
+
 ### 🔊 Gapless Playback
 
 <p align="center">Enjoy seamless transitions in your favourite albums without the buffering present on SoundCloud Web</p>
 
 ### 👁️ Audio Visualiser
 
-<p align="center">View the waveforms of your favourite music in oscilloscope or audio spectrum visualisation modes</p>
+<p align="center">Choose from one of 13 modes, from oscilloscopes to spectrums and more...</p>
 
 <p align="center"><img src="./media/visualiser.gif" alt="Visualiser" width="480" /></p>
 
 <p align="center"><img src="./media/spectrum.gif" alt="Visualiser 2" width="480" /></p>
 
-<p align="center">(maybe more modes coming soon..)</p>
+<p align="center">and more...</p>
 
 ## Limitations
 
