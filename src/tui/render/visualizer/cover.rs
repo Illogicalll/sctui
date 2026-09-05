@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
@@ -14,6 +14,7 @@ use super::common::frame_block;
 const PAD: u16 = 2;
 const MIN_WIDTH_FOR_ART: u16 = 30;
 const ART_MAX_WIDTH_FRACTION: f32 = 0.55;
+const INFO_WIDTH_FRACTION: u16 = 3; // info block is 3/4 of the text column
 const DIM: Color = Color::Rgb(70, 70, 85);
 const GREY: Color = Color::Rgb(160, 160, 176);
 
@@ -68,24 +69,31 @@ pub fn render_now_playing(
         );
     }
 
-    // Five text rows, vertically centred: title, artist, blank, bar, times.
+    // Info block centred in the text column, both ways. Five rows: title,
+    // artist, blank, bar, times.
+    let info_w = (text.width * INFO_WIDTH_FRACTION / 4).max(text.width.min(16));
+    let info_x = text.x + (text.width - info_w) / 2;
     let rows = 5u16.min(text.height);
     let top = text.y + (text.height - rows) / 2;
-    let row = |i: u16| Rect { x: text.x, y: top + i, width: text.width, height: 1 };
+    let row = |i: u16| Rect { x: info_x, y: top + i, width: info_w, height: 1 };
 
     if rows >= 1 {
         frame.render_widget(
-            Paragraph::new(track.title.as_str()).style(
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Paragraph::new(track.title.as_str())
+                .alignment(Alignment::Center)
+                .style(
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
             row(0),
         );
     }
     if rows >= 2 {
         frame.render_widget(
-            Paragraph::new(track.artists.as_str()).style(Style::default().fg(GREY)),
+            Paragraph::new(track.artists.as_str())
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(GREY)),
             row(1),
         );
     }
@@ -95,12 +103,12 @@ pub fn render_now_playing(
         } else {
             (progress_ms as f64 / track.duration_ms as f64).clamp(0.0, 1.0)
         };
-        frame.render_widget(Paragraph::new(progress_line(text.width, ratio)), row(3));
+        frame.render_widget(Paragraph::new(progress_line(info_w, ratio)), row(3));
     }
     if rows >= 5 {
         let elapsed = format_duration(progress_ms);
         let total = track.duration.as_str();
-        let space = (text.width as usize).saturating_sub(elapsed.chars().count() + total.chars().count());
+        let space = (info_w as usize).saturating_sub(elapsed.chars().count() + total.chars().count());
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::raw(elapsed),
