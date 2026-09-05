@@ -6,6 +6,9 @@ a soundcloud client for the terminal
 
 ## Installation
 
+<details>
+<summary><b>Installation instructions</b></summary>
+
 ### macOS / Linux
 
 ```sh
@@ -42,9 +45,14 @@ Needs [Rust](https://rustup.rs) 1.85 or newer. On Linux, install the ALSA header
 cargo install --git https://github.com/Illogicalll/sctui
 ```
 
-### Updating
+</details>
+
+<details>
+<summary><b>Updating</b></summary>
 
 sctui checks GitHub for a newer release every time it starts and asks before installing it: `y` updates in place and relaunches, `n` carries on, `s` stops asking about that version. Pass `--no-update-check` to skip the check, or re-run the installer above to update by hand. `sctui --version` shows what you have.
+
+</details>
 
 ### Requirements
 
