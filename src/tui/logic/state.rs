@@ -20,14 +20,16 @@ pub enum VisualizerMode {
     SpectrumBars,
     MirrorSpectrum,
     RadialSpectrum,
+    FilledCurve,
 }
 
 impl VisualizerMode {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Oscilloscope,
         Self::SpectrumBars,
         Self::MirrorSpectrum,
         Self::RadialSpectrum,
+        Self::FilledCurve,
     ];
 
     pub fn next(self) -> Self {
