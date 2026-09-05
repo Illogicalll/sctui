@@ -35,8 +35,8 @@ impl Token {
     }
 }
 
-/// `$XDG_CONFIG_HOME/sctui/token.json`, else `~/.config/sctui/token.json`.
-fn token_path() -> PathBuf {
+/// `$XDG_CONFIG_HOME/sctui`, else `~/.config/sctui` (`%USERPROFILE%\.config\sctui` on Windows).
+pub fn config_dir() -> PathBuf {
     let config_home = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| {
@@ -45,7 +45,11 @@ fn token_path() -> PathBuf {
                 .map(|home| PathBuf::from(home).join(".config"))
         })
         .unwrap_or_else(|| PathBuf::from("."));
-    config_home.join("sctui").join("token.json")
+    config_home.join("sctui")
+}
+
+fn token_path() -> PathBuf {
+    config_dir().join("token.json")
 }
 
 /// Stored token, possibly expired. Caller decides whether to refresh.

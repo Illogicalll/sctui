@@ -3,9 +3,33 @@ mod api;
 mod auth;
 mod player;
 mod tui;
+mod update;
 use player::Player;
 
+const USAGE: &str = "\
+sctui - a soundcloud client for the terminal
+
+USAGE: sctui [OPTIONS]
+
+OPTIONS:
+  -V, --version          print version and exit
+  -h, --help             print this help and exit
+      --no-update-check  don't check GitHub for a newer release on startup";
+
 fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("sctui {}", update::CURRENT);
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    if !args.iter().any(|a| a == "--no-update-check") {
+        update::maybe_self_update();
+    }
+
     // stored token if still valid; refresh it if expired; browser login only as last resort
     let token = match auth::load_token() {
         Some(token) if !token.is_expired() => token,

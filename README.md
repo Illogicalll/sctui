@@ -42,6 +42,10 @@ Needs [Rust](https://rustup.rs) 1.85 or newer. On Linux, install the ALSA header
 cargo install --git https://github.com/Illogicalll/sctui
 ```
 
+### Updating
+
+sctui checks GitHub for a newer release every time it starts and asks before installing it: `y` updates in place and relaunches, `n` carries on, `s` stops asking about that version. Pass `--no-update-check` to skip the check, or re-run the installer above to update by hand. `sctui --version` shows what you have.
+
 ### Requirements
 
 - **A SoundCloud account.** The free tier is fine. The first launch opens your browser to sign in; the token is stored in `~/.config/sctui/token.json` (`%USERPROFILE%\.config\sctui\token.json` on Windows) and refreshed automatically.
