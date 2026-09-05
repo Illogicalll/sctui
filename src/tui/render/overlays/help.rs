@@ -40,6 +40,7 @@ pub fn render_help(frame: &mut Frame) {
         Row::new(vec!["Shift + V", "Toggle visualizer mode"]),
         Row::new(vec!["Shift + F", "Search current view (only works in library)"]),
         Row::new(vec!["Shift + Q", "Toggle queue popup"]),
+        Row::new(vec!["Shift + P", "Toggle listening history (Enter replays a track)"]),
         Row::new(vec!["Shift + H", "Toggle help popup"]),
     ];
 

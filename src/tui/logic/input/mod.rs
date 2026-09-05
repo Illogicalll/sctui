@@ -10,6 +10,7 @@ mod search;
 mod navigation;
 mod movement;
 mod playback;
+mod history;
 mod queue;
 mod commands;
 
@@ -26,6 +27,12 @@ pub fn handle_key_event(
 ) -> InputOutcome {
     if state.quit_confirm_visible {
         return quit::handle_quit_confirm(key, state);
+    }
+
+    if state.history_visible {
+        if let Some(outcome) = history::handle_history_input(key, state, data, player) {
+            return outcome;
+        }
     }
 
     if state.search_popup_visible {

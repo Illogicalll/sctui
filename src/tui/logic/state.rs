@@ -307,6 +307,9 @@ pub struct AppState {
     pub engagement_queue: VecDeque<Engagement>,
     pub following_tracks_focus: FollowingTracksFocus,
     pub queue_visible: bool,
+    pub history_visible: bool,
+    /// Row in the history popup, 0 = newest.
+    pub history_selected: usize,
     pub help_visible: bool,
     pub quit_confirm_visible: bool,
     pub quit_confirm_selected: usize,

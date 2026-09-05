@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
 use super::InputOutcome;
 use crate::api::Track;
-use crate::tui::logic::state::{AppData, AppState, Engagement, FollowingTracksFocus};
+use crate::tui::logic::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource};
 use crate::player::Player;
 use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::build_search_matches;
@@ -96,11 +96,17 @@ fn handle_shift_char(
         'v' | 'V' => {
             state.visualizer_mode = !state.visualizer_mode;
         }
+        'p' | 'P' => {
+            state.history_visible = !state.history_visible;
+            state.history_selected = 0;
+        }
         'q' | 'Q' => {
             state.queue_visible = !state.queue_visible;
             if state.queue_visible {
                 if let Some(current_idx) = state.current_playing_index {
-                    if state.auto_queue.is_empty() {
+                    // In radio mode an empty queue means related tracks are loading;
+                    // rebuilding from the chain would replay what was already heard.
+                    if state.auto_queue.is_empty() && state.playback_source != PlaybackSource::Radio {
                         state.auto_queue = build_queue(
                             current_idx,
                             active_tracks(state, data),

@@ -1,4 +1,5 @@
 mod help;
+mod history;
 mod queue;
 mod quit;
 mod utils;
@@ -32,6 +33,10 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
             current_playing_track,
             previous_playing_track,
         );
+    }
+
+    if state.history_visible {
+        history::render_history(frame, &state.playback_history, state.history_selected);
     }
 
     if state.help_visible {
