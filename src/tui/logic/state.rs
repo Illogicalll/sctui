@@ -11,6 +11,8 @@ pub enum PlaybackSource {
     FollowingPublished,
     FollowingLikes,
     Feed,
+    /// Related-track chain started by Shift+Enter or by a list running out.
+    Radio,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -285,6 +287,11 @@ pub struct AppState {
     pub feed_tracks_fetch: FetchTask,
     /// Background walk over later feed items that keeps extending the queue after Enter.
     pub feed_queue_fetch: FetchTask,
+    pub radio_fetch: FetchTask,
+    /// Seed URN of the last related-tracks fetch, so each seed is fetched once.
+    pub radio_fetched_for: Option<String>,
+    /// The radio queue ran dry before related tracks arrived; play as soon as they do.
+    pub radio_waiting: bool,
     /// Set by Enter in the feed: index of the activity being played; the loop expands from there.
     pub feed_expand_from: Option<usize>,
     pub progress: u64,

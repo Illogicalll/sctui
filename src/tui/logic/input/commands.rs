@@ -53,6 +53,7 @@ fn handle_shift_char(
         'u' | 'U' => {
             player.volume_up();
         }
+        'g' | 'G' => return super::playback::handle_station(state, data, player),
         'd' | 'D' => {
             player.volume_down();
         }

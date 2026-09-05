@@ -10,6 +10,7 @@ use crate::auth::Token;
 pub(crate) use calls::engagement::engage;
 pub(crate) use calls::following::fetch_user_tracks;
 pub use calls::playlists::fetch_playlist_tracks;
+pub use calls::related::fetch_related_tracks;
 pub use calls::search::{
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
 };

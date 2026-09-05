@@ -19,6 +19,7 @@ pub fn render_help(frame: &mut Frame) {
         Row::new(vec!["Up/Down", "Move selector"]),
         Row::new(vec!["Space", "Play/Pause"]),
         Row::new(vec!["Enter", "Play selected track"]),
+        Row::new(vec!["Shift + Enter / Shift + G", "Start a station: play selected track, then related tracks"]),
         Row::new(vec!["Shift + Right", "Skip song"]),
         Row::new(vec!["Shift + Left", "Go back a song"]),
         Row::new(vec!["Option + Right", "Fast forward 10s"]),

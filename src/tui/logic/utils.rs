@@ -307,13 +307,15 @@ pub fn play_queued_track(
         | PlaybackSource::Album
         | PlaybackSource::FollowingPublished
         | PlaybackSource::FollowingLikes
-        | PlaybackSource::Feed => {
+        | PlaybackSource::Feed
+        | PlaybackSource::Radio => {
             let tracks = queued.tracks_snapshot.unwrap_or_else(|| match queued.source {
                 PlaybackSource::Playlist => data.playlist_tracks.clone(),
                 PlaybackSource::Album => data.album_tracks.clone(),
                 PlaybackSource::FollowingPublished => data.following_tracks.clone(),
                 PlaybackSource::FollowingLikes => data.following_likes_tracks.clone(),
                 PlaybackSource::Feed => data.feed_tracks.clone(),
+                PlaybackSource::Radio => data.playback_tracks.clone(),
                 PlaybackSource::Likes => Vec::new(),
             });
             if tracks.is_empty() || queued.index >= tracks.len() {
@@ -372,8 +374,24 @@ pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Tra
         | PlaybackSource::Album
         | PlaybackSource::FollowingPublished
         | PlaybackSource::FollowingLikes
-        | PlaybackSource::Feed => &data.playback_tracks,
+        | PlaybackSource::Feed
+        | PlaybackSource::Radio => &data.playback_tracks,
     }
+}
+
+/// Hand playback over to related tracks, seeded by `seed` (the track playing now, index 0).
+/// The main loop notices the near-empty radio queue and fetches related tracks for the seed.
+pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seed: Track) {
+    state.playback_source = PlaybackSource::Radio;
+    state.override_playing = None;
+    state.current_playing_index = Some(0);
+    state.auto_queue.clear();
+    state.radio_fetched_for = None;
+    state.radio_waiting = false;
+    data.playback_tracks = vec![seed];
+    data.playback_playlist_uri = None;
+    data.playback_album_uri = None;
+    data.playback_following_user_urn = None;
 }
 
 pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
@@ -403,7 +421,7 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
             None,
             data.playback_following_user_urn.clone(),
         ),
-        PlaybackSource::Feed => (Some(&data.playback_tracks), None, None, None),
+        PlaybackSource::Feed | PlaybackSource::Radio => (Some(&data.playback_tracks), None, None, None),
     };
     Some(QueuedTrack::new(
         source, idx, track, tracks_snapshot, playlist_uri, album_uri, following_user_urn, false,

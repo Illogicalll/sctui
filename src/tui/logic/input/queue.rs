@@ -19,7 +19,7 @@ pub(crate) fn handle_add_next_to_queue(
     }
 }
 
-fn selected_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+pub(crate) fn selected_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if state.selected_tab == 0 {
         match state.selected_subtab {
             0 => get_likes_queued(state, data),

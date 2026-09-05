@@ -3,7 +3,9 @@ use super::helpers::filtered_row;
 use crate::api::Track;
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, FollowingTracksFocus};
 use crate::player::Player;
-use crate::tui::logic::utils::{build_queue, queued_from_current};
+use crate::tui::logic::utils::{build_queue, enter_radio, queued_from_current};
+
+use super::queue::selected_queued;
 
 pub(crate) fn handle_enter(
     state: &mut AppState,
@@ -23,6 +25,27 @@ pub(crate) fn handle_enter(
     } else if state.selected_tab == 2 {
         handle_feed_enter(state, data, player);
     }
+    InputOutcome::Continue
+}
+
+/// Shift+Enter (or Shift+G): play the selected track as a station — related tracks follow.
+pub(crate) fn handle_station(
+    state: &mut AppState,
+    data: &mut AppData,
+    player: &Player,
+) -> InputOutcome {
+    let Some(queued) = selected_queued(state, data) else {
+        return InputOutcome::Continue;
+    };
+    if !queued.track.is_playable() {
+        return InputOutcome::Continue;
+    }
+    if let Some(current) = queued_from_current(state, data) {
+        state.playback_history.push(current);
+    }
+    state.manual_queue.clear();
+    player.play(queued.track.clone());
+    enter_radio(state, data, queued.track);
     InputOutcome::Continue
 }
 

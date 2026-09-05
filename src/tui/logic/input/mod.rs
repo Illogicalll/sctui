@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::player::Player;
 
@@ -52,6 +52,10 @@ pub fn handle_key_event(
         KeyCode::Up => movement::handle_up_key(key, state, data),
         KeyCode::Char(c) => commands::handle_char(key, c, state, data, player),
         KeyCode::Backspace => commands::handle_backspace(state),
+        // Needs the kitty keyboard protocol to be distinguishable from Enter; Shift+G is the fallback.
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            playback::handle_station(state, data, player)
+        }
         KeyCode::Enter => playback::handle_enter(state, data, player),
         _ => InputOutcome::Continue,
     }

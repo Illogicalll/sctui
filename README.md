@@ -78,6 +78,10 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center">Enjoy seamless transitions in your favourite albums without the buffering present on SoundCloud Web</p>
 
+### 📻 Stations
+
+<p align="center">Press Shift + Enter on any track to start a station: it plays, then SoundCloud's related tracks follow. When a playlist, album or your likes run out, sctui keeps going with related tracks instead of stopping</p>
+
 ### 👁️ Audio Visualiser
 
 <p align="center">Choose from one of 13 modes, from oscilloscopes to spectrums and more...</p>

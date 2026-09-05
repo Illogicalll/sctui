@@ -10,7 +10,7 @@ use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
 
 use crate::api::format_duration;
 use crate::player::Player;
-use crate::tui::logic::state::AppState;
+use crate::tui::logic::state::{AppState, PlaybackSource};
 
 pub fn render_now_playing(
     frame: &mut Frame,
@@ -131,9 +131,11 @@ pub fn render_now_playing(
     let shuffle_indicator = if state.shuffle_enabled { "✔︎" } else { "×" };
     let repeat_indicator = if state.repeat_enabled { "✔︎" } else { "×" };
 
+    let radio_indicator = if state.playback_source == PlaybackSource::Radio { "✔︎" } else { "×" };
+
     let lines = vec![
         "".to_string(),
-        "".to_string(),
+        format!("rad:   {}", radio_indicator),
         format!("shf:   {}", shuffle_indicator),
         format!("vol: {:.1}", player.get_volume()),
         format!("rep:   {}", repeat_indicator),

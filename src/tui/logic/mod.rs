@@ -4,11 +4,17 @@ pub(crate) mod state;
 pub(crate) mod utils;
 
 use crate::api::{
+    fetch_related_tracks,
     API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
     fetch_user_tracks,
 };
 use crate::player::Player;
+use ratatui::crossterm::{
+    event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    execute,
+    terminal::supports_keyboard_enhancement,
+};
 use ratatui::{
     DefaultTerminal,
     crossterm::event::{self, Event},
@@ -33,7 +39,8 @@ use self::input::helpers::reset_search_rows;
 use self::input::{handle_key_event, InputOutcome};
 use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource};
 use self::utils::{
-    active_tracks, append_feed_tracks, build_queue, play_queued_track, queued_from_current,
+    enter_radio,
+    active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
 };
 
 enum AppEvent {
@@ -65,13 +72,27 @@ enum Msg {
     FeedTracks(u64, Vec<Track>),
     /// Tracks of one later feed item, to append to the queue while the feed plays.
     FeedQueue(u64, Vec<Track>),
+    /// Related tracks for the radio seed, to append to the queue.
+    Related(u64, Vec<Track>),
     Engagement(Engagement),
 }
 
 pub fn run(api: &mut Arc<Mutex<API>>, player: Player) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
+    // Lets terminals that speak the kitty keyboard protocol report Shift+Enter; others still
+    // send a plain Enter (Shift+G covers them).
+    let enhanced_keys = supports_keyboard_enhancement().unwrap_or(false);
+    if enhanced_keys {
+        let _ = execute!(
+            std::io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     let result = start(terminal, api, player);
+    if enhanced_keys {
+        let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+    }
     ratatui::restore();
     result
 }
@@ -234,6 +255,26 @@ fn start(
                         && state.playback_source == PlaybackSource::Feed
                     {
                         append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, t);
+                    }
+                }
+                Msg::Related(id, tracks) => {
+                    if id == state.radio_fetch.request_id
+                        && state.playback_source == PlaybackSource::Radio
+                    {
+                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks);
+                        if state.radio_waiting {
+                            if let Some(next_idx) = state.auto_queue.pop_front() {
+                                if let Some(track) = data.playback_tracks.get(next_idx).cloned() {
+                                    if let Some(current) = queued_from_current(&state, &data) {
+                                        state.playback_history.push(current);
+                                    }
+                                    player.play(track);
+                                    state.override_playing = None;
+                                    state.current_playing_index = Some(next_idx);
+                                    state.radio_waiting = false;
+                                }
+                            }
+                        }
                     }
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
@@ -449,6 +490,26 @@ fn start(
                     ),
                 },
             );
+        }
+
+        // Radio: keep related tracks queued behind whatever is playing. Seeded by the last
+        // track in the chain so each fetch drifts a little further from the start.
+        if state.playback_source == PlaybackSource::Radio
+            && state.manual_queue.is_empty()
+            && state.auto_queue.len() <= 1
+        {
+            if let Some(seed) = data.playback_tracks.last().map(|t| t.track_urn.clone()) {
+                if state.radio_fetched_for.as_deref() != Some(seed.as_str()) {
+                    state.radio_fetched_for = Some(seed.clone());
+                    state.radio_fetch.cancel();
+                    let id = state.radio_fetch.request_id;
+                    state.radio_fetch.task = Some(spawn_tracks(
+                        &async_rt, &tx, id,
+                        fetch_related_tracks(auth(), seed),
+                        Msg::Related,
+                    ));
+                }
+            }
         }
 
         // Enter in the feed: keep the queue going with the items after the one playing, in
@@ -698,26 +759,32 @@ fn start(
                 
                 if should_preload {
                     if let Some(current_idx) = state.current_playing_index {
-                        let tracks = active_tracks(&state, &data);
-
-                        let next_track = if state.repeat_enabled {
-                            tracks.get(current_idx).cloned()
-                        } else if let Some(queued) = state.manual_queue.front() {
-                            Some(queued.track.clone())
-                        } else if let Some(&next_idx) = state.auto_queue.front() {
-                            tracks.get(next_idx).cloned()
-                        } else {
-                            if state.auto_queue.is_empty() {
-                                state.auto_queue = build_queue(current_idx, tracks, state.shuffle_enabled);
+                        let next_track = {
+                            let tracks = active_tracks(&state, &data);
+                            if state.repeat_enabled {
+                                tracks.get(current_idx).cloned()
+                            } else if let Some(queued) = state.manual_queue.front() {
+                                Some(queued.track.clone())
+                            } else if let Some(&next_idx) = state.auto_queue.front() {
+                                tracks.get(next_idx).cloned()
+                            } else {
+                                None
                             }
-                            state.auto_queue.front().and_then(|&idx| tracks.get(idx).cloned())
                         };
 
-                        if let Some(track) = next_track {
-                            if track.track_urn != current_track.track_urn && track.is_playable() {
-                                player.preload_next(track);
-                                state.preload_triggered_for_track_urn = Some(current_track.track_urn.clone());
+                        match next_track {
+                            Some(track) => {
+                                if track.track_urn != current_track.track_urn && track.is_playable() {
+                                    player.preload_next(track);
+                                    state.preload_triggered_for_track_urn = Some(current_track.track_urn.clone());
+                                }
                             }
+                            // The list is running out: hand over to related tracks now so the
+                            // radio fetch lands before this track ends.
+                            None if state.playback_source != PlaybackSource::Radio => {
+                                enter_radio(&mut state, &mut data, current_track.clone());
+                            }
+                            None => {}
                         }
                     }
                 }
@@ -741,10 +808,6 @@ fn start(
                             state.override_playing = None;
                         }
                         } else {
-                            if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
-                                state.auto_queue =
-                                    build_queue(current_idx, active_tracks(&state, &data), state.shuffle_enabled);
-                            }
                             if let Some(queued) = state.manual_queue.pop_front() {
                             if let Some(current) = queued_from_current(&state, &data) {
                                 state.playback_history.push(current);
@@ -760,8 +823,12 @@ fn start(
                                     state.current_playing_index = Some(next_idx);
                                 }
                             } else {
-                                player.pause();
-                                state.current_playing_index = None;
+                                // Nothing queued: related tracks are (or are about to be) on
+                                // their way; Msg::Related starts the next one.
+                                if state.playback_source != PlaybackSource::Radio {
+                                    enter_radio(&mut state, &mut data, current_track.clone());
+                                }
+                                state.radio_waiting = true;
                             }
                         }
                     }
