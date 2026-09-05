@@ -5,11 +5,13 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
+use ratatui_image::thread::ThreadProtocol;
 
 use crate::api::Track;
 use crate::tui::logic::state::VisualizerMode;
 
 mod common;
+mod cover;
 mod oscilloscope;
 mod spectrum;
 mod interference;
@@ -29,6 +31,8 @@ pub fn render_visualizer(
     wave_buffer: &Arc<Mutex<VecDeque<f32>>>,
     mode: VisualizerMode,
     track: &Track,
+    progress_ms: u64,
+    cover_art: &mut ThreadProtocol,
 ) {
     let samples: Vec<f32> = {
         let buffer = wave_buffer.lock().unwrap();
@@ -48,6 +52,10 @@ pub fn render_visualizer(
         VisualizerMode::StackedScope => stacked::render_stacked_scope(frame, area, &samples),
         VisualizerMode::ParticleFountain => fountain::render_particle_fountain(frame, area, &samples),
         VisualizerMode::InterferenceField => interference::render_interference_field(frame, area, &samples),
+        VisualizerMode::NowPlaying => {
+            // Shows title/artist itself; the border overlay would be redundant.
+            return cover::render_now_playing(frame, area, track, progress_ms, cover_art);
+        }
         // ADD_MODE
     }
 
@@ -101,12 +109,17 @@ mod tests {
             .collect()
     }
 
+    fn empty_protocol() -> ThreadProtocol {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        ThreadProtocol::new(tx, None)
+    }
+
     fn track() -> Track {
         Track {
             title: "Track Title".into(),
             artists: "Artist".into(),
-            duration: String::new(),
-            duration_ms: 0,
+            duration: "4:10".into(),
+            duration_ms: 250_000,
             playback_count: String::new(),
             artwork_url: String::new(),
             access: String::new(),
@@ -124,8 +137,11 @@ mod tests {
                     // Let the history/simulation modes accumulate real time.
                     std::thread::sleep(std::time::Duration::from_millis(40));
                 }
+                let mut proto = empty_protocol();
                 terminal
-                    .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track))
+                    .draw(|f| {
+                        render_visualizer(f, f.area(), &wave, mode, &track, 102_000, &mut proto)
+                    })
                     .unwrap();
             }
             if show {
@@ -158,8 +174,9 @@ mod tests {
         };
         for mode in VisualizerMode::ALL {
             let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
+            let mut proto = empty_protocol();
             terminal
-                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track))
+                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track, 0, &mut proto))
                 .unwrap();
         }
     }

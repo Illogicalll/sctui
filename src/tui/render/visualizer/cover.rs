@@ -1,0 +1,133 @@
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::Paragraph,
+};
+use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
+
+use crate::api::{Track, format_duration};
+
+use super::common::frame_block;
+
+const PAD: u16 = 2;
+const MIN_WIDTH_FOR_ART: u16 = 30;
+const ART_MAX_WIDTH_FRACTION: f32 = 0.55;
+const DIM: Color = Color::Rgb(70, 70, 85);
+const GREY: Color = Color::Rgb(160, 160, 176);
+
+/// Big cover art on the left, title / artist / progress on the right.
+pub fn render_now_playing(
+    frame: &mut Frame,
+    area: Rect,
+    track: &Track,
+    progress_ms: u64,
+    cover_art: &mut ThreadProtocol,
+) {
+    let block = frame_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width < 8 || inner.height < 5 {
+        return;
+    }
+
+    let body = Rect {
+        x: inner.x + PAD,
+        y: inner.y + 1,
+        width: inner.width.saturating_sub(2 * PAD),
+        height: inner.height.saturating_sub(2),
+    };
+
+    // Art is a square: a cell is ~2:1, so width = 2 × height.
+    let art_w = if inner.width >= MIN_WIDTH_FOR_ART {
+        (body.height * 2).min((body.width as f32 * ART_MAX_WIDTH_FRACTION) as u16)
+    } else {
+        0
+    };
+    let gap = if art_w > 0 { PAD * 2 } else { 0 };
+    let [art, _, text] = Layout::horizontal([
+        Constraint::Length(art_w),
+        Constraint::Length(gap),
+        Constraint::Fill(1),
+    ])
+    .areas(body);
+
+    if art_w > 0 {
+        let art_h = (art_w / 2).clamp(1, art.height);
+        let art_rect = Rect {
+            x: art.x,
+            y: art.y + (art.height - art_h) / 2,
+            width: art_w,
+            height: art_h,
+        };
+        frame.render_stateful_widget(
+            StatefulImage::new().resize(Resize::Scale(None)),
+            art_rect,
+            cover_art,
+        );
+    }
+
+    // Five text rows, vertically centred: title, artist, blank, bar, times.
+    let rows = 5u16.min(text.height);
+    let top = text.y + (text.height - rows) / 2;
+    let row = |i: u16| Rect { x: text.x, y: top + i, width: text.width, height: 1 };
+
+    if rows >= 1 {
+        frame.render_widget(
+            Paragraph::new(track.title.as_str()).style(
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            row(0),
+        );
+    }
+    if rows >= 2 {
+        frame.render_widget(
+            Paragraph::new(track.artists.as_str()).style(Style::default().fg(GREY)),
+            row(1),
+        );
+    }
+    if rows >= 4 {
+        let ratio = if track.duration_ms == 0 {
+            0.0
+        } else {
+            (progress_ms as f64 / track.duration_ms as f64).clamp(0.0, 1.0)
+        };
+        frame.render_widget(Paragraph::new(progress_line(text.width, ratio)), row(3));
+    }
+    if rows >= 5 {
+        let elapsed = format_duration(progress_ms);
+        let total = track.duration.as_str();
+        let space = (text.width as usize).saturating_sub(elapsed.chars().count() + total.chars().count());
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::raw(elapsed),
+                Span::raw(" ".repeat(space)),
+                Span::raw(total),
+            ]))
+            .style(Style::default().fg(GREY)),
+            row(4),
+        );
+    }
+}
+
+/// `━━━━╸────`: heavy line for played, a head glyph, faint line for remaining.
+fn progress_line(width: u16, ratio: f64) -> Line<'static> {
+    let width = width as usize;
+    let played = (ratio * width as f64).round() as usize;
+    let played = played.min(width);
+    let mut spans = Vec::with_capacity(3);
+    if played > 0 {
+        spans.push(Span::styled(
+            "━".repeat(played - 1) + "╸",
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+    spans.push(Span::styled(
+        "─".repeat(width - played),
+        Style::default().fg(DIM),
+    ));
+    Line::from(spans)
+}

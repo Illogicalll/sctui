@@ -28,10 +28,11 @@ pub enum VisualizerMode {
     StackedScope,
     ParticleFountain,
     InterferenceField,
+    NowPlaying,
 }
 
 impl VisualizerMode {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Oscilloscope,
         Self::SpectrumBars,
         Self::MirrorSpectrum,
@@ -44,6 +45,7 @@ impl VisualizerMode {
         Self::StackedScope,
         Self::ParticleFountain,
         Self::InterferenceField,
+        Self::NowPlaying,
     ];
 
     pub fn next(self) -> Self {

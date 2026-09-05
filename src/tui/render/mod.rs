@@ -51,6 +51,8 @@ pub fn render(
             wave_buffer,
             state.visualizer_view,
             &player.current_track(),
+            state.progress,
+            cover_art_async,
         );
         overlays::render_overlays(frame, state, data);
         return;
