@@ -180,6 +180,10 @@ fn start(
     let wave_buffer = player.wave_buffer();
     let tick_rate = Duration::from_millis(200);
     let mut last_tick = Instant::now();
+    // A full repaint whenever the visible view changes. ratatui only redraws changed cells,
+    // so a glyph the terminal sized differently from unicode-width can leave a ghost behind;
+    // clearing at view boundaries wipes any that slipped past sanitize_display.
+    let mut last_view = None;
 
     loop {
         while let Ok(msg) = rx.try_recv() {
@@ -707,6 +711,20 @@ fn start(
             );
         }
 
+        let view = (
+            state.selected_tab,
+            state.selected_subtab,
+            state.selected_searchfilter,
+            state.visualizer_mode,
+            state.visualizer_view,
+            state.queue_visible,
+            state.history_visible,
+            state.help_visible,
+        );
+        if last_view != Some(view) {
+            terminal.clear()?;
+            last_view = Some(view);
+        }
         terminal.draw(|frame| {
             render(
                 frame,
@@ -870,6 +888,20 @@ fn start(
                 following_len,
             );
 
+            let view = (
+                state.selected_tab,
+                state.selected_subtab,
+                state.selected_searchfilter,
+                state.visualizer_mode,
+                state.visualizer_view,
+                state.queue_visible,
+                state.history_visible,
+                state.help_visible,
+            );
+            if last_view != Some(view) {
+                terminal.clear()?;
+                last_view = Some(view);
+            }
             terminal.draw(|frame| {
                 render(
                     frame,

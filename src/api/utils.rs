@@ -49,10 +49,41 @@ pub(crate) fn format_duration(duration_ms: u64) -> String {
 }
 
 pub(crate) fn parse_str(obj: &serde_json::Value, key: &str) -> String {
-    obj.get(key)
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
+    sanitize_display(obj.get(key).and_then(|v| v.as_str()).unwrap_or(""))
+}
+
+/// Drops the invisible code points that make terminals and ratatui disagree
+/// about how many cells a string occupies: variation selectors (`◼️`, `☑️`),
+/// zero-width joiners and spaces, emoji skin-tone modifiers. A mismatch shifts
+/// the rest of the row on screen and leaves ghost characters behind, because
+/// ratatui's diff never sees the shift.
+pub(crate) fn sanitize_display(s: &str) -> String {
+    s.chars()
+        .filter(|&c| {
+            !matches!(c,
+                '\u{FE00}'..='\u{FE0F}'   // variation selectors
+                | '\u{200B}'..='\u{200F}' // zero-width space/joiners, marks
+                | '\u{2060}'               // word joiner
+                | '\u{FEFF}'               // BOM
+                | '\u{1F3FB}'..='\u{1F3FF}' // emoji skin-tone modifiers
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize_display;
+
+    #[test]
+    fn strips_width_hazards_and_keeps_text() {
+        assert_eq!(sanitize_display("He incognito\u{25FC}\u{FE0F} - 2"), "He incognito\u{25FC} - 2");
+        assert_eq!(sanitize_display("T H E \u{2611}\u{FE0F}"), "T H E \u{2611}");
+        assert_eq!(sanitize_display("\u{1F64F}\u{1F3FD}\u{2728}"), "\u{1F64F}\u{2728}");
+        assert_eq!(sanitize_display("a\u{200D}b\u{200B}c"), "abc");
+        assert_eq!(sanitize_display("AÚN NO HE TERMINADO"), "AÚN NO HE TERMINADO");
+        assert_eq!(sanitize_display("HE/HIM\u{1F49A}"), "HE/HIM\u{1F49A}");
+    }
 }
 
 pub(crate) fn parse_u64(obj: &serde_json::Value, key: &str) -> u64 {
