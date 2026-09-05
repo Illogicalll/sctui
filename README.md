@@ -4,6 +4,52 @@ a soundcloud client for the terminal
 
 ![demo](./media/playing_demo.png)
 
+## Installation
+
+### macOS / Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Illogicalll/sctui/main/install.sh | sh
+```
+
+Downloads the latest release for your platform, verifies its checksum and installs it to `~/.local/bin/sctui`. Set `SCTUI_INSTALL_DIR` to change the location or `SCTUI_VERSION=v0.1.0` to pin a release.
+
+### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/Illogicalll/sctui/main/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\sctui\bin` and adds it to your user `PATH`.
+
+### Manual download
+
+Grab the archive for your platform from the [latest release](https://github.com/Illogicalll/sctui/releases/latest), extract it and put `sctui` somewhere on your `PATH`.
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `sctui-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `sctui-x86_64-apple-darwin.tar.gz` |
+| Linux (x86_64) | `sctui-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux (ARM64) | `sctui-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows (x86_64) | `sctui-x86_64-pc-windows-msvc.zip` |
+
+### From source
+
+Needs [Rust](https://rustup.rs) 1.85 or newer. On Linux, install the ALSA headers first: `sudo apt install libasound2-dev pkg-config` (Debian/Ubuntu) or `sudo dnf install alsa-lib-devel` (Fedora).
+
+```sh
+cargo install --git https://github.com/Illogicalll/sctui
+```
+
+### Requirements
+
+- **A SoundCloud account.** The free tier is fine. The first launch opens your browser to sign in; the token is stored in `~/.config/sctui/token.json` (`%USERPROFILE%\.config\sctui\token.json` on Windows) and refreshed automatically.
+- **A modern terminal with true colour.** Cover art needs a terminal that supports an image protocol: kitty, WezTerm, Ghostty, iTerm2 or foot. Any other terminal falls back to block-character art.
+- **A font with Unicode block and braille glyphs** for the visualisers. Any Nerd Font, JetBrains Mono or Fira Code works.
+- **Linux:** the ALSA runtime (`libasound2`), which every desktop distro ships. PipeWire and PulseAudio work through their ALSA plugin.
+- **macOS 11+** or **Windows 10+**.
+
 ## Features
 
 ### 🎧 High Quality Ad-Free playback
