@@ -54,13 +54,16 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 </details>
 
-### Requirements
+<details>
+<summary><b>Requirements</b></summary>
 
-- **A SoundCloud account.** The free tier is fine. The first launch opens your browser to sign in; the token is stored in `~/.config/sctui/token.json` (`%USERPROFILE%\.config\sctui\token.json` on Windows) and refreshed automatically.
+- **A SoundCloud account.** The free tier is fine.
 - **A modern terminal with true colour.** Cover art needs a terminal that supports an image protocol: kitty, WezTerm, Ghostty, iTerm2 or foot. Any other terminal falls back to block-character art.
 - **A font with Unicode block and braille glyphs** for the visualisers. Any Nerd Font, JetBrains Mono or Fira Code works.
 - **Linux:** the ALSA runtime (`libasound2`), which every desktop distro ships. PipeWire and PulseAudio work through their ALSA plugin.
 - **macOS 11+** or **Windows 10+**.
+
+</details>
 
 ## Features
 
