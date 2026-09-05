@@ -13,8 +13,8 @@ use super::common::frame_block;
 
 const PAD: u16 = 2;
 const MIN_WIDTH_FOR_ART: u16 = 30;
-const ART_MAX_WIDTH_FRACTION: f32 = 0.45;
-const ART_HEIGHT_FRACTION: f32 = 0.8;
+const ART_MAX_WIDTH_FRACTION: f32 = 0.38;
+const ART_HEIGHT_FRACTION: f32 = 0.65;
 const INFO_WIDTH_FRACTION: u16 = 3; // info block is 3/4 of the text column
 const DIM: Color = Color::Rgb(70, 70, 85);
 const GREY: Color = Color::Rgb(160, 160, 176);
@@ -42,7 +42,7 @@ pub fn render_now_playing(
     };
 
     // Art is a square: a cell is ~2:1, so width = 2 × height. Takes 80% of the
-    // height so it sits inset rather than touching the frame.
+    // height (65%) so it sits inset rather than touching the frame.
     let art_w = if inner.width >= MIN_WIDTH_FOR_ART {
         ((body.height as f32 * ART_HEIGHT_FRACTION) as u16 * 2)
             .min((body.width as f32 * ART_MAX_WIDTH_FRACTION) as u16)
