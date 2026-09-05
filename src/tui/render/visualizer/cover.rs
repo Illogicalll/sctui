@@ -62,7 +62,7 @@ pub fn render_now_playing(
             height: art_h,
         };
         frame.render_stateful_widget(
-            StatefulImage::new().resize(Resize::Scale(Some(FilterType::Lanczos3))),
+            StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle))),
             art_rect,
             cover_art,
         );
