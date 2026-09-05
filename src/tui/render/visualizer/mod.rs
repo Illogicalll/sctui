@@ -12,6 +12,7 @@ use crate::tui::logic::state::VisualizerMode;
 mod common;
 mod oscilloscope;
 mod spectrum;
+mod rings;
 mod ridgeline;
 mod led;
 mod curve;
@@ -38,6 +39,7 @@ pub fn render_visualizer(
         VisualizerMode::FilledCurve => curve::render_filled_curve(frame, area, &samples),
         VisualizerMode::LedMatrix => led::render_led_matrix(frame, area, &samples),
         VisualizerMode::Ridgeline => ridgeline::render_ridgeline(frame, area, &samples),
+        VisualizerMode::SpectrumRings => rings::render_spectrum_rings(frame, area, &samples),
         // ADD_MODE
     }
 
