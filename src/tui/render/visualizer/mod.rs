@@ -12,6 +12,7 @@ use crate::tui::logic::state::VisualizerMode;
 mod common;
 mod oscilloscope;
 mod spectrum;
+mod stacked;
 mod seismograph;
 mod rings;
 mod ridgeline;
@@ -42,6 +43,7 @@ pub fn render_visualizer(
         VisualizerMode::Ridgeline => ridgeline::render_ridgeline(frame, area, &samples),
         VisualizerMode::SpectrumRings => rings::render_spectrum_rings(frame, area, &samples),
         VisualizerMode::Seismograph => seismograph::render_seismograph(frame, area, &samples),
+        VisualizerMode::StackedScope => stacked::render_stacked_scope(frame, area, &samples),
         // ADD_MODE
     }
 
