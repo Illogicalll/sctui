@@ -1,57 +1,54 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Rect,
     style::{Color, Style},
-    widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType},
+    widgets::{Axis, Chart, Dataset, GraphType},
 };
 
-use super::common::{downsample, normalize, split_channels, MAX_POINTS};
+use super::common::{MAX_POINTS, downsample, frame_block, normalize, split_channels};
 
 const OSCILLOSCOPE_WINDOW_SAMPLES: usize = 1024;
 
-pub fn render_oscilloscope(frame: &mut Frame, area: Rect, samples: &[f32]) {
+pub type Points = Vec<(f64, f64)>;
+
+/// Left/right traces of the most recent window, normalised to -1..1.
+pub fn scope_points(samples: &[f32]) -> (Points, Points) {
     let samples = oscilloscope_window(samples);
     let (left, right) = split_channels(samples);
-    let left = downsample(&normalize(&left), MAX_POINTS);
-    let right = downsample(&normalize(&right), MAX_POINTS);
+    let to_points = |ch: &[f32]| -> Points {
+        downsample(&normalize(ch), MAX_POINTS)
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (i as f64, *s as f64))
+            .collect()
+    };
+    (to_points(&left), to_points(&right))
+}
+
+pub fn scope_dataset(points: &[(f64, f64)], color: Color) -> Dataset<'_> {
+    Dataset::default()
+        .marker(ratatui::symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(color))
+        .data(points)
+}
+
+pub fn scope_chart<'a>(datasets: Vec<Dataset<'a>>, max_x: f64) -> Chart<'a> {
+    Chart::new(datasets)
+        .x_axis(Axis::default().bounds([0.0, max_x]))
+        .y_axis(Axis::default().bounds([-1.0, 1.0]))
+}
+
+pub fn render_oscilloscope(frame: &mut Frame, area: Rect, samples: &[f32]) {
+    let (left, right) = scope_points(samples);
     let max_x = left.len().max(1) as f64;
 
-    let left_points: Vec<(f64, f64)> = left
-        .iter()
-        .enumerate()
-        .map(|(i, sample)| (i as f64, *sample as f64))
-        .collect();
-    let right_points: Vec<(f64, f64)> = right
-        .iter()
-        .enumerate()
-        .map(|(i, sample)| (i as f64, *sample as f64))
-        .collect();
-
-    let datasets: Vec<Dataset> = vec![
-        Dataset::default()
-            .marker(ratatui::symbols::Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Style::default().fg(Color::Cyan))
-            .data(&left_points),
-        Dataset::default()
-            .marker(ratatui::symbols::Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Style::default().fg(Color::Magenta))
-            .data(&right_points),
+    let datasets = vec![
+        scope_dataset(&left, Color::Cyan),
+        scope_dataset(&right, Color::Magenta),
     ];
 
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title("sctui")
-                .title_alignment(Alignment::Center)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded),
-        )
-        .x_axis(Axis::default().bounds([0.0, max_x]))
-        .y_axis(Axis::default().bounds([-1.0, 1.0]));
-
-    frame.render_widget(chart, area);
+    frame.render_widget(scope_chart(datasets, max_x).block(frame_block()), area);
 }
 
 fn oscilloscope_window(samples: &[f32]) -> &[f32] {
