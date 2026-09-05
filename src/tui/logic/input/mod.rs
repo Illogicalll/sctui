@@ -39,10 +39,6 @@ pub fn handle_key_event(
         return InputOutcome::Continue;
     }
 
-    if player.is_seeking() {
-        return InputOutcome::Continue;
-    }
-
     match key.code {
         KeyCode::Esc => {
             state.quit_confirm_visible = true;

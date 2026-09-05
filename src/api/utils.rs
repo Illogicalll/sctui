@@ -1,4 +1,29 @@
+use chrono::{DateTime, FixedOffset, Utc};
+
 use super::models::Track;
+
+/// Largest whole unit of an elapsed time: "now", "5m", "3h", "2d", "1w", "1mo", "1y".
+pub(crate) fn format_age(secs: u64) -> String {
+    const UNITS: [(u64, &str); 6] = [
+        (31_536_000, "y"),
+        (2_592_000, "mo"),
+        (604_800, "w"),
+        (86_400, "d"),
+        (3_600, "h"),
+        (60, "m"),
+    ];
+    UNITS
+        .iter()
+        .find(|(len, _)| secs >= *len)
+        .map(|(len, name)| format!("{}{name}", secs / len))
+        .unwrap_or_else(|| "now".to_string())
+}
+
+/// SoundCloud's `2026/09/04 00:00:00 +0000` timestamps; now on parse failure.
+pub(crate) fn parse_datetime(obj: &serde_json::Value, key: &str) -> DateTime<FixedOffset> {
+    DateTime::parse_from_str(&parse_str(obj, key), "%Y/%m/%d %H:%M:%S %z")
+        .unwrap_or_else(|_| Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()))
+}
 
 pub(crate) fn format_playback_count(n: u64) -> String {
     match n {

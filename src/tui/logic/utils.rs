@@ -256,6 +256,23 @@ pub fn build_queue(
     }
 }
 
+/// Extend the playing list with `incoming`, queueing each new playable track after what is
+/// already queued. Tracks already present (by urn) or unplayable are dropped.
+pub(crate) fn append_feed_tracks(
+    playback_tracks: &mut Vec<Track>,
+    auto_queue: &mut VecDeque<usize>,
+    incoming: Vec<Track>,
+) {
+    for track in incoming {
+        let seen = playback_tracks.iter().any(|t| t.track_urn == track.track_urn);
+        if seen || !track.is_playable() {
+            continue;
+        }
+        auto_queue.push_back(playback_tracks.len());
+        playback_tracks.push(track);
+    }
+}
+
 pub fn play_queued_track(
     queued: QueuedTrack,
     state: &mut AppState,
@@ -289,12 +306,14 @@ pub fn play_queued_track(
         PlaybackSource::Playlist
         | PlaybackSource::Album
         | PlaybackSource::FollowingPublished
-        | PlaybackSource::FollowingLikes => {
+        | PlaybackSource::FollowingLikes
+        | PlaybackSource::Feed => {
             let tracks = queued.tracks_snapshot.unwrap_or_else(|| match queued.source {
                 PlaybackSource::Playlist => data.playlist_tracks.clone(),
                 PlaybackSource::Album => data.album_tracks.clone(),
                 PlaybackSource::FollowingPublished => data.following_tracks.clone(),
                 PlaybackSource::FollowingLikes => data.following_likes_tracks.clone(),
+                PlaybackSource::Feed => data.feed_tracks.clone(),
                 PlaybackSource::Likes => Vec::new(),
             });
             if tracks.is_empty() || queued.index >= tracks.len() {
@@ -352,7 +371,8 @@ pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Tra
         PlaybackSource::Playlist
         | PlaybackSource::Album
         | PlaybackSource::FollowingPublished
-        | PlaybackSource::FollowingLikes => &data.playback_tracks,
+        | PlaybackSource::FollowingLikes
+        | PlaybackSource::Feed => &data.playback_tracks,
     }
 }
 
@@ -383,8 +403,47 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
             None,
             data.playback_following_user_urn.clone(),
         ),
+        PlaybackSource::Feed => (Some(&data.playback_tracks), None, None, None),
     };
     Some(QueuedTrack::new(
         source, idx, track, tracks_snapshot, playlist_uri, album_uri, following_user_urn, false,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(urn: &str, access: &str) -> Track {
+        Track {
+            title: urn.to_string(),
+            artists: String::new(),
+            duration: String::new(),
+            duration_ms: 0,
+            playback_count: String::new(),
+            artwork_url: String::new(),
+            access: access.to_string(),
+            track_urn: urn.to_string(),
+        }
+    }
+
+    #[test]
+    fn append_feed_tracks_queues_new_playable_tracks_after_existing_queue() {
+        let mut playing = vec![track("a", "playable"), track("b", "playable")];
+        let mut queue = VecDeque::from([1]);
+        append_feed_tracks(
+            &mut playing,
+            &mut queue,
+            vec![
+                track("a", "playable"), // duplicate of what is playing: dropped
+                track("c", "blocked"),  // unplayable: dropped
+                track("d", "playable"),
+                track("e", ""),
+                track("d", "playable"), // duplicate within the batch: dropped
+            ],
+        );
+        let urns: Vec<&str> = playing.iter().map(|t| t.track_urn.as_str()).collect();
+        assert_eq!(urns, ["a", "b", "d", "e"]);
+        assert_eq!(queue, VecDeque::from([1, 2, 3]));
+    }
 }

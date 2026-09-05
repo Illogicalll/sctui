@@ -2,6 +2,7 @@ mod utils;
 mod models;
 mod calls;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::auth::Token;
@@ -12,7 +13,7 @@ pub use calls::playlists::fetch_playlist_tracks;
 pub use calls::search::{
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
 };
-pub use models::{Album, Artist, Playlist, Track};
+pub use models::{Activity, Album, Artist, Playlist, Track};
 pub(crate) use utils::format_duration;
 
 /// Cursor over one `linked_partitioning` list.
@@ -54,6 +55,9 @@ pub struct API {
     others_playlists_page: Page,
     albums_page: Page,
     following_page: Page,
+    feed_page: Page,
+    /// User urn → username, for feed reposters.
+    user_names: HashMap<String, String>,
 }
 
 impl API {
@@ -65,6 +69,8 @@ impl API {
             others_playlists_page: Page::Start,
             albums_page: Page::Start,
             following_page: Page::Start,
+            feed_page: Page::Start,
+            user_names: HashMap::new(),
         }
     }
 

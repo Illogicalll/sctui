@@ -1,4 +1,4 @@
-use crate::api::{API, Album, Artist, Playlist, Track};
+use crate::api::{API, Activity, Album, Artist, Playlist, Track};
 use ratatui::widgets::TableState;
 use std::collections::{HashSet, VecDeque};
 
@@ -10,6 +10,7 @@ pub enum PlaybackSource {
     Album,
     FollowingPublished,
     FollowingLikes,
+    Feed,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -256,6 +257,11 @@ pub struct AppState {
     pub search_album_tracks_fetch: FetchTask,
     pub search_people_tracks_fetch: FetchTask,
     pub search_people_likes_fetch: FetchTask,
+    pub feed_tracks_fetch: FetchTask,
+    /// Background walk over later feed items that keeps extending the queue after Enter.
+    pub feed_queue_fetch: FetchTask,
+    /// Set by Enter in the feed: index of the activity being played; the loop expands from there.
+    pub feed_expand_from: Option<usize>,
     pub progress: u64,
     pub tick: f64,
     pub current_playing_index: Option<usize>,
@@ -330,6 +336,11 @@ pub struct AppData {
     pub search_people_likes_tracks: Vec<Track>,
     pub search_people_likes_state: TableState,
     pub search_people_likes_user_urn: Option<String>,
+    pub feed: Vec<Activity>,
+    pub feed_state: TableState,
+    pub feed_tracks: Vec<Track>,
+    pub feed_tracks_state: TableState,
+    pub feed_tracks_key: Option<String>,
 }
 
 impl AppData {
@@ -402,6 +413,11 @@ impl AppData {
             search_people_likes_tracks: Vec::new(),
             search_people_likes_state: TableState::default().with_selected(0),
             search_people_likes_user_urn: None,
+            feed: Vec::new(),
+            feed_state: TableState::default().with_selected(0),
+            feed_tracks: Vec::new(),
+            feed_tracks_state: TableState::default().with_selected(0),
+            feed_tracks_key: None,
         })
     }
 }
@@ -414,10 +430,6 @@ pub fn table_rows_count(selected_subtab: usize, data: &AppData) -> usize {
         3 => data.following.len(),
         _ => 0,
     }
-}
-
-pub fn info_table_rows_count() -> usize {
-    2
 }
 
 pub const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];

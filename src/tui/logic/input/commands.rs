@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
 use super::InputOutcome;
+use crate::api::Track;
 use crate::tui::logic::state::{AppData, AppState, Engagement, FollowingTracksFocus};
 use crate::player::Player;
 use crate::tui::logic::utils::{active_tracks, build_queue};
@@ -19,7 +20,7 @@ pub(crate) fn handle_char(
 ) -> InputOutcome {
     if key.modifiers.contains(KeyModifiers::SHIFT) {
         handle_shift_char(c, state, data, player)
-    } else if state.selected_tab == 0 && c == ' ' {
+    } else if state.selected_tab != 1 && c == ' ' {
         if player.is_playing() {
             player.pause();
         } else {
@@ -220,26 +221,7 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
         }
     } else if state.selected_tab == 1 {
         match state.selected_searchfilter {
-            0 => {
-                if let Some(track) = data.search_tracks.get(state.selected_row) {
-                    if let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) {
-                        let is_liked = data.liked_track_urns.contains(&track.track_urn);
-                        if is_liked {
-                            data.liked_track_urns.remove(&track.track_urn);
-                            state.engagement_queue.push_back(Engagement::UnlikeTrack {
-                                track_urn: track.track_urn.clone(),
-                                track_id,
-                            });
-                        } else {
-                            data.liked_track_urns.insert(track.track_urn.clone());
-                            state.engagement_queue.push_back(Engagement::LikeTrack {
-                                track: track.clone(),
-                                track_id,
-                            });
-                        }
-                    }
-                }
-            }
+            0 => toggle_track_like(data.search_tracks.get(state.selected_row).cloned(), state, data),
             1 => {
                 if let Some(album) = data.search_albums.get(state.selected_row) {
                     if let Some(playlist_id) =
@@ -308,6 +290,25 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
             }
             _ => {}
         }
+    } else if state.selected_tab == 2 {
+        toggle_track_like(data.feed_tracks.get(state.selected_info_row).cloned(), state, data);
+    }
+}
+
+/// Like/unlike a track from outside the Likes list, optimistically.
+fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppData) {
+    let Some(track) = track else { return };
+    let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) else { return };
+    if data.liked_track_urns.remove(&track.track_urn) {
+        state.engagement_queue.push_back(Engagement::UnlikeTrack {
+            track_urn: track.track_urn,
+            track_id,
+        });
+    } else {
+        data.liked_track_urns.insert(track.track_urn.clone());
+        state
+            .engagement_queue
+            .push_back(Engagement::LikeTrack { track, track_id });
     }
 }
 

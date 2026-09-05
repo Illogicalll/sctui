@@ -20,8 +20,23 @@ pub(crate) fn handle_enter(
         handle_album_enter(state, data, player);
     } else if state.selected_tab == 0 && state.selected_subtab == 3 {
         handle_following_enter(state, data, player);
+    } else if state.selected_tab == 2 {
+        handle_feed_enter(state, data, player);
     }
     InputOutcome::Continue
+}
+
+/// Enter on an activity moves focus to its tracks; Enter on a track plays it.
+fn handle_feed_enter(state: &mut AppState, data: &mut AppData, player: &Player) {
+    if !state.info_pane_selected {
+        state.info_pane_selected = true;
+        return;
+    }
+    let idx = state.selected_info_row;
+    if start_playback(state, data, player, PlaybackSource::Feed, |d| &d.feed_tracks, idx, None, None, None) {
+        data.feed_tracks_state.select(Some(idx));
+        state.feed_expand_from = Some(state.selected_row);
+    }
 }
 
 /// Shared Enter core. Returns `false` (without side effects) when `tracks(data)[idx]` is missing or

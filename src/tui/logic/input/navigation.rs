@@ -19,7 +19,8 @@ pub(crate) fn handle_right_key(
     player: &Player,
 ) -> InputOutcome {
     if key.modifiers.contains(KeyModifiers::ALT) {
-        if player.is_playing() || state.current_playing_index.is_some() {
+        // Only seeks wait for an in-flight seek; every other key stays live.
+        if (player.is_playing() || state.current_playing_index.is_some()) && !player.is_seeking() {
             player.fast_forward();
         }
         return InputOutcome::Continue;
@@ -93,7 +94,7 @@ pub(crate) fn handle_left_key(
     player: &Player,
 ) -> InputOutcome {
     if key.modifiers.contains(KeyModifiers::ALT) {
-        if player.is_playing() || state.current_playing_index.is_some() {
+        if (player.is_playing() || state.current_playing_index.is_some()) && !player.is_seeking() {
             player.rewind();
         }
         return InputOutcome::Continue;

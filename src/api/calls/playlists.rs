@@ -1,10 +1,11 @@
-use chrono::{DateTime, FixedOffset, Utc};
 use reqwest::blocking::Client;
 use reqwest;
 
 use crate::auth::{Token, try_refresh_token};
 
-use super::super::utils::{format_duration, parse_str, parse_track, parse_u64, response_items};
+use super::super::utils::{
+    format_duration, parse_datetime, parse_str, parse_track, parse_u64, response_items,
+};
 use crate::api::{API, Page, Playlist, Track};
 use std::sync::{Arc, Mutex};
 
@@ -60,13 +61,7 @@ impl API {
                     let title = parse_str(&playlist, "title");
                     let track_count = parse_u64(&playlist, "track_count").to_string();
                     let duration = format_duration(parse_u64(&playlist, "duration"));
-                    let created_at = DateTime::parse_from_str(
-                        &parse_str(&playlist, "created_at"),
-                        "%Y/%m/%d %H:%M:%S %z",
-                    )
-                    .unwrap_or_else(|_| {
-                        Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap())
-                    });
+                    let created_at = parse_datetime(&playlist, "created_at");
                     let tracks_uri = parse_str(&playlist, "tracks_uri");
 
                     playlists.push(Playlist {

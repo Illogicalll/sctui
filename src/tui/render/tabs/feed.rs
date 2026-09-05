@@ -1,126 +1,67 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, Row, Table},
+    widgets::{Block, BorderType, Borders, Row, Table},
 };
 
-use crate::tui::render::utils::{
-    calculate_column_widths, calculate_min_widths, styled_header, truncate_with_ellipsis,
-};
+use crate::tui::logic::state::{AppData, AppState};
+use crate::tui::render::tabs::library::{TRACK_HEADER, TRACK_WIDTHS, track_cells, track_table};
+use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
 
-const NUM_FEED_ACTIVITY_COLS: usize = 4;
-const NUM_FEED_INFO_COLS: usize = 3;
+const ACTIVITY_WIDTHS: [Constraint; 4] = [
+    Constraint::Percentage(40),
+    Constraint::Percentage(20),
+    Constraint::Percentage(25),
+    Constraint::Percentage(15),
+];
 
-pub fn render_feed(
-    frame: &mut Frame,
-    area: Rect,
-    width: usize,
-    selected_row: usize,
-    selected_info_row: usize,
-    info_pane_selected: bool,
-) {
-    let subchunks = Layout::default()
+/// Left: posts and reposts from followed users. Right: the tracks of the highlighted item.
+pub fn render_feed(frame: &mut Frame, area: Rect, state: &AppState, data: &mut AppData) {
+    let panes = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
         .split(area);
 
-    let activity_header = styled_header(&["User", "Action", "Media Type", "Age"]);
-
-    let activity_col_widths = calculate_column_widths(NUM_FEED_ACTIVITY_COLS);
-    let activity_col_min_widths = calculate_min_widths(&activity_col_widths, width / 2);
-
-    let activity_rows = vec![
-        vec![
-            truncate_with_ellipsis("User 1", activity_col_min_widths[0]),
-            truncate_with_ellipsis("Post", activity_col_min_widths[1]),
-            truncate_with_ellipsis("Track", activity_col_min_widths[2]),
-            truncate_with_ellipsis("2d", activity_col_min_widths[3]),
-        ],
-        vec![
-            truncate_with_ellipsis("User 2", activity_col_min_widths[0]),
-            truncate_with_ellipsis("Repost", activity_col_min_widths[1]),
-            truncate_with_ellipsis("Album", activity_col_min_widths[2]),
-            truncate_with_ellipsis("5d", activity_col_min_widths[3]),
-        ],
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(i, cols)| {
-        let row = Row::new(cols);
-        if i == selected_row && info_pane_selected {
-            row.style(Style::default().bg(Color::Gray).fg(Color::Black))
-        } else if i == selected_row && !info_pane_selected {
-            row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-        } else {
+    let col_widths = ACTIVITY_WIDTHS;
+    let min_widths = calculate_min_widths(&col_widths, panes[0].width as usize);
+    let rows = data.feed.iter().enumerate().map(|(i, activity)| {
+        let row = Row::new(vec![
+            truncate_with_ellipsis(&activity.user, min_widths[0]),
+            activity.action.to_string(),
+            activity.media.to_string(),
+            activity.age(),
+        ]);
+        if i != state.selected_row {
             row
+        } else if state.info_pane_selected {
+            row.style(Style::default().bg(Color::Gray).fg(Color::Black))
+        } else {
+            row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
         }
-    })
-    .collect::<Vec<_>>();
-
-    let table = Table::new(activity_rows, activity_col_widths)
-        .header(activity_header)
+    });
+    let table = Table::new(rows, col_widths)
+        .header(styled_header(&["User", "Action", "Media Type", "Age"]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title("activity")
-                .title_alignment(ratatui::layout::Alignment::Center)
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .border_style(if info_pane_selected {
-                    Style::default()
-                } else {
-                    Style::default().fg(Color::Cyan)
-                }),
+                .title_alignment(Alignment::Center)
+                .border_type(BorderType::Rounded),
         )
         .column_spacing(1);
-    frame.render_widget(table, subchunks[0]);
+    frame.render_stateful_widget(table, panes[0], &mut data.feed_state);
 
-    let info_header = styled_header(&["Title", "Artist", "Dur."]);
-
-    let info_col_widths = calculate_column_widths(NUM_FEED_INFO_COLS);
-    let info_col_min_widths = calculate_min_widths(&info_col_widths, width / 2);
-
-    let info_rows = vec![
-        vec![
-            truncate_with_ellipsis("Track 1", info_col_min_widths[0]),
-            truncate_with_ellipsis("Artist 1", info_col_min_widths[1]),
-            truncate_with_ellipsis("1:30", info_col_min_widths[2]),
-        ],
-        vec![
-            truncate_with_ellipsis("Track 2", info_col_min_widths[0]),
-            truncate_with_ellipsis("Artist 1", info_col_min_widths[1]),
-            truncate_with_ellipsis("2:10", info_col_min_widths[2]),
-        ],
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(i, cols)| {
-        let row = Row::new(cols);
-        if i == selected_info_row && info_pane_selected {
-            row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-        } else if i == selected_info_row && !info_pane_selected {
-            row.style(Style::default().bg(Color::Gray).fg(Color::Black))
-        } else {
-            row
-        }
-    })
-    .collect::<Vec<_>>();
-
-    let table = Table::new(info_rows, info_col_widths)
-        .header(info_header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("info")
-                .title_alignment(ratatui::layout::Alignment::Center)
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .border_style(if info_pane_selected {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default()
-                }),
-        )
-        .column_spacing(1);
-
-    frame.render_widget(table, subchunks[1]);
+    track_table(
+        frame,
+        panes[1],
+        &mut data.feed_tracks_state,
+        Some("info"),
+        TRACK_HEADER,
+        &TRACK_WIDTHS,
+        &data.feed_tracks,
+        track_cells,
+        state.selected_info_row,
+        state.info_pane_selected,
+    );
 }

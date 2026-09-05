@@ -37,8 +37,16 @@ fn selected_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
             _ => None,
         }
     } else {
-        None
+        get_feed_queued(state, data)
     }
+}
+
+fn get_feed_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    let idx = state.selected_info_row;
+    let track = data.feed_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Feed, idx, track, Some(&data.feed_tracks), None, None, None, true,
+    ))
 }
 
 fn get_search_tracks_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {

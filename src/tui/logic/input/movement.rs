@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 use ratatui::widgets::TableState;
 
 use super::InputOutcome;
-use crate::tui::logic::state::{AppData, AppState, info_table_rows_count, table_rows_count, FollowingTracksFocus};
+use crate::tui::logic::state::{AppData, AppState, table_rows_count, FollowingTracksFocus};
 
 /// Single-row move (`delta` = ±1). Moves only if the target row exists (down) or `row > 0` (up);
 /// never clamps a stale row and re-selects only when it actually moved. Returns whether it moved.
@@ -51,12 +51,32 @@ pub(crate) fn handle_down_key(
         handle_album_down(key, state, data);
     } else if state.selected_tab == 0 && state.selected_subtab == 3 {
         handle_following_down(key, state, data);
+    } else if state.selected_tab == 2 {
+        handle_feed_move(key, state, data, 1);
     } else if key.modifiers.contains(KeyModifiers::ALT) {
         handle_alt_down(state, data);
     } else {
         handle_normal_down(state, data);
     }
     InputOutcome::Continue
+}
+
+/// Moves within whichever feed pane has focus; Shift targets (and focuses) the info pane;
+/// Alt jumps ten rows.
+fn handle_feed_move(key: KeyEvent, state: &mut AppState, data: &mut AppData, dir: isize) {
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        state.info_pane_selected = true;
+    }
+    let (row, len, table) = if state.info_pane_selected {
+        (&mut state.selected_info_row, data.feed_tracks.len(), &mut data.feed_tracks_state)
+    } else {
+        (&mut state.selected_row, data.feed.len(), &mut data.feed_state)
+    };
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        page(row, len, dir * 10, table);
+    } else {
+        step(row, len, dir, table);
+    }
 }
 
 pub(crate) fn handle_up_key(
@@ -72,6 +92,8 @@ pub(crate) fn handle_up_key(
         handle_album_up(key, state, data);
     } else if state.selected_tab == 0 && state.selected_subtab == 3 {
         handle_following_up(key, state, data);
+    } else if state.selected_tab == 2 {
+        handle_feed_move(key, state, data, -1);
     } else if key.modifiers.contains(KeyModifiers::ALT) {
         handle_alt_up(state, data);
     } else {
@@ -124,25 +146,12 @@ fn handle_following_down(key: KeyEvent, state: &mut AppState, data: &mut AppData
 
 fn handle_alt_down(state: &mut AppState, data: &mut AppData) {
     let max_rows = table_rows_count(state.selected_subtab, data);
-    let max_info_rows = info_table_rows_count();
-    if state.selected_tab == 2 && state.info_pane_selected {
-        if max_info_rows > 0 {
-            state.selected_info_row = (state.selected_info_row + 10).min(max_info_rows - 1);
-        }
-    } else {
-        page(&mut state.selected_row, max_rows, 10, main_state(state.selected_subtab, data));
-    }
+    page(&mut state.selected_row, max_rows, 10, main_state(state.selected_subtab, data));
 }
 
 fn handle_normal_down(state: &mut AppState, data: &mut AppData) {
     let max_rows = table_rows_count(state.selected_subtab, data);
-    let max_info_rows = info_table_rows_count();
-    if state.selected_tab == 2
-        && state.info_pane_selected
-        && state.selected_info_row + 1 < max_info_rows
-    {
-        state.selected_info_row += 1;
-    } else if step(&mut state.selected_row, max_rows, 1, main_state(state.selected_subtab, data)) {
+    if step(&mut state.selected_row, max_rows, 1, main_state(state.selected_subtab, data)) {
         if state.selected_subtab == 1 && state.selected_tab == 0 {
             state.selected_playlist_row = state.selected_row;
         }
@@ -196,26 +205,18 @@ fn handle_following_up(key: KeyEvent, state: &mut AppState, data: &mut AppData) 
 }
 
 fn handle_alt_up(state: &mut AppState, data: &mut AppData) {
-    if state.selected_tab == 2 && state.info_pane_selected {
-        state.selected_info_row = state.selected_info_row.saturating_sub(10);
-    } else {
-        let max_rows = table_rows_count(state.selected_subtab, data);
-        page(&mut state.selected_row, max_rows, -10, main_state(state.selected_subtab, data));
-    }
+    let max_rows = table_rows_count(state.selected_subtab, data);
+    page(&mut state.selected_row, max_rows, -10, main_state(state.selected_subtab, data));
 }
 
 fn handle_normal_up(state: &mut AppState, data: &mut AppData) {
-    if state.selected_tab == 2 && state.info_pane_selected && state.selected_info_row > 0 {
-        state.selected_info_row -= 1;
-    } else {
-        let max_rows = table_rows_count(state.selected_subtab, data);
-        if step(&mut state.selected_row, max_rows, -1, main_state(state.selected_subtab, data)) {
-            if state.selected_subtab == 1 && state.selected_tab == 0 {
-                state.selected_playlist_row = state.selected_row;
-            }
-            if state.selected_subtab == 2 && state.selected_tab == 0 {
-                state.selected_album_row = state.selected_row;
-            }
+    let max_rows = table_rows_count(state.selected_subtab, data);
+    if step(&mut state.selected_row, max_rows, -1, main_state(state.selected_subtab, data)) {
+        if state.selected_subtab == 1 && state.selected_tab == 0 {
+            state.selected_playlist_row = state.selected_row;
+        }
+        if state.selected_subtab == 2 && state.selected_tab == 0 {
+            state.selected_album_row = state.selected_row;
         }
     }
 }

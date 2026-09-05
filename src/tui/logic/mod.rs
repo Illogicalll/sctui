@@ -4,8 +4,9 @@ pub(crate) mod state;
 pub(crate) mod utils;
 
 use crate::api::{
-    API, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, fetch_search_albums,
-    fetch_search_people, fetch_search_playlists, fetch_search_tracks, fetch_user_tracks,
+    API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
+    fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
+    fetch_user_tracks,
 };
 use crate::player::Player;
 use ratatui::{
@@ -30,11 +31,15 @@ use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::helpers::reset_search_rows;
 use self::input::{handle_key_event, InputOutcome};
-use self::state::{AppData, AppState, Engagement, FollowingTracksFocus};
-use self::utils::{active_tracks, build_queue, play_queued_track, queued_from_current};
+use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource};
+use self::utils::{
+    active_tracks, append_feed_tracks, build_queue, play_queued_track, queued_from_current,
+};
 
 enum AppEvent {
     Redraw(Result<ResizeResponse, Errors>),
+    /// Cover art for `url`, downloaded off the UI thread; `None` if it failed.
+    Artwork(String, Option<DynamicImage>),
 }
 
 /// Results of background fetches, folded into the app state at the top of each loop pass.
@@ -56,6 +61,10 @@ enum Msg {
     SearchAlbumTracks(u64, Vec<Track>),
     SearchPeopleTracks(u64, Vec<Track>),
     SearchPeopleLikes(u64, Vec<Track>),
+    Feed(Vec<Activity>),
+    FeedTracks(u64, Vec<Track>),
+    /// Tracks of one later feed item, to append to the queue while the feed plays.
+    FeedQueue(u64, Vec<Track>),
     Engagement(Engagement),
 }
 
@@ -111,12 +120,19 @@ fn start(
     drop(api_guard);
 
     let async_rt = tokio::runtime::Runtime::new().unwrap();
-    let auth = || api.lock().unwrap().token_clone();
+    // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
+    // take it. The token Arc is stable across re-auth (main.rs rebuilds the API around the
+    // same Arc), so clone it once here.
+    let token = api.lock().unwrap().token_clone();
+    let auth = || Arc::clone(&token);
 
     let (tx, rx) = mpsc::channel::<Msg>();
 
     spawn_fetch(Arc::clone(api), tx.clone(), |api| {
         api.get_playlists().map(Msg::Playlists)
+    });
+    spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+        api.get_activities().map(Msg::Feed)
     });
 
     let mut picker = Picker::from_query_stdio()?;
@@ -138,6 +154,7 @@ fn start(
     let mut cover_art_async = ThreadProtocol::new(tx_worker.clone(), None);
     let mut last_artwork_url: Option<String> = None;
     let mut last_artwork_image: Option<DynamicImage> = None;
+    let mut artwork_pending: Option<String> = None;
 
     let wave_buffer = player.wave_buffer();
     let tick_rate = Duration::from_millis(200);
@@ -208,6 +225,17 @@ fn start(
                 Msg::SearchPeopleLikes(id, t) => state.search_people_likes_fetch.accept(
                     id, t, &mut data.search_people_likes_tracks, &mut data.search_people_likes_state,
                 ),
+                Msg::Feed(new) => data.feed.extend(new),
+                Msg::FeedTracks(id, t) => state.feed_tracks_fetch.accept(
+                    id, t, &mut data.feed_tracks, &mut data.feed_tracks_state,
+                ),
+                Msg::FeedQueue(id, t) => {
+                    if id == state.feed_queue_fetch.request_id
+                        && state.playback_source == PlaybackSource::Feed
+                    {
+                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, t);
+                    }
+                }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
             }
         }
@@ -244,33 +272,49 @@ fn start(
             });
         }
 
+        let current_artwork_url = player.current_track().artwork_url;
         while let Ok(app_ev) = rx_main.try_recv() {
             match app_ev {
                 AppEvent::Redraw(completed) => {
                     let _ = cover_art_async.update_resized_protocol(completed?);
                 }
-            }
-        }
-
-        let url = &player.current_track().artwork_url;
-        let should_update = match &last_artwork_url {
-            Some(prev) => prev != url,
-            None => true,
-        };
-
-        if should_update {
-            if let Ok(resp) = reqwest::blocking::get(url.as_str()) {
-                if let Ok(bytes) = resp.bytes() {
-                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
-                        let resize_proto = picker.new_resize_protocol(dyn_img.clone());
-                        cover_art_async =
-                            ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
-
-                        last_artwork_url = Some(url.clone());
-                        last_artwork_image = Some(dyn_img);
+                AppEvent::Artwork(url, image) => {
+                    if artwork_pending.as_deref() == Some(url.as_str()) {
+                        artwork_pending = None;
+                    }
+                    if url != current_artwork_url {
+                        continue; // track changed while this was downloading
+                    }
+                    last_artwork_url = Some(url);
+                    match image {
+                        Some(image) => {
+                            let resize_proto = picker.new_resize_protocol(image.clone());
+                            cover_art_async =
+                                ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
+                            last_artwork_image = Some(image);
+                        }
+                        None => {
+                            cover_art_async.empty_protocol();
+                            last_artwork_image = None;
+                        }
                     }
                 }
             }
+        }
+
+        // Cover art downloads off the UI thread; the result arrives as an AppEvent above.
+        if last_artwork_url.as_deref() != Some(current_artwork_url.as_str())
+            && artwork_pending.as_deref() != Some(current_artwork_url.as_str())
+        {
+            artwork_pending = Some(current_artwork_url.clone());
+            let tx = tx_main.clone();
+            std::thread::spawn(move || {
+                let image = reqwest::blocking::get(current_artwork_url.as_str())
+                    .and_then(|r| r.bytes())
+                    .ok()
+                    .and_then(|bytes| image::load_from_memory(&bytes).ok());
+                let _ = tx.send(AppEvent::Artwork(current_artwork_url, image));
+            });
         }
 
         let filter_active = is_filter_active(&state);
@@ -378,6 +422,62 @@ fn start(
                     Msg::FollowingLikes,
                 ),
             );
+        }
+
+        if state.selected_tab == 2 {
+            let selected = data.feed.get(state.selected_row);
+            let single = selected.and_then(|a| a.track.clone());
+            let key = selected.map(|a| a.key.clone());
+            state.feed_tracks_fetch.refetch(
+                &mut data.feed_tracks,
+                &mut data.feed_tracks_state,
+                &mut data.feed_tracks_key,
+                &mut state.selected_info_row,
+                key,
+                |id, key| match single {
+                    // A track post needs no fetch; deliver it through the same channel.
+                    Some(track) => {
+                        let tx = tx.clone();
+                        async_rt.spawn(async move {
+                            let _ = tx.send(Msg::FeedTracks(id, vec![track]));
+                        })
+                    }
+                    None => spawn_tracks(
+                        &async_rt, &tx, id,
+                        fetch_playlist_tracks(auth(), key),
+                        Msg::FeedTracks,
+                    ),
+                },
+            );
+        }
+
+        // Enter in the feed: keep the queue going with the items after the one playing, in
+        // feed order. Track items are appended at once; sets are fetched one at a time.
+        if let Some(from) = state.feed_expand_from.take() {
+            state.feed_queue_fetch.cancel();
+            let id = state.feed_queue_fetch.request_id;
+            let later: Vec<(Option<Track>, String)> = data
+                .feed
+                .iter()
+                .skip(from + 1)
+                .map(|a| (a.track.clone(), a.key.clone()))
+                .collect();
+            let token = auth();
+            let tx = tx.clone();
+            state.feed_queue_fetch.task = Some(async_rt.spawn(async move {
+                for (track, key) in later {
+                    let tracks = match track {
+                        Some(track) => vec![track],
+                        None => match fetch_playlist_tracks(Arc::clone(&token), key).await {
+                            Ok(tracks) => tracks,
+                            Err(_) => continue,
+                        },
+                    };
+                    if tx.send(Msg::FeedQueue(id, tracks)).is_err() {
+                        return;
+                    }
+                }
+            }));
         }
 
         if state.selected_tab == 1 && state.search_needs_fetch {
@@ -716,6 +816,13 @@ fn start(
             })?;
 
             last_tick = Instant::now();
+
+            // Feed is unbounded: only page when the cursor nears the end of what is loaded.
+            if state.selected_tab == 2 && state.selected_row + 10 >= data.feed.len() {
+                spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+                    api.get_activities().map(Msg::Feed)
+                });
+            }
 
             match state.selected_subtab {
                 0 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {

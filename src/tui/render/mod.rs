@@ -57,14 +57,7 @@ pub fn render(
     } else if state.selected_tab == 1 {
         tabs::render_search(frame, chunks[1], width, state, data);
     } else {
-        tabs::render_feed(
-            frame,
-            chunks[1],
-            width,
-            state.selected_row,
-            state.selected_info_row,
-            state.info_pane_selected,
-        );
+        tabs::render_feed(frame, chunks[1], state, data);
     }
 
     now_playing::render_now_playing(frame, chunks[2], state, player, cover_art_async);

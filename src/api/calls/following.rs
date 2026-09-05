@@ -37,6 +37,8 @@ impl API {
                 let name = parse_str(artist, "username");
                 let urn = parse_str(artist, "urn");
 
+                // Most feed reposters are followed users; saves a lookup each in the feed fetch.
+                self.user_names.insert(urn.clone(), name.clone());
                 following.push(Artist { name, urn });
             }
         }

@@ -22,8 +22,6 @@ a soundcloud client for the terminal
 
 <p align="center">View the activity of everyone you follow to stay up to date with their latest releases or reposts</p>
 
-<p align="center">🚧 Feature Coming Soon 🚧</p>
-
 ### 🔊 Gapless Playback
 
 <p align="center">Enjoy seamless transitions in your favourite albums without the buffering present on SoundCloud Web</p>
