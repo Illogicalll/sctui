@@ -59,7 +59,7 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
     }
 
     if state.help_visible {
-        help::render_help(frame, &state.keymap);
+        help::render_help(frame, state);
     }
 
     if state.quit_confirm_visible {

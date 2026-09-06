@@ -149,7 +149,7 @@ impl Action {
     pub fn description(self) -> &'static str {
         match self {
             Action::Quit => "Quit (Esc also closes an open popup first)",
-            Action::Help => "Toggle this help",
+            Action::Help => "Key reference and editor",
             Action::NextTab => "Next main tab / next visualiser mode",
             Action::PrevTab => "Previous main tab",
             Action::SubTabLeft => "Previous sub-tab / search filter",
@@ -507,20 +507,86 @@ impl Keymap {
         warnings
     }
 
+    pub fn config_path() -> std::path::PathBuf {
+        crate::auth::config_dir().join("config.toml")
+    }
+
     /// Defaults plus the user's `config.toml` if there is one.
     pub fn load() -> (Keymap, Vec<String>) {
         let mut km = Keymap::default();
-        let path = crate::auth::config_dir().join("config.toml");
-        let warnings = match std::fs::read_to_string(&path) {
+        let warnings = match std::fs::read_to_string(Self::config_path()) {
             Ok(text) => km.apply_toml(&text),
             Err(_) => Vec::new(),
         };
         (km, warnings)
     }
 
+    /// Which action owns `chord`, if any.
+    pub fn bound_to(&self, chord: Chord) -> Option<Action> {
+        self.bindings.get(&chord).copied()
+    }
+
+    /// Add a chord to `action`. Refused with the owning action if another one
+    /// already has it; binding a chord the action already has is a no-op.
+    pub fn add_chord(&mut self, action: Action, chord: Chord) -> Result<(), Action> {
+        if let Some(other) = self.bindings.get(&chord)
+            && *other != action
+        {
+            return Err(*other);
+        }
+        let list = self.chords.entry(action).or_default();
+        if !list.contains(&chord) {
+            list.push(chord);
+        }
+        self.rebuild();
+        Ok(())
+    }
+
+    pub fn clear(&mut self, action: Action) {
+        self.chords.insert(action, Vec::new());
+        self.rebuild();
+    }
+
+    /// Restore `action`'s default chords. A default that another action now
+    /// owns stays with that action; the message says so.
+    pub fn reset(&mut self, action: Action) -> Vec<String> {
+        let defaults: Vec<Chord> = DEFAULTS
+            .iter()
+            .find(|(a, _)| *a == action)
+            .map(|(_, specs)| specs.iter().map(|s| Chord::parse(s).expect("default chord parses")).collect())
+            .unwrap_or_default();
+        let kept: Vec<Chord> = defaults
+            .iter()
+            .copied()
+            .filter(|c| !matches!(self.bindings.get(c), Some(other) if *other != action))
+            .collect();
+        let taken: Vec<String> = defaults
+            .iter()
+            .filter(|c| !kept.contains(c))
+            .map(|c| format!("{} stays with {}", c.label(), self.bindings[c].name()))
+            .collect();
+        self.chords.insert(action, kept);
+        self.rebuild();
+        taken
+    }
+
+    /// Write the current bindings to `config.toml`.
+    pub fn save(&self) -> std::io::Result<()> {
+        let path = Self::config_path();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, self.to_toml())
+    }
+
     /// A complete config file with the defaults, for `sctui --dump-config`.
     pub fn default_toml() -> String {
-        let km = Keymap::default();
+        Keymap::default().to_toml()
+    }
+
+    /// The current bindings as a complete, commented config file.
+    pub fn to_toml(&self) -> String {
+        let km = self;
         let mut out = String::from(
             "# sctui key bindings. Save as ~/.config/sctui/config.toml (or $XDG_CONFIG_HOME/sctui/).\n\
              # Each action takes one chord or a list; an empty list unbinds it.\n\
@@ -595,6 +661,35 @@ mod tests {
         assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), Some(Action::Quit));
         assert!(warnings.iter().any(|w| w.contains("Esc is bound to both quit and volume_up")));
         assert!(km.apply_toml("this is not toml").iter().any(|w| w.contains("could not be parsed")));
+    }
+
+    #[test]
+    fn editing_api_adds_clears_resets_and_refuses_conflicts() {
+        let mut km = Keymap::default();
+        let p = Chord::parse("p").unwrap();
+        assert_eq!(km.add_chord(Action::PlayPause, p), Ok(()));
+        assert_eq!(km.bound_to(p), Some(Action::PlayPause));
+        assert_eq!(km.add_chord(Action::PlayPause, p), Ok(()), "same chord again is a no-op");
+        assert_eq!(km.chords(Action::PlayPause).len(), 2);
+        assert_eq!(km.add_chord(Action::NextTrack, p), Err(Action::PlayPause));
+        km.clear(Action::PlayPause);
+        assert!(km.chords(Action::PlayPause).is_empty());
+        assert_eq!(km.bound_to(p), None);
+        assert!(km.reset(Action::PlayPause).is_empty());
+        assert_eq!(km.chords(Action::PlayPause), Keymap::default().chords(Action::PlayPause));
+        // A default chord captured by another action stays there on reset.
+        km.clear(Action::Help);
+        let q = Chord::parse("?").unwrap();
+        assert_eq!(km.add_chord(Action::Quit, q), Ok(()));
+        let notes = km.reset(Action::Help);
+        assert!(km.chords(Action::Help).is_empty());
+        assert!(notes[0].contains("stays with quit"));
+        // to_toml reflects edits and reloads identically.
+        let text = km.to_toml();
+        let mut again = Keymap::default();
+        assert!(again.apply_toml(&text).is_empty());
+        assert_eq!(again.chords(Action::Quit), km.chords(Action::Quit));
+        assert!(again.chords(Action::Help).is_empty());
     }
 
     #[test]

@@ -72,6 +72,9 @@ pub(crate) fn run_command(
         }
         Action::Help => {
             state.help_visible = !state.help_visible;
+            state.help_selected = 0;
+            state.help_capture = None;
+            state.help_message = None;
         }
         Action::ToggleVisualizer => {
             state.visualizer_mode = !state.visualizer_mode;

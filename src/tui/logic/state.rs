@@ -345,6 +345,10 @@ pub struct AppState {
     pub engagement_queue: VecDeque<Engagement>,
     pub following_tracks_focus: FollowingTracksFocus,
     pub keymap: Keymap,
+    /// Key editor (the `?` popup): highlighted action, pending capture, last message.
+    pub help_selected: usize,
+    pub help_capture: Option<crate::keymap::Action>,
+    pub help_message: Option<String>,
     /// Search tab: printable keys go to the query until Enter/Esc.
     pub search_typing: bool,
     pub queue_visible: bool,

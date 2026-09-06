@@ -138,7 +138,7 @@ Press `?` in the app for the full list. The defaults:
 | `Shift+T` `Shift+C` `Shift+D` `Shift+X` | add to playlist, new playlist, remove from playlist, delete playlist |
 | `?` `Esc` | help, quit (Esc closes popups first) |
 
-Every binding can be changed in `~/.config/sctui/config.toml` (`$XDG_CONFIG_HOME/sctui/config.toml` if set). Start from the defaults:
+Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default. Changes are saved straight to `~/.config/sctui/config.toml`. The same file can be edited by hand (`$XDG_CONFIG_HOME/sctui/config.toml` if set). Start from the defaults:
 
 ```sh
 mkdir -p ~/.config/sctui && sctui --dump-config > ~/.config/sctui/config.toml

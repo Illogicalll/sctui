@@ -12,6 +12,7 @@ mod navigation;
 mod movement;
 mod playback;
 mod history;
+mod help_editor;
 mod confirm;
 mod playlist_picker;
 mod queue;
@@ -50,6 +51,9 @@ pub fn handle_key_event(
 ) -> InputOutcome {
     if state.quit_confirm_visible {
         return quit::handle_quit_confirm(key, state);
+    }
+    if state.help_visible {
+        return help_editor::handle_help_input(key, state);
     }
     if state.confirm.is_some() {
         return confirm::handle_confirm_input(key, state, data);
@@ -93,15 +97,9 @@ pub fn handle_key_event(
     }
 
     // Esc closes whatever is open before it means "quit".
-    if key.code == KeyCode::Esc {
-        if state.help_visible {
-            state.help_visible = false;
-            return InputOutcome::Continue;
-        }
-        if state.queue_visible {
-            state.queue_visible = false;
-            return InputOutcome::Continue;
-        }
+    if key.code == KeyCode::Esc && state.queue_visible {
+        state.queue_visible = false;
+        return InputOutcome::Continue;
     }
 
     if state.visualizer_mode && key.code == KeyCode::Tab {

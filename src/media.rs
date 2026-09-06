@@ -262,7 +262,7 @@ mod souvlaki_tests {
     #[test]
     #[ignore]
     fn souvlaki_remote_404_cover_aborts() {
-        let (mut media, t) = track(None);
+        let (mut media, _t) = track(None);
         if let Some(controls) = media.controls.as_mut() {
             let _ = controls.set_metadata(MediaMetadata {
                 title: Some("t"),
