@@ -570,23 +570,26 @@ impl Keymap {
         taken
     }
 
-    /// Write the current bindings to `config.toml`.
+    /// Write the bindings to `config.toml`. Only actions that differ from the
+    /// defaults are written, so future default changes still reach the user.
     pub fn save(&self) -> std::io::Result<()> {
         let path = Self::config_path();
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(path, self.to_toml())
+        std::fs::write(path, self.to_toml(true))
     }
 
     /// A complete config file with the defaults, for `sctui --dump-config`.
     pub fn default_toml() -> String {
-        Keymap::default().to_toml()
+        Keymap::default().to_toml(false)
     }
 
-    /// The current bindings as a complete, commented config file.
-    pub fn to_toml(&self) -> String {
+    /// The bindings as a commented config file; with `only_overrides`, just
+    /// the actions that differ from the defaults (unlisted = default).
+    pub fn to_toml(&self, only_overrides: bool) -> String {
         let km = self;
+        let defaults = Keymap::default();
         let mut out = String::from(
             "# sctui key bindings. Save as ~/.config/sctui/config.toml (or $XDG_CONFIG_HOME/sctui/).\n\
              # Each action takes one chord or a list; an empty list unbinds it.\n\
@@ -595,7 +598,13 @@ impl Keymap {
              # up, down, left, right, f1..f12. An uppercase letter means shift. Bare + is the plus key.\n\
              # Note: shift+enter needs a terminal with the kitty keyboard protocol.\n\n[keys]\n",
         );
+        if only_overrides {
+            out.push_str("# Only actions listed here are changed; everything else keeps its default.\n\n");
+        }
         for action in Action::ALL {
+            if only_overrides && km.chords(action) == defaults.chords(action) {
+                continue;
+            }
             let specs: Vec<String> = km.chords(action).iter().map(|c| format!("\"{}\"", c.spec())).collect();
             let _ = writeln!(out, "# {}\n{} = [{}]\n", action.description(), action.name(), specs.join(", "));
         }
@@ -684,8 +693,11 @@ mod tests {
         let notes = km.reset(Action::Help);
         assert!(km.chords(Action::Help).is_empty());
         assert!(notes[0].contains("stays with quit"));
-        // to_toml reflects edits and reloads identically.
-        let text = km.to_toml();
+        // Saved form lists only the edited actions and reloads identically.
+        let text = km.to_toml(true);
+        assert!(text.contains("quit = "), "edited action is written");
+        assert!(text.contains("help = []"), "unbound action is written");
+        assert!(!text.contains("\nnext_tab = "), "untouched action is left to the defaults");
         let mut again = Keymap::default();
         assert!(again.apply_toml(&text).is_empty());
         assert_eq!(again.chords(Action::Quit), km.chords(Action::Quit));
