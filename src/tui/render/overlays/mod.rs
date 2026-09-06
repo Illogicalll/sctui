@@ -43,16 +43,14 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
     }
 
     if state.playlist_picker_visible {
-        if let Some(track) = &state.playlist_picker_track {
-            let owned: Vec<&Playlist> = data.playlists.iter().filter(|p| p.is_owned).collect();
-            playlist_picker::render_playlist_picker(
-                frame,
-                track,
-                &owned,
-                state.playlist_picker_selected,
-                state.playlist_picker_title.as_deref(),
-            );
-        }
+        let owned: Vec<&Playlist> = data.playlists.iter().filter(|p| p.is_owned).collect();
+        playlist_picker::render_playlist_picker(
+            frame,
+            state.playlist_picker_track.as_ref(),
+            &owned,
+            state.playlist_picker_selected,
+            state.playlist_picker_title.as_deref(),
+        );
     }
 
     if let Some(action) = &state.confirm {

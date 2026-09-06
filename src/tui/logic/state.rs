@@ -122,7 +122,7 @@ impl ConfirmAction {
 pub enum PlaylistEdit {
     Add { playlist_id: u64, tracks_uri: String, track_urn: String },
     Remove { playlist_id: u64, tracks_uri: String, track_urn: String },
-    Create { title: String, track_urn: String },
+    Create { title: String, track_urn: Option<String> },
     Delete { playlist_id: u64 },
 }
 

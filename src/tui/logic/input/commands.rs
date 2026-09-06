@@ -102,6 +102,11 @@ fn handle_shift_char(
                 super::playlist_picker::open_picker(state, queued.track);
             }
         }
+        'c' | 'C' => {
+            if state.selected_tab == 0 && state.selected_subtab == 1 {
+                super::playlist_picker::open_new_playlist_prompt(state);
+            }
+        }
         'x' | 'X' => {
             if state.selected_tab == 0 && state.selected_subtab == 1 {
                 let open_playlist = data.playlists.iter().position(|p| {

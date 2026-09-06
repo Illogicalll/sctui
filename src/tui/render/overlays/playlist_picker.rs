@@ -15,7 +15,7 @@ use super::utils::centered_rect;
 /// typed and is shown instead of the list.
 pub fn render_playlist_picker(
     frame: &mut Frame,
-    track: &Track,
+    track: Option<&Track>,
     owned: &[&Playlist],
     selected: usize,
     new_title: Option<&str>,
@@ -23,8 +23,12 @@ pub fn render_playlist_picker(
     let popup_area = centered_rect(60, 60, frame.area());
     frame.render_widget(Clear, popup_area);
 
+    let heading = match track {
+        Some(track) => format!(" Add \"{}\" to… ", truncate_with_ellipsis(&track.title, 40)),
+        None => " New playlist ".to_string(),
+    };
     let block = Block::default()
-        .title(format!(" Add \"{}\" to… ", truncate_with_ellipsis(&track.title, 40)))
+        .title(heading)
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded);

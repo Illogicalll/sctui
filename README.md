@@ -95,7 +95,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ### 📝 Playlist Management
 
-<p align="center">Shift + T adds any track to one of your playlists, or to a brand new one. In your own playlists, Shift + X removes a track and Shift + Z deletes the playlist, each behind a confirmation</p>
+<p align="center">Shift + T adds any track to one of your playlists, or to a brand new one. Shift + C creates an empty playlist. In your own playlists, Shift + X removes a track and Shift + Z deletes the playlist, each behind a confirmation</p>
 
 ### 🕘 History
 
