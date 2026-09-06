@@ -29,13 +29,13 @@ Installs to `%LOCALAPPDATA%\sctui\bin` and adds it to your user `PATH`.
 
 Grab the archive for your platform from the [latest release](https://github.com/Illogicalll/sctui/releases/latest), extract it and put `sctui` somewhere on your `PATH`.
 
-| Platform | File |
-|---|---|
-| macOS (Apple Silicon) | `sctui-aarch64-apple-darwin.tar.gz` |
-| macOS (Intel) | `sctui-x86_64-apple-darwin.tar.gz` |
-| Linux (x86_64) | `sctui-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux (ARM64) | `sctui-aarch64-unknown-linux-gnu.tar.gz` |
-| Windows (x86_64) | `sctui-x86_64-pc-windows-msvc.zip` |
+| Platform              | File                                     |
+| --------------------- | ---------------------------------------- |
+| macOS (Apple Silicon) | `sctui-aarch64-apple-darwin.tar.gz`      |
+| macOS (Intel)         | `sctui-x86_64-apple-darwin.tar.gz`       |
+| Linux (x86_64)        | `sctui-x86_64-unknown-linux-gnu.tar.gz`  |
+| Linux (ARM64)         | `sctui-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows (x86_64)      | `sctui-x86_64-pc-windows-msvc.zip`       |
 
 ### From source
 
@@ -91,23 +91,17 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ### 📻 Stations
 
-<p align="center">Press Shift + Enter on any track to start a station: it plays, then SoundCloud's related tracks follow. When a playlist, album or your likes run out, sctui keeps going with related tracks instead of stopping</p>
+<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing Shift + Enter on any track will start a queue of related tracks</p>
 
 ### 🎛️ Media Keys
 
-<p align="center">The current track shows in your system's media panel with artwork and a live position (macOS Now Playing, Windows media overlay, Linux MPRIS), and the play/pause, skip and seek buttons on your keyboard, headphones or desktop drive sctui</p>
-
-### 📝 Playlist Management
-
-<p align="center">Shift + T adds any track to one of your playlists, or to a brand new one. Shift + C creates an empty playlist. In your own playlists, Shift + D removes a track and Shift + X deletes the playlist, each behind a confirmation</p>
-
-### 🕘 History
-
-<p align="center">Shift + P opens everything you have listened to this session, newest first. Pick any track to hear it again</p>
+<p align="center">The current track shows in your system's media panel with artwork and a live position. The play/pause, skip and seek buttons on your keyboard, headphones integrate directly</p>
 
 ### 🎤 Lyrics
 
-<p align="center">A Lyrics mode in the visualiser shows time-synced lyrics from <a href="https://lrclib.net">LRCLIB</a> with the current line centred, falls back to plain lyrics when that is all there is, and says so when there are none. Coverage is best for released music; SoundCloud-only uploads often have nothing</p>
+<p align="center">Where available, live lyrics can be displayed in the visualiser (sourced from <a href="https://lrclib.net">LRCLIB</a>)</p>
+
+<p align="center"><img src="./media/lyrics_feature.png" alt="Lyrics" width="480" /></p>
 
 ### 👁️ Audio Visualiser
 
@@ -121,34 +115,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ## Keybindings
 
-Press `?` in the app for the full list. The defaults:
-
-| | |
-|---|---|
-| `Tab` / `Shift+Tab` | next / previous tab |
-| `←` `→` or `h` `l` | sub-tab / search filter |
-| `↑` `↓` or `k` `j` | move; `PageUp` `PageDown` by ten |
-| `Shift+↑` `Shift+↓` or `Shift+K` `Shift+J` | second pane (by ten where there is only one pane); `Alt+↑` `Alt+↓` third pane |
-| `Space`, `Enter`, `Shift+Enter` | play/pause, play selected, start a station |
-| `Shift+→` `Shift+←` or `Shift+N` `Shift+B` | next / previous track |
-| `Alt+→` `Alt+←` or `Shift+L` `Shift+H` | seek ±10 s |
-| `+` `-` | volume |
-| `Shift+S` `Shift+R` | shuffle, repeat |
-| `Shift+F` | like / follow |
-| `Shift+A` `Shift+U` `Shift+Q` | add to queue, play next ("up next"), show queue |
-| `Shift+P` | listening history |
-| `/` | search (Search tab) or filter the list (Library); `Enter`/`Esc` leave the field. Shift-key commands work while typing (uppercase needs Caps Lock) |
-| `Shift+V` | visualiser (`Tab` cycles modes) |
-| `Shift+T` `Shift+C` `Shift+D` `Shift+X` | add to playlist, new playlist, remove from playlist, delete playlist |
-| `?` `Esc` | help, quit (Esc closes popups first) |
-
-Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default. Changes are saved straight to `~/.config/sctui/config.toml`. The same file can be edited by hand (`$XDG_CONFIG_HOME/sctui/config.toml` if set). Start from the defaults:
-
-```sh
-mkdir -p ~/.config/sctui && sctui --dump-config > ~/.config/sctui/config.toml
-```
-
-Then edit the `[keys]` table, one line per action, e.g. `play_pause = "p"`, `next_track = ["shift+right", "n"]`, `delete_playlist = []` to unbind. Chords are `shift` / `ctrl` / `alt` joined with `+` and a key name (`space`, `enter`, `f5`, a character…). `Shift+Enter` only works in terminals with the kitty keyboard protocol (kitty, WezTerm, Ghostty, foot, iTerm2, Alacritty).
+Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default. Changes are saved straight to `~/.config/sctui/config.toml`.
 
 ## Limitations
 
