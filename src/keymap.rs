@@ -514,11 +514,6 @@ impl Keymap {
         warnings
     }
 
-    /// Which action owns `chord`, if any.
-    pub fn bound_to(&self, chord: Chord) -> Option<Action> {
-        self.bindings.get(&chord).copied()
-    }
-
     /// Add a chord to `action`. Refused with the owning action if another one
     /// already has it; binding a chord the action already has is a no-op.
     pub fn add_chord(&mut self, action: Action, chord: Chord) -> Result<(), Action> {
@@ -659,13 +654,13 @@ mod tests {
         let mut km = Keymap::default();
         let p = Chord::parse("p").unwrap();
         assert_eq!(km.add_chord(Action::PlayPause, p), Ok(()));
-        assert_eq!(km.bound_to(p), Some(Action::PlayPause));
+        assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), Some(Action::PlayPause));
         assert_eq!(km.add_chord(Action::PlayPause, p), Ok(()), "same chord again is a no-op");
         assert_eq!(km.chords(Action::PlayPause).len(), 2);
         assert_eq!(km.add_chord(Action::NextTrack, p), Err(Action::PlayPause));
         km.clear(Action::PlayPause);
         assert!(km.chords(Action::PlayPause).is_empty());
-        assert_eq!(km.bound_to(p), None);
+        assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), None);
         assert!(km.reset(Action::PlayPause).is_empty());
         assert_eq!(km.chords(Action::PlayPause), Keymap::default().chords(Action::PlayPause));
         // A default chord captured by another action stays there on reset.
