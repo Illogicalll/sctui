@@ -169,7 +169,7 @@ pub(crate) fn handle_left_key(
     InputOutcome::Continue
 }
 
-fn handle_next_track(
+pub(crate) fn handle_next_track(
     state: &mut AppState,
     data: &mut AppData,
     player: &Player,
@@ -199,7 +199,7 @@ fn handle_next_track(
     InputOutcome::Continue
 }
 
-fn handle_prev_track(
+pub(crate) fn handle_prev_track(
     state: &mut AppState,
     data: &mut AppData,
     player: &Player,

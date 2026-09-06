@@ -21,6 +21,24 @@ pub enum InputOutcome {
     Quit,
 }
 
+/// Entry points for OS media commands (media keys, headphone buttons, Control
+/// Centre), which arrive outside the key-event path.
+pub(crate) fn toggle_play_pause(player: &Player) {
+    if player.is_playing() {
+        player.pause();
+    } else {
+        player.resume();
+    }
+}
+
+pub(crate) fn next_track(state: &mut AppState, data: &mut AppData, player: &Player) {
+    navigation::handle_next_track(state, data, player);
+}
+
+pub(crate) fn prev_track(state: &mut AppState, data: &mut AppData, player: &Player) {
+    navigation::handle_prev_track(state, data, player);
+}
+
 pub fn handle_key_event(
     key: KeyEvent,
     state: &mut AppState,
@@ -35,16 +53,16 @@ pub fn handle_key_event(
         return confirm::handle_confirm_input(key, state, data);
     }
 
-    if state.playlist_picker_visible {
-        if let Some(outcome) = playlist_picker::handle_picker_input(key, state, data) {
-            return outcome;
-        }
+    if state.playlist_picker_visible
+        && let Some(outcome) = playlist_picker::handle_picker_input(key, state, data)
+    {
+        return outcome;
     }
 
-    if state.history_visible {
-        if let Some(outcome) = history::handle_history_input(key, state, data, player) {
-            return outcome;
-        }
+    if state.history_visible
+        && let Some(outcome) = history::handle_history_input(key, state, data, player)
+    {
+        return outcome;
     }
 
     if state.search_popup_visible {

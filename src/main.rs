@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex, mpsc};
 mod api;
 mod auth;
 mod player;
+mod media;
 mod tui;
 mod update;
 use player::Player;

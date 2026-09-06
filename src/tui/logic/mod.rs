@@ -37,7 +37,8 @@ use image::DynamicImage;
 use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::helpers::reset_search_rows;
-use self::input::{handle_key_event, InputOutcome};
+use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
+use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
@@ -199,6 +200,14 @@ fn start(
     // so a glyph the terminal sized differently from unicode-width can leave a ghost behind;
     // repainting at view boundaries wipes any that slipped past sanitize_display.
     let mut last_view = None;
+
+    // OS media integration (Now Playing widget, media keys). `media_*` remember what the OS
+    // was last told so it is only updated on change, plus a periodic position re-sync.
+    let (mut media, media_rx) = Media::new();
+    let mut media_track_urn: Option<String> = None;
+    let mut media_playing: Option<bool> = None;
+    let mut media_synced_at = Instant::now();
+    let mut media_synced_pos: u64 = 0;
 
     loop {
         while let Ok(msg) = rx.try_recv() {
@@ -754,6 +763,49 @@ fn start(
                     Msg::SearchPeopleLikes,
                 ),
             );
+        }
+
+        media.pump();
+        while let Ok(command) = media_rx.try_recv() {
+            match command {
+                MediaCommand::Toggle => toggle_play_pause(&player),
+                MediaCommand::Play => player.resume(),
+                MediaCommand::Pause | MediaCommand::Stop => player.pause(),
+                MediaCommand::Next => next_track(&mut state, &mut data, &player),
+                MediaCommand::Previous => prev_track(&mut state, &mut data, &player),
+                MediaCommand::SeekForward => player.fast_forward(),
+                MediaCommand::SeekBackward => player.rewind(),
+            }
+        }
+        {
+            let track = player.current_track();
+            let playing = player.is_playing();
+            if track.track_urn.is_empty() {
+                if media_track_urn.take().is_some() {
+                    media.set_stopped();
+                    media_playing = None;
+                }
+            } else {
+                let changed_track = media_track_urn.as_deref() != Some(track.track_urn.as_str());
+                if changed_track {
+                    media.set_track(&track);
+                    media_track_urn = Some(track.track_urn.clone());
+                }
+                // The OS extrapolates the position itself; re-send it only when the
+                // track or play state changes, or after a seek moved it.
+                let expected = if media_playing == Some(true) {
+                    media_synced_pos + media_synced_at.elapsed().as_millis() as u64
+                } else {
+                    media_synced_pos
+                };
+                let drifted = state.progress.abs_diff(expected) > 1500;
+                if changed_track || media_playing != Some(playing) || drifted {
+                    media.set_playback(playing, state.progress);
+                    media_playing = Some(playing);
+                    media_synced_at = Instant::now();
+                    media_synced_pos = state.progress;
+                }
+            }
         }
 
         let view = (
