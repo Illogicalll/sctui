@@ -39,7 +39,15 @@ pub fn render_search(
         )
         .split(area);
 
-    let input = Paragraph::new(state.query.to_string())
+    let (input_text, input_style) = if state.search_typing {
+        (format!("{}▏", state.query), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+    } else if state.query.is_empty() {
+        ("press / to search".to_string(), Style::default().fg(Color::DarkGray))
+    } else {
+        (state.query.clone(), Style::default().fg(Color::White))
+    };
+    let input = Paragraph::new(input_text)
+        .style(input_style)
         .block(
             Block::default()
                 .title("search")

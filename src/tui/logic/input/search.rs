@@ -67,28 +67,27 @@ pub(crate) fn handle_search_input(
                 set_primary_selection(state, data, 0);
             }
         }
-        KeyCode::Char(c) => {
-            if key.modifiers.contains(KeyModifiers::SHIFT) && (c == 'f' || c == 'F') {
-                let previously_selected = selected_original_index(state);
-                if let Some(idx) = previously_selected {
-                    set_primary_selection(state, data, idx);
-                }
-                state.search_popup_visible = false;
-                state.search_query.clear();
-                state.search_matches.clear();
-            } else {
-                state.search_query.push(c);
-                state.search_matches = build_search_matches(
-                    state.selected_subtab,
-                    &state.search_query,
-                    &data.likes,
-                    &data.playlist_tracks,
-                    &data.albums,
-                    &data.following,
-                );
-                if !state.search_query.trim().is_empty() {
-                    set_primary_selection(state, data, 0);
-                }
+        KeyCode::Esc => {
+            let previously_selected = selected_original_index(state);
+            if let Some(idx) = previously_selected {
+                set_primary_selection(state, data, idx);
+            }
+            state.search_popup_visible = false;
+            state.search_query.clear();
+            state.search_matches.clear();
+        }
+        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+            state.search_query.push(c);
+            state.search_matches = build_search_matches(
+                state.selected_subtab,
+                &state.search_query,
+                &data.likes,
+                &data.playlist_tracks,
+                &data.albums,
+                &data.following,
+            );
+            if !state.search_query.trim().is_empty() {
+                set_primary_selection(state, data, 0);
             }
         }
         _ => {

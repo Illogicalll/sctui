@@ -1,5 +1,3 @@
-use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
-
 use super::InputOutcome;
 use super::helpers::reset_search_rows;
 use crate::player::Player;
@@ -8,28 +6,23 @@ use crate::tui::logic::utils::{active_tracks, build_queue, build_search_matches}
 
 pub(crate) fn handle_tab_switch(state: &mut AppState) -> InputOutcome {
     state.selected_tab = (state.selected_tab + 1) % 3;
-    state.selected_row = 0;
+    after_tab_switch(state);
     InputOutcome::Continue
 }
 
-pub(crate) fn handle_right_key(
-    key: KeyEvent,
-    state: &mut AppState,
-    data: &mut AppData,
-    player: &Player,
-) -> InputOutcome {
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        // Only seeks wait for an in-flight seek; every other key stays live.
-        if (player.is_playing() || state.current_playing_index.is_some()) && !player.is_seeking() {
-            player.fast_forward();
-        }
-        return InputOutcome::Continue;
-    }
+pub(crate) fn handle_tab_switch_back(state: &mut AppState) -> InputOutcome {
+    state.selected_tab = (state.selected_tab + 2) % 3;
+    after_tab_switch(state);
+    InputOutcome::Continue
+}
 
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
-        return handle_next_track(state, data, player);
-    }
+/// Landing on an empty Search tab drops straight into typing.
+fn after_tab_switch(state: &mut AppState) {
+    state.selected_row = 0;
+    state.search_typing = state.selected_tab == 1 && state.query.is_empty();
+}
 
+pub(crate) fn sub_tab_right(state: &mut AppState, data: &mut AppData) -> InputOutcome {
     if state.selected_tab == 0 {
         if state.selected_subtab == 1 {
             state.selected_playlist_row = state.selected_row;
@@ -87,23 +80,7 @@ pub(crate) fn handle_right_key(
     InputOutcome::Continue
 }
 
-pub(crate) fn handle_left_key(
-    key: KeyEvent,
-    state: &mut AppState,
-    data: &mut AppData,
-    player: &Player,
-) -> InputOutcome {
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        if (player.is_playing() || state.current_playing_index.is_some()) && !player.is_seeking() {
-            player.rewind();
-        }
-        return InputOutcome::Continue;
-    }
-
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
-        return handle_prev_track(state, data, player);
-    }
-
+pub(crate) fn sub_tab_left(state: &mut AppState, data: &mut AppData) -> InputOutcome {
     if state.selected_tab == 0 {
         if state.selected_subtab == 1 {
             state.selected_playlist_row = state.selected_row;

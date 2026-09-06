@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex, mpsc};
 mod api;
 mod auth;
+mod keymap;
 mod player;
 mod media;
 mod tui;
@@ -15,6 +16,7 @@ USAGE: sctui [OPTIONS]
 OPTIONS:
   -V, --version          print version and exit
   -h, --help             print this help and exit
+      --dump-config      print the default config (key bindings) to stdout and exit
       --no-update-check  don't check GitHub for a newer release on startup";
 
 fn main() -> anyhow::Result<()> {
@@ -26,6 +28,18 @@ fn main() -> anyhow::Result<()> {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("{USAGE}");
         return Ok(());
+    }
+    if args.iter().any(|a| a == "--dump-config") {
+        print!("{}", keymap::Keymap::default_toml());
+        return Ok(());
+    }
+    let (keys, key_warnings) = keymap::Keymap::load();
+    if !key_warnings.is_empty() {
+        for w in &key_warnings {
+            eprintln!("config: {w}");
+        }
+        eprintln!("(continuing with the remaining bindings)");
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
     if !args.iter().any(|a| a == "--no-update-check") {
         update::maybe_self_update();
@@ -66,7 +80,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    tui::run(&mut api, player).map_err(|e| anyhow::anyhow!(e))?;
+    tui::run(&mut api, player, keys).map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())
 }

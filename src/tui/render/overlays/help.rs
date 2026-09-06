@@ -4,49 +4,28 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Row, Table},
 };
 
+use crate::keymap::{Action, Keymap};
 use crate::tui::render::utils::styled_header;
 
 use super::utils::centered_rect;
 
-pub fn render_help(frame: &mut Frame) {
-    let popup_area = centered_rect(70, 70, frame.area());
+/// Generated from the live keymap, so it always shows the user's own bindings.
+pub fn render_help(frame: &mut Frame, keymap: &Keymap) {
+    let popup_area = centered_rect(70, 80, frame.area());
     frame.render_widget(Clear, popup_area);
 
-    let mut rows: Vec<Row> = vec![
-        Row::new(vec!["Esc", "Quit"]),
-        Row::new(vec!["Tab", "Cycle main tabs / Visualizer view (in visualizer mode)"]),
-        Row::new(vec!["Left/Right", "Change sub-tab"]),
-        Row::new(vec!["Up/Down", "Move selector"]),
-        Row::new(vec!["Space", "Play/Pause"]),
-        Row::new(vec!["Enter", "Play selected track"]),
-        Row::new(vec!["Shift + Enter / Shift + G", "Start a station: play selected track, then related tracks"]),
-        Row::new(vec!["Shift + Right", "Skip song"]),
-        Row::new(vec!["Shift + Left", "Go back a song"]),
-        Row::new(vec!["Option + Right", "Fast forward 10s"]),
-        Row::new(vec!["Option + Left", "Rewind 10s"]),
-        Row::new(vec!["Option + Up/Down", "Move selector by 10"]),
-        Row::new(vec!["Shift + Up/Down", "Move secondary selector"]),
-        Row::new(vec!["Shift + J/K", "Move tertiary selector"]),
-        Row::new(vec!["Shift + U", "Volume up"]),
-        Row::new(vec!["Shift + D", "Volume down"]),
-        Row::new(vec!["Shift + S", "Toggle shuffle queue"]),
-        Row::new(vec!["Shift + R", "Toggle repeat same song"]),
-        Row::new(vec!["Shift + A", "Add selected song to queue"]),
-        Row::new(vec!["Shift + N", "Play next (add to front of queue)"]),
-        Row::new(vec![
-            "Shift + L",
-            "Like selected item (or follow selected person)",
-        ]),
-        Row::new(vec!["Shift + V", "Toggle visualizer mode"]),
-        Row::new(vec!["Shift + F", "Search current view (only works in library)"]),
-        Row::new(vec!["Shift + Q", "Toggle queue popup"]),
-        Row::new(vec!["Shift + P", "Toggle listening history (Enter replays a track)"]),
-        Row::new(vec!["Shift + T", "Add selected track to a playlist (or a new one)"]),
-        Row::new(vec!["Shift + C", "Create a new empty playlist (in the Playlists tab)"]),
-        Row::new(vec!["Shift + X", "Remove selected track from the open playlist (yours only)"]),
-        Row::new(vec!["Shift + Z", "Delete the selected playlist (yours only)"]),
-        Row::new(vec!["Shift + H", "Toggle help popup"]),
-    ];
+    let mut rows: Vec<Row> = Action::ALL
+        .iter()
+        .map(|action| Row::new(vec![keymap.labels(*action), action.description().to_string()]))
+        .collect();
+    rows.push(Row::new(vec![
+        "Esc / Enter (while typing)".to_string(),
+        "Leave the search field".to_string(),
+    ]));
+    rows.push(Row::new(vec![
+        "config".to_string(),
+        "~/.config/sctui/config.toml  (sctui --dump-config for a template)".to_string(),
+    ]));
 
     let max_rows = popup_area.height.saturating_sub(3) as usize;
     if rows.len() > max_rows {
@@ -55,9 +34,9 @@ pub fn render_help(frame: &mut Frame) {
 
     let table = Table::new(
         rows,
-        vec![Constraint::Percentage(50), Constraint::Percentage(50)],
+        vec![Constraint::Percentage(32), Constraint::Percentage(68)],
     )
-    .header(styled_header(&["Action", "Description"]))
+    .header(styled_header(&["Keys", "Action"]))
     .block(
         Block::default()
             .title("Help")

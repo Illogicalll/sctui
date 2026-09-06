@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+use crate::keymap::Action;
 
 use super::InputOutcome;
 use crate::api::Track;
@@ -11,29 +11,6 @@ use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_fr
 use super::helpers::{filtered_row, reset_search_rows};
 use super::queue::{handle_add_to_queue, handle_add_next_to_queue, selected_queued};
 
-pub(crate) fn handle_char(
-    key: KeyEvent,
-    c: char,
-    state: &mut AppState,
-    data: &mut AppData,
-    player: &Player,
-) -> InputOutcome {
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
-        handle_shift_char(c, state, data, player)
-    } else if state.selected_tab != 1 && c == ' ' {
-        if player.is_playing() {
-            player.pause();
-        } else {
-            player.resume();
-        }
-        InputOutcome::Continue
-    } else if state.selected_tab == 1 {
-        handle_search_char(c, state)
-    } else {
-        InputOutcome::Continue
-    }
-}
-
 pub(crate) fn handle_backspace(state: &mut AppState) -> InputOutcome {
     if state.selected_tab == 1 {
         state.query.pop();
@@ -43,41 +20,44 @@ pub(crate) fn handle_backspace(state: &mut AppState) -> InputOutcome {
     InputOutcome::Continue
 }
 
-fn handle_shift_char(
-    c: char,
+/// Commands that are plain state changes; movement, playback and tab actions
+/// are dispatched in `input::run_action`.
+pub(crate) fn run_command(
+    action: Action,
     state: &mut AppState,
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
-    match c {
-        'u' | 'U' => {
+    match action {
+        Action::VolumeUp => {
             player.volume_up();
         }
-        'g' | 'G' => return super::playback::handle_station(state, data, player),
-        'd' | 'D' => {
+        Action::VolumeDown => {
             player.volume_down();
         }
-        's' | 'S' => {
+        Action::ToggleShuffle => {
             state.shuffle_enabled = !state.shuffle_enabled;
             if let Some(current_idx) = state.current_playing_index {
                 state.auto_queue =
                     build_queue(current_idx, active_tracks(state, data), state.shuffle_enabled);
             }
         }
-        'r' | 'R' => {
+        Action::ToggleRepeat => {
             state.repeat_enabled = !state.repeat_enabled;
         }
-        'a' | 'A' => {
+        Action::AddToQueue => {
             handle_add_to_queue(state, data);
         }
-        'n' | 'N' => {
+        Action::PlayNext => {
             handle_add_next_to_queue(state, data);
         }
-        'l' | 'L' => {
+        Action::ToggleLike => {
             enqueue_like_follow_selected(state, data);
         }
-        'f' | 'F' => {
-            if state.selected_tab == 0 {
+        Action::Search => {
+            if state.selected_tab == 1 {
+                state.search_typing = true;
+            } else if state.selected_tab == 0 {
                 state.search_popup_visible = true;
                 state.search_query.clear();
                 state.search_matches = build_search_matches(
@@ -90,24 +70,24 @@ fn handle_shift_char(
                 );
             }
         }
-        'h' | 'H' => {
+        Action::Help => {
             state.help_visible = !state.help_visible;
         }
-        'v' | 'V' => {
+        Action::ToggleVisualizer => {
             state.visualizer_mode = !state.visualizer_mode;
         }
         // Playlist management. Both destructive actions go through the confirm popup.
-        't' | 'T' => {
+        Action::AddToPlaylist => {
             if let Some(queued) = selected_queued(state, data) {
                 super::playlist_picker::open_picker(state, queued.track);
             }
         }
-        'c' | 'C' => {
+        Action::NewPlaylist => {
             if state.selected_tab == 0 && state.selected_subtab == 1 {
                 super::playlist_picker::open_new_playlist_prompt(state);
             }
         }
-        'x' | 'X' => {
+        Action::RemoveFromPlaylist => {
             if state.selected_tab == 0 && state.selected_subtab == 1 {
                 let open_playlist = data.playlists.iter().position(|p| {
                     Some(p.tracks_uri.as_str()) == data.playlist_tracks_uri.as_deref()
@@ -122,7 +102,7 @@ fn handle_shift_char(
                 }
             }
         }
-        'z' | 'Z' => {
+        Action::DeletePlaylist => {
             if state.selected_tab == 0
                 && state.selected_subtab == 1
                 && data.playlists.get(state.selected_row).is_some_and(|p| p.is_owned)
@@ -133,11 +113,11 @@ fn handle_shift_char(
                 state.confirm_selected = 1;
             }
         }
-        'p' | 'P' => {
+        Action::ToggleHistory => {
             state.history_visible = !state.history_visible;
             state.history_selected = 0;
         }
-        'q' | 'Q' => {
+        Action::ToggleQueue => {
             state.queue_visible = !state.queue_visible;
             if state.queue_visible {
                 if let Some(current_idx) = state.current_playing_index {
@@ -153,7 +133,7 @@ fn handle_shift_char(
                 }
             }
         }
-        'j' | 'J' => {
+        Action::TertiaryDown => {
             if state.selected_tab == 0 && state.selected_subtab == 3 {
                 if state.selected_following_like_row + 1 < data.following_likes_tracks.len() {
                     state.selected_following_like_row += 1;
@@ -170,7 +150,7 @@ fn handle_shift_char(
                 }
             }
         }
-        'k' | 'K' => {
+        Action::TertiaryUp => {
             if state.selected_tab == 0 && state.selected_subtab == 3 {
                 if state.selected_following_like_row > 0 {
                     state.selected_following_like_row -= 1;
@@ -356,7 +336,7 @@ fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppD
     }
 }
 
-fn handle_search_char(c: char, state: &mut AppState) -> InputOutcome {
+pub(crate) fn handle_search_char(c: char, state: &mut AppState) -> InputOutcome {
     state.query.push(c);
     state.search_needs_fetch = true;
     reset_search_rows(state);

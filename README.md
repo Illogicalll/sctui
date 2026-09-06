@@ -99,7 +99,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ### 📝 Playlist Management
 
-<p align="center">Shift + T adds any track to one of your playlists, or to a brand new one. Shift + C creates an empty playlist. In your own playlists, Shift + X removes a track and Shift + Z deletes the playlist, each behind a confirmation</p>
+<p align="center">Shift + T adds any track to one of your playlists, or to a brand new one. Shift + C creates an empty playlist. In your own playlists, Shift + D removes a track and Shift + X deletes the playlist, each behind a confirmation</p>
 
 ### 🕘 History
 
@@ -114,6 +114,37 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 <p align="center"><img src="./media/spectrum.gif" alt="Visualiser 2" width="480" /></p>
 
 <p align="center">and more...</p>
+
+## Keybindings
+
+Press `?` in the app for the full list. The defaults:
+
+| | |
+|---|---|
+| `Tab` / `Shift+Tab` | next / previous tab |
+| `←` `→` or `h` `l` | sub-tab / search filter |
+| `↑` `↓` or `k` `j` | move; `PageUp` `PageDown` or `Shift+K` `Shift+J` by ten |
+| `Shift+↑` `Shift+↓`, `Alt+↑` `Alt+↓` | second and third pane |
+| `Space`, `Enter`, `Shift+Enter` | play/pause, play selected, start a station |
+| `Shift+→` `Shift+←` or `n` `b` | next / previous track |
+| `Alt+→` `Alt+←` or `Shift+L` `Shift+H` | seek ±10 s |
+| `+` `-` | volume |
+| `Shift+S` `Shift+R` | shuffle, repeat |
+| `Shift+F` | like / follow |
+| `Shift+A` `Shift+N` `Shift+Q` | add to queue, play next, show queue |
+| `Shift+P` | listening history |
+| `/` | search (Search tab) or filter the list (Library) |
+| `Shift+V` | visualiser (`Tab` cycles modes) |
+| `Shift+T` `Shift+C` `Shift+D` `Shift+X` | add to playlist, new playlist, remove from playlist, delete playlist |
+| `?` `Esc` | help, quit (Esc closes popups first) |
+
+Every binding can be changed in `~/.config/sctui/config.toml` (`$XDG_CONFIG_HOME/sctui/config.toml` if set). Start from the defaults:
+
+```sh
+mkdir -p ~/.config/sctui && sctui --dump-config > ~/.config/sctui/config.toml
+```
+
+Then edit the `[keys]` table, one line per action, e.g. `play_pause = "p"`, `next_track = ["shift+right", "n"]`, `delete_playlist = []` to unbind. Chords are `shift` / `ctrl` / `alt` joined with `+` and a key name (`space`, `enter`, `f5`, a character…). `Shift+Enter` only works in terminals with the kitty keyboard protocol (kitty, WezTerm, Ghostty, foot, iTerm2, Alacritty).
 
 ## Limitations
 

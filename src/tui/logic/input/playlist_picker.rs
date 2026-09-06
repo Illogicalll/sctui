@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use crate::keymap::Action;
 use crate::tui::logic::state::{AppData, AppState, PlaylistEdit};
 use crate::tui::logic::utils::{bump_track_count, soundcloud_playlist_id_from_tracks_uri};
 
@@ -75,11 +76,11 @@ pub(crate) fn handle_picker_input(
 
     let owned = owned_playlists(data);
     let last_row = owned.len(); // row 0 is "+ New playlist…"
-    match key.code {
-        KeyCode::Esc => close_picker(state),
-        KeyCode::Up => state.playlist_picker_selected = state.playlist_picker_selected.saturating_sub(1),
-        KeyCode::Down => state.playlist_picker_selected = (state.playlist_picker_selected + 1).min(last_row),
-        KeyCode::Enter => {
+    match (key.code, state.keymap.action(&key)) {
+        (KeyCode::Esc, _) => close_picker(state),
+        (_, Some(Action::Up)) => state.playlist_picker_selected = state.playlist_picker_selected.saturating_sub(1),
+        (_, Some(Action::Down)) => state.playlist_picker_selected = (state.playlist_picker_selected + 1).min(last_row),
+        (KeyCode::Enter, _) => {
             if state.playlist_picker_selected == 0 {
                 state.playlist_picker_title = Some(String::new());
             } else if let Some(&playlist_idx) = owned.get(state.playlist_picker_selected - 1) {

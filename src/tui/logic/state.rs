@@ -1,4 +1,5 @@
 use crate::api::{API, Activity, Album, Artist, Playlist, Track};
+use crate::keymap::Keymap;
 use ratatui::widgets::TableState;
 use std::collections::{HashSet, VecDeque};
 
@@ -343,6 +344,9 @@ pub struct AppState {
     pub override_playing: Option<QueuedTrack>,
     pub engagement_queue: VecDeque<Engagement>,
     pub following_tracks_focus: FollowingTracksFocus,
+    pub keymap: Keymap,
+    /// Search tab: printable keys go to the query until Enter/Esc.
+    pub search_typing: bool,
     pub queue_visible: bool,
     pub history_visible: bool,
     pub playlist_picker_visible: bool,
