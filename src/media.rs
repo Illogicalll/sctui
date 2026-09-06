@@ -8,6 +8,7 @@
 //!   one is created on the main thread and its message queue is pumped.
 //! - Linux: MPRIS over D-Bus (zbus). souvlaki runs its own thread; no pump.
 
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
@@ -94,14 +95,17 @@ impl Media {
         )
     }
 
-    /// Push title / artist / artwork / length to the OS.
-    pub fn set_track(&mut self, track: &Track) {
+    /// Push title / artist / length and, when a local copy exists, the artwork.
+    /// Only local files are passed: souvlaki's macOS backend aborts the process
+    /// when `NSImage` fails to load a remote URL.
+    pub fn set_track(&mut self, track: &Track, cover_file: Option<&Path>) {
         if let Some(controls) = self.controls.as_mut() {
+            let cover_url = cover_file.map(|p| format!("file://{}", p.display()));
             let _ = controls.set_metadata(MediaMetadata {
                 title: Some(track.title.as_str()),
                 artist: Some(track.artists.as_str()),
                 album: None,
-                cover_url: (!track.artwork_url.is_empty()).then_some(track.artwork_url.as_str()),
+                cover_url: cover_url.as_deref(),
                 duration: (track.duration_ms > 0).then(|| Duration::from_millis(track.duration_ms)),
             });
         }
@@ -217,5 +221,57 @@ mod win {
                 DispatchMessageW(&msg);
             }
         }
+    }
+}
+
+/// Process-level checks of souvlaki's macOS artwork loader. Run explicitly:
+/// `cargo test -- --ignored souvlaki_`. The "remote" one is expected to abort
+/// the test process (that is the bug these tests document); the "local" one
+/// must survive.
+#[cfg(all(test, target_os = "macos"))]
+mod souvlaki_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn track(cover: Option<&std::path::Path>) -> (Media, Track) {
+        let (media, _rx) = Media::new();
+        let t = Track {
+            title: "t".into(),
+            artists: "a".into(),
+            duration: "0:10".into(),
+            duration_ms: 10_000,
+            playback_count: String::new(),
+            artwork_url: String::new(),
+            access: String::new(),
+            track_urn: "x".into(),
+        };
+        let _ = cover;
+        (media, t)
+    }
+
+    #[test]
+    #[ignore]
+    fn souvlaki_local_file_cover_survives() {
+        let Ok(dir) = std::env::var("SCTUI_FIXTURE_DIR") else { return };
+        let path = std::path::PathBuf::from(dir).join("art500.jpg");
+        let (mut media, t) = track(Some(&path));
+        media.set_track(&t, Some(&path));
+        std::thread::sleep(Duration::from_secs(3)); // artwork loads on a GCD queue
+    }
+
+    #[test]
+    #[ignore]
+    fn souvlaki_remote_404_cover_aborts() {
+        let (mut media, t) = track(None);
+        if let Some(controls) = media.controls.as_mut() {
+            let _ = controls.set_metadata(MediaMetadata {
+                title: Some("t"),
+                artist: Some("a"),
+                album: None,
+                cover_url: Some("https://i1.sndcdn.com/artworks-does-not-exist-t500x500.jpg"),
+                duration: None,
+            });
+        }
+        std::thread::sleep(Duration::from_secs(5));
     }
 }

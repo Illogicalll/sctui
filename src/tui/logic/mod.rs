@@ -49,7 +49,18 @@ use self::utils::{
 enum AppEvent {
     Redraw(Result<ResizeResponse, Errors>),
     /// Cover art for `url`, downloaded off the UI thread; `None` if it failed.
-    Artwork(String, Option<DynamicImage>),
+    /// The path is a local copy of the bytes for the OS media integration.
+    Artwork(String, Option<DynamicImage>, Option<std::path::PathBuf>),
+}
+
+/// Where a track's artwork bytes are cached for the OS media panel. souvlaki on
+/// macOS loads the cover with `NSImage` and aborts the process if that returns
+/// nil, which remote URLs do intermittently; a local file never does.
+fn artwork_cache_path(url: &str) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut h);
+    std::env::temp_dir().join(format!("sctui-art-{:016x}.img", h.finish()))
 }
 
 /// Results of background fetches, folded into the app state at the top of each loop pass.
@@ -193,6 +204,7 @@ fn start(
 
     let mut cover_art_async = ThreadProtocol::new(tx_worker.clone(), None);
     let mut last_artwork_url: Option<String> = None;
+    let mut last_artwork_file: Option<(String, std::path::PathBuf)> = None;
     let mut last_artwork_image: Option<DynamicImage> = None;
     let mut artwork_pending: Option<String> = None;
 
@@ -208,6 +220,7 @@ fn start(
     // was last told so it is only updated on change, plus a periodic position re-sync.
     let (mut media, media_rx) = Media::new();
     let mut media_track_urn: Option<String> = None;
+    let mut media_cover: Option<std::path::PathBuf> = None;
     let mut media_playing: Option<bool> = None;
     let mut media_synced_at = Instant::now();
     let mut media_synced_pos: u64 = 0;
@@ -380,13 +393,14 @@ fn start(
                 AppEvent::Redraw(completed) => {
                     let _ = cover_art_async.update_resized_protocol(completed?);
                 }
-                AppEvent::Artwork(url, image) => {
+                AppEvent::Artwork(url, image, file) => {
                     if artwork_pending.as_deref() == Some(url.as_str()) {
                         artwork_pending = None;
                     }
                     if url != current_artwork_url {
                         continue; // track changed while this was downloading
                     }
+                    last_artwork_file = file.map(|path| (url.clone(), path));
                     last_artwork_url = Some(url);
                     match image {
                         Some(image) => {
@@ -411,11 +425,15 @@ fn start(
             artwork_pending = Some(current_artwork_url.clone());
             let tx = tx_main.clone();
             std::thread::spawn(move || {
-                let image = reqwest::blocking::get(current_artwork_url.as_str())
+                let bytes = reqwest::blocking::get(current_artwork_url.as_str())
                     .and_then(|r| r.bytes())
-                    .ok()
-                    .and_then(|bytes| image::load_from_memory(&bytes).ok());
-                let _ = tx.send(AppEvent::Artwork(current_artwork_url, image));
+                    .ok();
+                let image = bytes.as_ref().and_then(|b| image::load_from_memory(b).ok());
+                let file = bytes.filter(|_| image.is_some()).and_then(|b| {
+                    let path = artwork_cache_path(&current_artwork_url);
+                    std::fs::write(&path, &b).ok().map(|_| path)
+                });
+                let _ = tx.send(AppEvent::Artwork(current_artwork_url, image, file));
             });
         }
 
@@ -790,9 +808,15 @@ fn start(
                 }
             } else {
                 let changed_track = media_track_urn.as_deref() != Some(track.track_urn.as_str());
-                if changed_track {
-                    media.set_track(&track);
+                // Artwork is sent once its local copy exists (it arrives after the metadata).
+                let cover = last_artwork_file
+                    .as_ref()
+                    .filter(|(url, path)| *url == track.artwork_url && path.exists())
+                    .map(|(_, path)| path.clone());
+                if changed_track || media_cover != cover {
+                    media.set_track(&track, cover.as_deref());
                     media_track_urn = Some(track.track_urn.clone());
+                    media_cover = cover;
                 }
                 // The OS extrapolates the position itself; re-send it only when the
                 // track or play state changes, or after a seek moved it.
