@@ -158,8 +158,8 @@ impl Action {
             Action::Down => "Move selection down",
             Action::PageUp => "Move selection up by 10",
             Action::PageDown => "Move selection down by 10",
-            Action::SecondaryUp => "Move the second pane's selection up",
-            Action::SecondaryDown => "Move the second pane's selection down",
+            Action::SecondaryUp => "Second pane up (or up by 10 when there is only one pane)",
+            Action::SecondaryDown => "Second pane down (or down by 10 when there is only one pane)",
             Action::TertiaryUp => "Move the third pane's selection up (likes of a person)",
             Action::TertiaryDown => "Move the third pane's selection down (likes of a person)",
             Action::PlayPause => "Play / pause",
@@ -202,10 +202,10 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::SubTabRight, &["right", "l"]),
     (Action::Up, &["up", "k"]),
     (Action::Down, &["down", "j"]),
-    (Action::PageUp, &["pageup", "shift+k"]),
-    (Action::PageDown, &["pagedown", "shift+j"]),
-    (Action::SecondaryUp, &["shift+up"]),
-    (Action::SecondaryDown, &["shift+down"]),
+    (Action::PageUp, &["pageup"]),
+    (Action::PageDown, &["pagedown"]),
+    (Action::SecondaryUp, &["shift+up", "shift+k"]),
+    (Action::SecondaryDown, &["shift+down", "shift+j"]),
     (Action::TertiaryUp, &["alt+up"]),
     (Action::TertiaryDown, &["alt+down"]),
     (Action::PlayPause, &["space"]),
@@ -639,7 +639,7 @@ mod tests {
             assert!(!km.chords(action).is_empty(), "{} has no default key", action.name());
         }
         assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::NONE)), Some(Action::Down));
-        assert_eq!(km.action(&key(KeyCode::Char('J'), KeyModifiers::SHIFT)), Some(Action::PageDown));
+        assert_eq!(km.action(&key(KeyCode::Char('J'), KeyModifiers::SHIFT)), Some(Action::SecondaryDown));
         assert_eq!(km.action(&key(KeyCode::Char('?'), KeyModifiers::SHIFT)), Some(Action::Help));
         assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), Some(Action::Quit));
         assert_eq!(km.action(&key(KeyCode::Char('h'), KeyModifiers::SHIFT)), Some(Action::SeekBackward));

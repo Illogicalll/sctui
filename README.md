@@ -127,8 +127,8 @@ Press `?` in the app for the full list. The defaults:
 |---|---|
 | `Tab` / `Shift+Tab` | next / previous tab |
 | `←` `→` or `h` `l` | sub-tab / search filter |
-| `↑` `↓` or `k` `j` | move; `PageUp` `PageDown` or `Shift+K` `Shift+J` by ten |
-| `Shift+↑` `Shift+↓`, `Alt+↑` `Alt+↓` | second and third pane |
+| `↑` `↓` or `k` `j` | move; `PageUp` `PageDown` by ten |
+| `Shift+↑` `Shift+↓` or `Shift+K` `Shift+J` | second pane (by ten where there is only one pane); `Alt+↑` `Alt+↓` third pane |
 | `Space`, `Enter`, `Shift+Enter` | play/pause, play selected, start a station |
 | `Shift+→` `Shift+←` or `n` `b` | next / previous track |
 | `Alt+→` `Alt+←` or `Shift+L` `Shift+H` | seek ±10 s |

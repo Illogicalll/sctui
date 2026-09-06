@@ -113,6 +113,17 @@ pub fn handle_key_event(
     }
 }
 
+/// Views with two selectable panes: Library playlists/albums/following, Search
+/// albums/playlists/people, and the feed (activities + their tracks).
+fn has_second_pane(state: &AppState) -> bool {
+    match state.selected_tab {
+        0 => state.selected_subtab != 0,
+        1 => state.selected_searchfilter != 0,
+        2 => true,
+        _ => false,
+    }
+}
+
 /// Dispatch one action. Movement handlers still take a `KeyEvent` whose
 /// modifiers select the variant (plain = step, Alt = page, Shift = second pane).
 pub(crate) fn run_action(
@@ -140,8 +151,15 @@ pub(crate) fn run_action(
         Action::Down => movement::handle_down_key(key(KeyCode::Down, KeyModifiers::NONE), state, data),
         Action::PageUp => movement::handle_up_key(key(KeyCode::Up, KeyModifiers::ALT), state, data),
         Action::PageDown => movement::handle_down_key(key(KeyCode::Down, KeyModifiers::ALT), state, data),
-        Action::SecondaryUp => movement::handle_up_key(key(KeyCode::Up, KeyModifiers::SHIFT), state, data),
-        Action::SecondaryDown => movement::handle_down_key(key(KeyCode::Down, KeyModifiers::SHIFT), state, data),
+        // Second pane where there is one; otherwise behave like PageUp/PageDown.
+        Action::SecondaryUp => {
+            let mods = if has_second_pane(state) { KeyModifiers::SHIFT } else { KeyModifiers::ALT };
+            movement::handle_up_key(key(KeyCode::Up, mods), state, data)
+        }
+        Action::SecondaryDown => {
+            let mods = if has_second_pane(state) { KeyModifiers::SHIFT } else { KeyModifiers::ALT };
+            movement::handle_down_key(key(KeyCode::Down, mods), state, data)
+        }
         Action::PlayPause => {
             toggle_play_pause(player);
             InputOutcome::Continue
