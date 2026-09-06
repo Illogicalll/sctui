@@ -1,16 +1,13 @@
-use std::io::Cursor;
+use std::sync::mpsc::Sender;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Duration;
 
-use rodio::{Decoder, Sink};
-
 use crate::player::Position;
 use crate::player::stream::cache::SegmentCache;
 use crate::player::stream::hls::HlsManifest;
-use crate::player::stream::sample::TapSource;
 
 pub(crate) const PREFETCH_SEGMENTS: usize = 3;
 
@@ -19,11 +16,10 @@ pub(crate) struct SegmentPumpParams {
     pub generation: Arc<AtomicU64>,
     pub generation_value: u64,
     pub manifest: Arc<HlsManifest>,
-    pub init_bytes: Arc<Vec<u8>>,
     pub segment_cache: Arc<Mutex<SegmentCache>>,
     pub start_segment_index: usize,
-    pub sink_arc: Arc<Mutex<Option<Sink>>>,
-    pub wave_buffer: Arc<Mutex<std::collections::VecDeque<f32>>>,
+    /// Feeds the track's single continuous decoder (see `stream::reader`).
+    pub bytes_tx: Sender<Arc<Vec<u8>>>,
     pub is_playing_flag: Arc<std::sync::atomic::AtomicBool>,
     pub position: Arc<Mutex<Position>>,
 }
@@ -35,11 +31,9 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             generation,
             generation_value,
             manifest,
-            init_bytes,
             segment_cache,
             start_segment_index,
-            sink_arc,
-            wave_buffer,
+            bytes_tx,
             is_playing_flag,
             position,
         } = params;
@@ -93,23 +87,11 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                 }
             };
 
-            let combined = [init_bytes.as_slice(), media_bytes.as_slice()].concat();
-            let decoder = match Decoder::new(Cursor::new(combined)) {
-                Ok(d) => d,
-                Err(_) => break,
-            };
-
-            let tapped = TapSource::new(decoder, Arc::clone(&wave_buffer));
             if generation.load(Ordering::SeqCst) != generation_value {
                 break;
             }
-            let guard = sink_arc.lock().unwrap();
-            if generation.load(Ordering::SeqCst) != generation_value {
-                break;
-            }
-            if let Some(ref sink) = *guard {
-                sink.append(tapped);
-            } else {
+            // Receiver gone means the track was stopped or replaced.
+            if bytes_tx.send(media_bytes).is_err() {
                 break;
             }
 

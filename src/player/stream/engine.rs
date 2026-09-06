@@ -1,6 +1,6 @@
 use anyhow::Context;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
-use std::io::Cursor;
+use std::sync::mpsc::SyncSender;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -14,10 +14,15 @@ use crate::player::Position;
 use crate::player::stream::cache::{CachedHls, SegmentCache};
 use crate::player::stream::hls::{HlsManifest, StreamsResponse};
 use crate::player::stream::downloader::spawn_segment_pump;
+use crate::player::stream::reader::{PcmSource, SegmentReader};
 use crate::player::stream::sample::TapSource;
 
 pub(crate) const CROSSFADE_DURATION: Duration = Duration::from_millis(35);
 const CROSSFADE_STEPS: usize = 7;
+/// Decoded audio handed to the output in chunks of this many samples; the
+/// channel holds PCM_CHUNKS of them (~1.5 s of stereo 44.1 kHz) as look-ahead.
+const PCM_CHUNK_SAMPLES: usize = 2048;
+const PCM_CHUNKS: usize = 64;
 
 pub(crate) fn open_output_stream() -> Arc<Mutex<OutputStream>> {
     let output_stream = OutputStreamBuilder::open_default_stream().unwrap();
@@ -266,27 +271,38 @@ impl PlaybackEngine {
             }
         };
 
-        let first_bytes = [init_bytes.as_slice(), media_bytes.as_slice()].concat();
+        // One continuous decoder for the whole track: init + this segment now, the rest
+        // streamed in by the pump as they download. Decoding each segment separately
+        // restarts the AAC decoder and clicks at every boundary.
+        let (bytes_tx, bytes_rx) = std::sync::mpsc::channel::<Arc<Vec<u8>>>();
+        if !init_bytes.is_empty() {
+            let _ = bytes_tx.send(Arc::clone(&init_bytes));
+        }
+        let _ = bytes_tx.send(Arc::clone(&media_bytes));
+
+        let decoder = match Decoder::builder()
+            .with_data(SegmentReader::new(bytes_rx))
+            .with_seekable(false)
+            .with_gapless(true)
+            .build()
+        {
+            Ok(decoder) => decoder,
+            Err(_) => {
+                if !is_seek {
+                    is_playing_flag.store(false, Ordering::SeqCst);
+                    position.lock().unwrap().last_start = None;
+                }
+                return;
+            }
+        };
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
 
         let new_sink = {
             let stream_guard = self.stream.lock().unwrap();
             Sink::connect_new(stream_guard.mixer())
         };
-
         new_sink.set_volume(target_volume);
-
-        if append_segment_to_sink(
-            &new_sink,
-            first_bytes,
-            wave_buffer,
-            offset_within_segment_ms,
-        ).is_err() {
-            if !is_seek {
-                is_playing_flag.store(false, Ordering::SeqCst);
-                position.lock().unwrap().last_start = None;
-            }
-            return;
-        }
 
         let gen_for_pump = if is_seek {
             let generation_id = self.bump_generation();
@@ -295,6 +311,19 @@ impl PlaybackEngine {
         } else {
             planned_generation
         };
+
+        let (pcm_tx, pcm_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(PCM_CHUNKS);
+        spawn_decode_thread(
+            decoder,
+            Duration::from_millis(offset_within_segment_ms),
+            pcm_tx,
+            Arc::clone(&self.generation),
+            gen_for_pump,
+        );
+        new_sink.append(TapSource::new(
+            PcmSource::new(pcm_rx, channels, sample_rate),
+            Arc::clone(wave_buffer),
+        ));
 
         let old_sink_for_fade = if is_seek && has_old_sink {
             sink_arc.lock().unwrap().take()
@@ -322,36 +351,55 @@ impl PlaybackEngine {
             generation: Arc::clone(&self.generation),
             generation_value: gen_for_pump,
             manifest,
-            init_bytes,
             segment_cache,
             start_segment_index: segment_index,
-            sink_arc: Arc::clone(sink_arc),
-            wave_buffer: Arc::clone(wave_buffer),
+            bytes_tx,
             is_playing_flag: Arc::clone(is_playing_flag),
             position: Arc::clone(position),
         });
     }
 }
 
-fn append_segment_to_sink(
-    sink: &Sink,
-    bytes: Vec<u8>,
-    wave_buffer: &Arc<Mutex<std::collections::VecDeque<f32>>>,
-    skip_ms: u64,
-) -> anyhow::Result<()> {
-    let cursor = Cursor::new(bytes);
-    let decoder = Decoder::new(cursor).context("rodio decoder init failed")?;
-
-    if skip_ms > 0 {
-        let skipped = decoder.skip_duration(Duration::from_millis(skip_ms));
-        let tapped = TapSource::new(skipped, Arc::clone(wave_buffer));
-        sink.append(tapped);
-    } else {
-        let tapped = TapSource::new(decoder, Arc::clone(wave_buffer));
-        sink.append(tapped);
-    }
-
-    Ok(())
+/// Decodes on its own thread so a network stall never blocks the audio callback.
+/// `skip` drops the start of the first segment when playback begins mid-segment.
+/// Stops when the generation moves on or the output side is dropped.
+fn spawn_decode_thread(
+    decoder: Decoder<SegmentReader>,
+    skip: Duration,
+    tx: SyncSender<Vec<f32>>,
+    generation: Arc<AtomicU64>,
+    generation_value: u64,
+) {
+    std::thread::spawn(move || {
+        let mut source: Box<dyn Source<Item = f32> + Send> = if skip.is_zero() {
+            Box::new(decoder)
+        } else {
+            Box::new(decoder.skip_duration(skip))
+        };
+        let mut chunk = Vec::with_capacity(PCM_CHUNK_SAMPLES);
+        loop {
+            match source.next() {
+                Some(sample) => {
+                    chunk.push(sample);
+                    if chunk.len() == PCM_CHUNK_SAMPLES {
+                        if generation.load(Ordering::SeqCst) != generation_value {
+                            return;
+                        }
+                        let full = std::mem::replace(&mut chunk, Vec::with_capacity(PCM_CHUNK_SAMPLES));
+                        if tx.send(full).is_err() {
+                            return;
+                        }
+                    }
+                }
+                None => {
+                    if !chunk.is_empty() {
+                        let _ = tx.send(chunk);
+                    }
+                    return;
+                }
+            }
+        }
+    });
 }
 
 fn crossfade_and_stop(old_sink: Sink, target_volume: f32) {

@@ -145,14 +145,18 @@ impl Media {
 mod win {
     use std::ffi::c_void;
 
-    use windows::Win32::Foundation::{HINSTANCE, HWND};
+    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
-        PeekMessageW, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
-        WNDCLASSW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, HMENU, MSG,
+        PM_REMOVE, PeekMessageW, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE,
+        WINDOW_STYLE, WNDCLASSW,
     };
     use windows::core::PCWSTR;
+
+    unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
 
     pub struct HiddenWindow {
         hwnd: HWND,
@@ -166,7 +170,7 @@ mod win {
             unsafe {
                 let instance = HINSTANCE(GetModuleHandleW(None).ok()?.0);
                 let class = WNDCLASSW {
-                    lpfnWndProc: Some(DefWindowProcW),
+                    lpfnWndProc: Some(wnd_proc),
                     hInstance: instance,
                     lpszClassName: PCWSTR(class_name.as_ptr()),
                     ..Default::default()
@@ -183,8 +187,8 @@ mod win {
                     0,
                     0,
                     0,
-                    None,
-                    None,
+                    HWND(0),
+                    HMENU(0),
                     instance,
                     None,
                 );
@@ -208,7 +212,7 @@ mod win {
     pub fn pump_messages() {
         unsafe {
             let mut msg = MSG::default();
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+            while PeekMessageW(&mut msg, HWND(0), 0, 0, PM_REMOVE).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
