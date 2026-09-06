@@ -70,7 +70,9 @@ pub fn handle_key_event(
         return outcome;
     }
 
-    // Search tab: while typing, printable keys go to the query. Enter/Esc leave.
+    // Search tab: while typing, printable keys (uppercase included) go to the query.
+    // Enter/Esc leave; any other key (arrows, Tab, ...) leaves and is then handled
+    // normally, so moving onto a result is enough to get the commands back.
     if state.selected_tab == 1 && state.search_typing {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => {
@@ -81,7 +83,7 @@ pub fn handle_key_event(
             KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
                 return commands::handle_search_char(c, state);
             }
-            _ => {}
+            _ => state.search_typing = false,
         }
     }
 

@@ -40,7 +40,10 @@ pub fn render_search(
         .split(area);
 
     let (input_text, input_style) = if state.search_typing {
-        (format!("{}▏", state.query), Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        (
+            format!("{}▏   Enter to finish typing", state.query),
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )
     } else if state.query.is_empty() {
         ("press / to search".to_string(), Style::default().fg(Color::DarkGray))
     } else {
