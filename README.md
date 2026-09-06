@@ -95,7 +95,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ### 🎛️ Media Keys
 
-<p align="center">On macOS the current track shows in the Now Playing widget with artwork and a live position, and the play/pause, skip and seek buttons on your keyboard, headphones or Control Centre drive sctui</p>
+<p align="center">The current track shows in your system's media panel with artwork and a live position (macOS Now Playing, Windows media overlay, Linux MPRIS), and the play/pause, skip and seek buttons on your keyboard, headphones or desktop drive sctui</p>
 
 ### 📝 Playlist Management
 

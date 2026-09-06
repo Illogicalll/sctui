@@ -1,9 +1,22 @@
 //! OS media integration: the Now Playing widget and the play/pause/skip
-//! commands behind media keys, headphones and the Control Centre.
+//! commands behind media keys, headphones and the system media panel.
 //!
-//! macOS only for now (MPNowPlayingInfoCenter + MPRemoteCommandCenter via
-//! `souvlaki`). Other platforms get a no-op with the same API so the main loop
-//! needs no `cfg`s.
+//! One backend per OS, all through `souvlaki`:
+//! - macOS: MPNowPlayingInfoCenter + MPRemoteCommandCenter. Callbacks come via
+//!   the main dispatch queue, so the TUI loop pumps the main CFRunLoop.
+//! - Windows: System Media Transport Controls, which need a window. A hidden
+//!   one is created on the main thread and its message queue is pumped.
+//! - Linux: MPRIS over D-Bus (zbus). souvlaki runs its own thread; no pump.
+
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition,
+    PlatformConfig, SeekDirection,
+};
+
+use crate::api::Track;
 
 /// A command the OS asked us to perform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,128 +31,187 @@ pub enum MediaCommand {
     SeekBackward,
 }
 
-pub use imp::Media;
+pub struct Media {
+    controls: Option<MediaControls>,
+    #[cfg(target_os = "windows")]
+    _window: Option<win::HiddenWindow>,
+}
 
-#[cfg(target_os = "macos")]
-mod imp {
-    use std::sync::mpsc::{self, Receiver};
-    use std::time::Duration;
+impl Media {
+    /// Registers with the system. Commands arrive on the returned receiver.
+    /// Any failure just disables the integration.
+    pub fn new() -> (Self, Receiver<MediaCommand>) {
+        let (tx, rx) = mpsc::channel();
 
-    use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
-    use souvlaki::{
-        MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition,
-        PlatformConfig, SeekDirection,
-    };
+        #[cfg(target_os = "windows")]
+        let window = win::HiddenWindow::create();
+        #[cfg(target_os = "windows")]
+        let hwnd = window.as_ref().map(|w| w.hwnd_ptr());
+        #[cfg(not(target_os = "windows"))]
+        let hwnd = None;
 
-    use super::MediaCommand;
-    use crate::api::Track;
+        let controls = MediaControls::new(PlatformConfig {
+            display_name: "sctui",
+            dbus_name: "sctui",
+            hwnd,
+        })
+        .ok()
+        .and_then(|mut controls| {
+            controls
+                .attach(move |event| {
+                    let command = match event {
+                        MediaControlEvent::Toggle => MediaCommand::Toggle,
+                        MediaControlEvent::Play => MediaCommand::Play,
+                        MediaControlEvent::Pause => MediaCommand::Pause,
+                        MediaControlEvent::Stop | MediaControlEvent::Quit => MediaCommand::Stop,
+                        MediaControlEvent::Next => MediaCommand::Next,
+                        MediaControlEvent::Previous => MediaCommand::Previous,
+                        MediaControlEvent::Seek(SeekDirection::Forward)
+                        | MediaControlEvent::SeekBy(SeekDirection::Forward, _) => {
+                            MediaCommand::SeekForward
+                        }
+                        MediaControlEvent::Seek(SeekDirection::Backward)
+                        | MediaControlEvent::SeekBy(SeekDirection::Backward, _) => {
+                            MediaCommand::SeekBackward
+                        }
+                        // No seek-to-position in the player yet; volume, URIs and
+                        // Raise have no meaning for a TUI.
+                        _ => return,
+                    };
+                    let _ = tx.send(command);
+                })
+                .ok()
+                .map(|_| controls)
+        });
 
-    pub struct Media {
-        controls: Option<MediaControls>,
+        (
+            Self {
+                controls,
+                #[cfg(target_os = "windows")]
+                _window: window,
+            },
+            rx,
+        )
     }
 
-    impl Media {
-        /// Registers with the system. Commands arrive on the returned receiver.
-        /// Failure just disables the integration.
-        pub fn new() -> (Self, Receiver<MediaCommand>) {
-            let (tx, rx) = mpsc::channel();
-            let controls = MediaControls::new(PlatformConfig {
-                display_name: "sctui",
-                dbus_name: "sctui",
-                hwnd: None,
-            })
-            .ok()
-            .and_then(|mut controls| {
-                controls
-                    .attach(move |event| {
-                        let command = match event {
-                            MediaControlEvent::Toggle => MediaCommand::Toggle,
-                            MediaControlEvent::Play => MediaCommand::Play,
-                            MediaControlEvent::Pause => MediaCommand::Pause,
-                            MediaControlEvent::Stop | MediaControlEvent::Quit => MediaCommand::Stop,
-                            MediaControlEvent::Next => MediaCommand::Next,
-                            MediaControlEvent::Previous => MediaCommand::Previous,
-                            MediaControlEvent::Seek(SeekDirection::Forward)
-                            | MediaControlEvent::SeekBy(SeekDirection::Forward, _) => {
-                                MediaCommand::SeekForward
-                            }
-                            MediaControlEvent::Seek(SeekDirection::Backward)
-                            | MediaControlEvent::SeekBy(SeekDirection::Backward, _) => {
-                                MediaCommand::SeekBackward
-                            }
-                            // No seek-to-position in the player yet; volume and URIs are
-                            // not exposed by macOS anyway.
-                            _ => return,
-                        };
-                        let _ = tx.send(command);
-                    })
-                    .ok()
-                    .map(|_| controls)
+    /// Push title / artist / artwork / length to the OS.
+    pub fn set_track(&mut self, track: &Track) {
+        if let Some(controls) = self.controls.as_mut() {
+            let _ = controls.set_metadata(MediaMetadata {
+                title: Some(track.title.as_str()),
+                artist: Some(track.artists.as_str()),
+                album: None,
+                cover_url: (!track.artwork_url.is_empty()).then_some(track.artwork_url.as_str()),
+                duration: (track.duration_ms > 0).then(|| Duration::from_millis(track.duration_ms)),
             });
-            (Self { controls }, rx)
         }
+    }
 
-        /// Push title / artist / artwork / length to the Now Playing widget.
-        pub fn set_track(&mut self, track: &Track) {
-            if let Some(controls) = self.controls.as_mut() {
-                let _ = controls.set_metadata(MediaMetadata {
-                    title: Some(track.title.as_str()),
-                    artist: Some(track.artists.as_str()),
-                    album: None,
-                    cover_url: (!track.artwork_url.is_empty()).then_some(track.artwork_url.as_str()),
-                    duration: (track.duration_ms > 0).then(|| Duration::from_millis(track.duration_ms)),
-                });
-            }
+    pub fn set_playback(&mut self, playing: bool, position_ms: u64) {
+        if let Some(controls) = self.controls.as_mut() {
+            let progress = Some(MediaPosition(Duration::from_millis(position_ms)));
+            let _ = controls.set_playback(if playing {
+                MediaPlayback::Playing { progress }
+            } else {
+                MediaPlayback::Paused { progress }
+            });
         }
+    }
 
-        pub fn set_playback(&mut self, playing: bool, position_ms: u64) {
-            if let Some(controls) = self.controls.as_mut() {
-                let progress = Some(MediaPosition(Duration::from_millis(position_ms)));
-                let _ = controls.set_playback(if playing {
-                    MediaPlayback::Playing { progress }
-                } else {
-                    MediaPlayback::Paused { progress }
-                });
-            }
+    pub fn set_stopped(&mut self) {
+        if let Some(controls) = self.controls.as_mut() {
+            let _ = controls.set_playback(MediaPlayback::Stopped);
         }
+    }
 
-        pub fn set_stopped(&mut self) {
-            if let Some(controls) = self.controls.as_mut() {
-                let _ = controls.set_playback(MediaPlayback::Stopped);
-            }
+    /// Deliver pending OS callbacks. Called once per TUI loop iteration on the
+    /// main thread, which is where both macOS and Windows want them handled.
+    pub fn pump(&self) {
+        if self.controls.is_none() {
+            return;
         }
-
-        /// MPRemoteCommandCenter delivers its callbacks through the main dispatch
-        /// queue, which only drains while the main thread's run loop runs. The TUI
-        /// loop owns the main thread, so it calls this once per iteration.
-        pub fn pump(&self) {
-            if self.controls.is_some() {
-                CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, Duration::ZERO, true);
-            }
+        #[cfg(target_os = "macos")]
+        {
+            use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
+            CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, Duration::ZERO, true);
         }
+        #[cfg(target_os = "windows")]
+        win::pump_messages();
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-mod imp {
-    use std::sync::mpsc::{self, Receiver};
+/// SMTC binds to a window handle. A console has none, so make an invisible one.
+#[cfg(target_os = "windows")]
+mod win {
+    use std::ffi::c_void;
 
-    use super::MediaCommand;
-    use crate::api::Track;
+    use windows::Win32::Foundation::{HINSTANCE, HWND};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
+        PeekMessageW, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WNDCLASSW,
+    };
+    use windows::core::PCWSTR;
 
-    pub struct Media {
-        // Keeps the channel open so `try_recv` reports Empty rather than Disconnected.
-        _tx: mpsc::Sender<MediaCommand>,
+    pub struct HiddenWindow {
+        hwnd: HWND,
+        // The class name must outlive the registered class.
+        _class_name: Vec<u16>,
     }
 
-    impl Media {
-        pub fn new() -> (Self, Receiver<MediaCommand>) {
-            let (tx, rx) = mpsc::channel();
-            (Self { _tx: tx }, rx)
+    impl HiddenWindow {
+        pub fn create() -> Option<Self> {
+            let class_name: Vec<u16> = "sctui_media\0".encode_utf16().collect();
+            unsafe {
+                let instance = HINSTANCE(GetModuleHandleW(None).ok()?.0);
+                let class = WNDCLASSW {
+                    lpfnWndProc: Some(DefWindowProcW),
+                    hInstance: instance,
+                    lpszClassName: PCWSTR(class_name.as_ptr()),
+                    ..Default::default()
+                };
+                if RegisterClassW(&class) == 0 {
+                    return None;
+                }
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    PCWSTR(class_name.as_ptr()),
+                    PCWSTR(class_name.as_ptr()),
+                    WINDOW_STYLE::default(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                    None,
+                    instance,
+                    None,
+                );
+                (hwnd.0 != 0).then_some(Self { hwnd, _class_name: class_name })
+            }
         }
-        pub fn set_track(&mut self, _track: &Track) {}
-        pub fn set_playback(&mut self, _playing: bool, _position_ms: u64) {}
-        pub fn set_stopped(&mut self) {}
-        pub fn pump(&self) {}
+
+        pub fn hwnd_ptr(&self) -> *mut c_void {
+            self.hwnd.0 as *mut c_void
+        }
+    }
+
+    impl Drop for HiddenWindow {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DestroyWindow(self.hwnd);
+            }
+        }
+    }
+
+    pub fn pump_messages() {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
     }
 }
