@@ -47,6 +47,9 @@ use self::utils::{
     active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
 };
 
+/// How long a track must have been playing before its lyrics are looked up.
+const LYRICS_DEBOUNCE: Duration = Duration::from_millis(400);
+
 enum AppEvent {
     Redraw(Result<ResizeResponse, Errors>),
     /// Cover art for `url`, downloaded off the UI thread; `None` if it failed.
@@ -224,6 +227,7 @@ fn start(
     let (mut media, media_rx) = Media::new();
     let mut media_track_urn: Option<String> = None;
     let mut lyrics_cache: std::collections::HashMap<String, Option<Lyrics>> = std::collections::HashMap::new();
+    let mut lyrics_pending: Option<(Track, Instant)> = None;
     let mut media_cover: Option<std::path::PathBuf> = None;
     let mut media_playing: Option<bool> = None;
     let mut media_synced_at = Instant::now();
@@ -820,23 +824,38 @@ fn start(
                     media_playing = None;
                 }
             } else {
-                // Lyrics follow the playing track; looked up once per track per session.
+                // Lyrics follow the playing track, looked up once per track per session.
+                // Playback never waits for this: the lookup is spawned on the async runtime
+                // only after the track has been current for LYRICS_DEBOUNCE, so it starts
+                // behind the first audio segment and skipped tracks are never looked up.
                 if state.lyrics_track_urn.as_deref() != Some(track.track_urn.as_str()) {
                     state.lyrics_track_urn = Some(track.track_urn.clone());
                     match lyrics_cache.get(&track.track_urn) {
-                        Some(Some(l)) => state.lyrics = LyricsStatus::Found(l.clone()),
-                        Some(None) => state.lyrics = LyricsStatus::NotFound,
+                        Some(Some(l)) => {
+                            state.lyrics = LyricsStatus::Found(l.clone());
+                            lyrics_pending = None;
+                        }
+                        Some(None) => {
+                            state.lyrics = LyricsStatus::NotFound;
+                            lyrics_pending = None;
+                        }
                         None => {
                             state.lyrics = LyricsStatus::Loading;
-                            let tx = tx.clone();
-                            let t = track.clone();
-                            async_rt.spawn(async move {
-                                let urn = t.track_urn.clone();
-                                let found = fetch_lyrics(t).await;
-                                let _ = tx.send(Msg::Lyrics(urn, found));
-                            });
+                            lyrics_pending = Some((track.clone(), Instant::now()));
                         }
                     }
+                }
+                if let Some((pending, since)) = &lyrics_pending
+                    && since.elapsed() >= LYRICS_DEBOUNCE
+                {
+                    let tx = tx.clone();
+                    let t = pending.clone();
+                    lyrics_pending = None;
+                    async_rt.spawn(async move {
+                        let urn = t.track_urn.clone();
+                        let found = fetch_lyrics(t).await;
+                        let _ = tx.send(Msg::Lyrics(urn, found));
+                    });
                 }
 
                 let changed_track = media_track_urn.as_deref() != Some(track.track_urn.as_str());
