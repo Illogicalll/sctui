@@ -1,10 +1,11 @@
 use ratatui::{
     Frame,
     layout::Alignment,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph},
 };
+use crate::theme;
 
 use super::utils::centered_rect_fixed;
 
@@ -16,10 +17,10 @@ pub fn render_confirm(frame: &mut Frame, message: &str, selected: usize) {
     frame.render_widget(Clear, popup_area);
 
     let highlight = Style::default()
-        .fg(Color::Black)
-        .bg(Color::LightBlue)
+        .fg(theme::current().selection_fg)
+        .bg(theme::current().selection_bg)
         .add_modifier(Modifier::BOLD);
-    let plain = Style::default().fg(Color::White);
+    let plain = Style::default().fg(theme::current().fg);
     let (yes_style, no_style) = if selected == 0 {
         (highlight, plain)
     } else {

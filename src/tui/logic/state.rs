@@ -1,6 +1,7 @@
 use crate::api::{API, Activity, Album, Artist, Playlist, Track};
 use crate::api::Lyrics;
 use crate::keymap::Keymap;
+use crate::theme::{Overrides, Theme};
 use ratatui::widgets::TableState;
 use std::collections::{HashSet, VecDeque};
 
@@ -358,6 +359,12 @@ pub struct AppState {
     pub engagement_queue: VecDeque<Engagement>,
     pub following_tracks_focus: FollowingTracksFocus,
     pub keymap: Keymap,
+    pub theme_name: String,
+    pub theme_overrides: Overrides,
+    pub theme_picker_visible: bool,
+    pub theme_picker_selected: usize,
+    /// Theme to restore if the picker is cancelled.
+    pub theme_picker_previous: Option<Theme>,
     pub lyrics: LyricsStatus,
     /// Track the lyrics above belong to (or are being fetched for).
     pub lyrics_track_urn: Option<String>,

@@ -113,7 +113,22 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center">and more...</p>
 
-## Keybindings
+## Configuration
+
+### Themes
+
+Press `Shift+O` to pick a colour theme with a live preview: `default` (your terminal's own ANSI colours), `tokyonight`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `solarized-dark`, `one-dark`, `rose-pine`. Enter keeps it, Esc reverts. The choice is saved to `~/.config/sctui/config.toml`, where single roles can also be overridden:
+
+```toml
+[theme]
+name = "tokyonight"
+[theme.colors]
+accent = "#ff9e64"   # roles: fg, muted, dim, accent, secondary, selection_bg, selection_fg, warning
+```
+
+The terminal background is never painted, so transparent terminals stay transparent.
+
+### Keybindings
 
 Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default. Changes are saved straight to `~/.config/sctui/config.toml`.
 

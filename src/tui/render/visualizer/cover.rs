@@ -6,6 +6,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 use ratatui_image::{FilterType, Resize, StatefulImage, thread::ThreadProtocol};
+use crate::theme;
 
 use crate::api::{Track, format_duration};
 
@@ -16,8 +17,14 @@ const MIN_WIDTH_FOR_ART: u16 = 30;
 const ART_MAX_WIDTH_FRACTION: f32 = 0.9; // of the left half
 const ART_HEIGHT_FRACTION: f32 = 0.5;
 const INFO_WIDTH_FRACTION: u16 = 3; // info block is 3/4 of the text column
-const DIM: Color = Color::Rgb(70, 70, 85);
-const GREY: Color = Color::Rgb(160, 160, 176);
+#[allow(non_snake_case)]
+fn DIM() -> Color {
+    theme::current().dim
+}
+#[allow(non_snake_case)]
+fn GREY() -> Color {
+    theme::current().muted
+}
 
 /// Big cover art on the left, title / artist / progress on the right.
 pub fn render_now_playing(
@@ -84,7 +91,7 @@ pub fn render_now_playing(
                 .alignment(Alignment::Center)
                 .style(
                     Style::default()
-                        .fg(Color::White)
+                        .fg(theme::current().fg)
                         .add_modifier(Modifier::BOLD),
                 ),
             row(0),
@@ -94,7 +101,7 @@ pub fn render_now_playing(
         frame.render_widget(
             Paragraph::new(track.artists.as_str())
                 .alignment(Alignment::Center)
-                .style(Style::default().fg(GREY)),
+                .style(Style::default().fg(GREY())),
             row(1),
         );
     }
@@ -116,7 +123,7 @@ pub fn render_now_playing(
                 Span::raw(" ".repeat(space)),
                 Span::raw(total),
             ]))
-            .style(Style::default().fg(GREY)),
+            .style(Style::default().fg(GREY())),
             row(4),
         );
     }
@@ -131,12 +138,12 @@ fn progress_line(width: u16, ratio: f64) -> Line<'static> {
     if played > 0 {
         spans.push(Span::styled(
             "━".repeat(played - 1) + "╸",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::current().accent),
         ));
     }
     spans.push(Span::styled(
         "─".repeat(width - played),
-        Style::default().fg(DIM),
+        Style::default().fg(DIM()),
     ));
     Line::from(spans)
 }

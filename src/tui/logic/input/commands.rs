@@ -116,6 +116,7 @@ pub(crate) fn run_command(
                 state.confirm_selected = 1;
             }
         }
+        Action::Themes => super::theme_picker::open_theme_picker(state),
         Action::ToggleHistory => {
             state.history_visible = !state.history_visible;
             state.history_selected = 0;

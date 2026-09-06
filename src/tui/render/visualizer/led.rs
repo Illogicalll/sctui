@@ -4,6 +4,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::Clear,
 };
+use crate::theme;
 
 use super::common::{frame_block, spectrum_bands};
 
@@ -12,7 +13,10 @@ const TRIM_RIGHT_BANDS: usize = 2;
 const RED: Color = Color::Rgb(255, 92, 92);
 const YELLOW: Color = Color::Rgb(255, 209, 102);
 const GREEN: Color = Color::Rgb(92, 247, 138);
-const UNLIT: Color = Color::Rgb(38, 38, 48);
+#[allow(non_snake_case)]
+fn UNLIT() -> Color {
+    theme::current().dim
+}
 
 /// Discrete LED dots, green at the bottom through yellow to red at the top.
 pub fn render_led_matrix(frame: &mut Frame, area: Rect, samples: &[f32]) {
@@ -48,7 +52,7 @@ pub fn render_led_matrix(frame: &mut Frame, area: Rect, samples: &[f32]) {
                 if row < lit {
                     cell.set_symbol("●").set_style(Style::default().fg(color));
                 } else {
-                    cell.set_symbol("○").set_style(Style::default().fg(UNLIT));
+                    cell.set_symbol("○").set_style(Style::default().fg(UNLIT()));
                 }
             }
         }

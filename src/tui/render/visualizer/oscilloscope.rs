@@ -4,6 +4,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Axis, Chart, Dataset, GraphType},
 };
+use crate::theme;
 
 use super::common::{MAX_POINTS, downsample, frame_block, normalize, split_channels};
 
@@ -44,8 +45,8 @@ pub fn render_oscilloscope(frame: &mut Frame, area: Rect, samples: &[f32]) {
     let max_x = left.len().max(1) as f64;
 
     let datasets = vec![
-        scope_dataset(&left, Color::Cyan),
-        scope_dataset(&right, Color::Magenta),
+        scope_dataset(&left, theme::current().accent),
+        scope_dataset(&right, theme::current().secondary),
     ];
 
     frame.render_widget(scope_chart(datasets, max_x).block(frame_block()), area);

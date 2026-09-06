@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex, mpsc};
 mod api;
 mod auth;
+mod config;
 mod keymap;
+mod theme;
 mod player;
 mod media;
 mod tui;
@@ -16,7 +18,7 @@ USAGE: sctui [OPTIONS]
 OPTIONS:
   -V, --version          print version and exit
   -h, --help             print this help and exit
-      --dump-config      print the default config (key bindings) to stdout and exit
+      --dump-config      print the default config (theme + key bindings) to stdout and exit
       --no-update-check  don't check GitHub for a newer release on startup";
 
 fn main() -> anyhow::Result<()> {
@@ -30,12 +32,12 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     if args.iter().any(|a| a == "--dump-config") {
-        print!("{}", keymap::Keymap::default_toml());
+        print!("{}", config::template());
         return Ok(());
     }
-    let (keys, key_warnings) = keymap::Keymap::load();
-    if !key_warnings.is_empty() {
-        for w in &key_warnings {
+    let loaded = config::load();
+    if !loaded.warnings.is_empty() {
+        for w in &loaded.warnings {
             eprintln!("config: {w}");
         }
         eprintln!("(continuing with the remaining bindings)");
@@ -80,7 +82,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    tui::run(&mut api, player, keys).map_err(|e| anyhow::anyhow!(e))?;
+    tui::run(&mut api, player, loaded).map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())
 }

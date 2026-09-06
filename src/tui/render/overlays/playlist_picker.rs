@@ -1,10 +1,11 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
 };
+use crate::theme;
 
 use crate::api::{Playlist, Track};
 use crate::tui::render::utils::{styled_header, truncate_with_ellipsis};
@@ -54,17 +55,17 @@ pub fn render_playlist_picker(
         let shown: String = title.chars().rev().take(field_width).collect::<Vec<_>>().into_iter().rev().collect();
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" Name: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(format!("{shown}▏"), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(" Name: ", Style::default().fg(theme::current().dim)),
+                Span::styled(format!("{shown}▏"), Style::default().fg(theme::current().fg).add_modifier(Modifier::BOLD)),
             ])),
             name,
         );
 
-        let on = Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD);
-        let off = Style::default().fg(Color::White);
+        let on = Style::default().fg(theme::current().selection_fg).bg(theme::current().selection_bg).add_modifier(Modifier::BOLD);
+        let off = Style::default().fg(theme::current().fg);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" Visibility: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(" Visibility: ", Style::default().fg(theme::current().dim)),
                 Span::styled(" Private ", if public { off } else { on }),
                 Span::raw("  "),
                 Span::styled(" Public ", if public { on } else { off }),
@@ -74,7 +75,7 @@ pub fn render_playlist_picker(
         frame.render_widget(
             Paragraph::new("Enter create  ·  ←/→ visibility  ·  Esc cancel")
                 .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::DarkGray)),
+                .style(Style::default().fg(theme::current().dim)),
             hint,
         );
         return;
@@ -88,7 +89,7 @@ pub fn render_playlist_picker(
     let title_width = (popup_area.width as usize * 70) / 100;
     let mut rows = vec![
         Row::new(vec!["+ New playlist…".to_string(), String::new()])
-            .style(Style::default().fg(Color::Cyan)),
+            .style(Style::default().fg(theme::current().accent)),
     ];
     rows.extend(owned.iter().map(|p| {
         Row::new(vec![
@@ -103,8 +104,8 @@ pub fn render_playlist_picker(
         .column_spacing(1)
         .row_highlight_style(
             Style::default()
-                .bg(Color::LightBlue)
-                .fg(Color::White)
+                .bg(theme::current().selection_bg)
+                .fg(theme::current().fg)
                 .add_modifier(Modifier::BOLD),
         );
 

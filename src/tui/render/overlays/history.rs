@@ -1,9 +1,10 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Block, Borders, Clear, Row, Table, TableState},
 };
+use crate::theme;
 
 use crate::tui::logic::state::QueuedTrack;
 use crate::tui::render::utils::{styled_header, truncate_with_ellipsis};
@@ -21,7 +22,7 @@ pub fn render_history(frame: &mut Frame, history: &[QueuedTrack], selected: usiz
     let artist_width = (total_width * 25) / 100;
 
     let rows: Vec<Row> = if history.is_empty() {
-        vec![Row::new(vec!["No history yet", "", ""]).style(Style::default().fg(Color::DarkGray))]
+        vec![Row::new(vec!["No history yet", "", ""]).style(Style::default().fg(theme::current().dim))]
     } else {
         history
             .iter()
@@ -34,7 +35,7 @@ pub fn render_history(frame: &mut Frame, history: &[QueuedTrack], selected: usiz
                     track.duration.clone(),
                 ]);
                 if !track.is_playable() {
-                    row = row.style(Style::default().fg(Color::DarkGray));
+                    row = row.style(Style::default().fg(theme::current().dim));
                 }
                 row
             })
@@ -60,8 +61,8 @@ pub fn render_history(frame: &mut Frame, history: &[QueuedTrack], selected: usiz
     .column_spacing(1)
     .row_highlight_style(
         Style::default()
-            .bg(Color::LightBlue)
-            .fg(Color::White)
+            .bg(theme::current().selection_bg)
+            .fg(theme::current().fg)
             .add_modifier(Modifier::BOLD),
     );
 

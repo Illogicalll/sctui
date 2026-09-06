@@ -1,10 +1,11 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Span,
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, Tabs},
 };
+use crate::theme;
 
 use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, SEARCHFILTERS};
 
@@ -42,12 +43,12 @@ pub fn render_search(
     let (input_text, input_style) = if state.search_typing {
         (
             format!("{}▏", state.query),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::current().fg).add_modifier(Modifier::BOLD),
         )
     } else if state.query.is_empty() {
-        ("press / to search".to_string(), Style::default().fg(Color::DarkGray))
+        ("press / to search".to_string(), Style::default().fg(theme::current().dim))
     } else {
-        (state.query.clone(), Style::default().fg(Color::White))
+        (state.query.clone(), Style::default().fg(theme::current().fg))
     };
     let input = Paragraph::new(input_text)
         .style(input_style)
@@ -126,7 +127,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&playlist.duration, left_min_widths[3]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
+                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
                 }
                 row
             })
@@ -189,7 +190,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&album.duration, left_min_widths[5]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
+                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
                 }
                 row
             })
@@ -245,7 +246,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&artist.name, left_min_widths[1]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
+                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
                 }
                 row
             })
@@ -319,10 +320,10 @@ pub fn render_search(
                 .border_type(ratatui::widgets::BorderType::Rounded),
         )
         .select(selected_searchfilter)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::current().fg))
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::current().accent)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_widget(searchfilter_widget, subchunks[2]);

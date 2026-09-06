@@ -55,7 +55,7 @@ pub(crate) fn handle_help_input(key: KeyEvent, state: &mut AppState) -> InputOut
 
 /// Persist and decorate the message with the outcome.
 fn saved(state: &AppState, msg: String) -> String {
-    match state.keymap.save() {
+    match crate::config::save(&state.keymap, &state.theme_name, &state.theme_overrides) {
         Ok(()) => format!("{msg}  · saved"),
         Err(e) => format!("{msg}  · NOT saved: {e}"),
     }

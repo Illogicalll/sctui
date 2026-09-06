@@ -2,6 +2,7 @@ mod confirm;
 mod help;
 mod history;
 mod playlist_picker;
+mod theme_picker;
 mod queue;
 mod quit;
 mod utils;
@@ -56,6 +57,10 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
 
     if let Some(action) = &state.confirm {
         confirm::render_confirm(frame, &action.message(data), state.confirm_selected);
+    }
+
+    if state.theme_picker_visible {
+        theme_picker::render_theme_picker(frame, state.theme_picker_selected, &state.theme_name);
     }
 
     if state.help_visible {

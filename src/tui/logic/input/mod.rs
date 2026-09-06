@@ -13,6 +13,7 @@ mod movement;
 mod playback;
 mod history;
 mod help_editor;
+mod theme_picker;
 mod confirm;
 mod playlist_picker;
 mod queue;
@@ -54,6 +55,9 @@ pub fn handle_key_event(
     }
     if state.help_visible {
         return help_editor::handle_help_input(key, state);
+    }
+    if state.theme_picker_visible {
+        return theme_picker::handle_theme_picker_input(key, state);
     }
     if state.confirm.is_some() {
         return confirm::handle_confirm_input(key, state, data);

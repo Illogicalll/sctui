@@ -6,11 +6,12 @@ mod visualizer;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use crate::theme;
 
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Span,
     widgets::{Block, BorderType, Borders, Tabs},
 };
@@ -88,10 +89,10 @@ fn render_tabs(frame: &mut Frame, area: ratatui::layout::Rect, tab_titles: &[&st
                 .border_type(BorderType::Rounded),
         )
         .select(selected)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::current().fg))
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::current().accent)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_widget(tabs_widget, area);

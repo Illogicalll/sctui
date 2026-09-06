@@ -39,7 +39,6 @@ use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::helpers::reset_search_rows;
 use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
-use crate::keymap::Keymap;
 use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
@@ -99,7 +98,7 @@ enum Msg {
     Engagement(Engagement),
 }
 
-pub fn run(api: &mut Arc<Mutex<API>>, player: Player, keymap: Keymap) -> anyhow::Result<()> {
+pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
     // Lets terminals that speak the kitty keyboard protocol report Shift+Enter; others still
@@ -111,7 +110,7 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player, keymap: Keymap) -> anyhow:
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         );
     }
-    let result = start(terminal, api, player, keymap);
+    let result = start(terminal, api, player, config);
     if enhanced_keys {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     }
@@ -167,10 +166,12 @@ fn start(
     mut terminal: DefaultTerminal,
     api: &mut Arc<Mutex<API>>,
     player: Player,
-    keymap: Keymap,
+    config: crate::config::Loaded,
 ) -> anyhow::Result<()> {
     let mut state = AppState::default();
-    state.keymap = keymap;
+    state.keymap = config.keymap;
+    state.theme_name = config.theme_name;
+    state.theme_overrides = config.theme_overrides;
 
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;

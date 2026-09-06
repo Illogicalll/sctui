@@ -1,9 +1,10 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::{Style},
     widgets::{Block, BorderType, Borders, Row, Table},
 };
+use crate::theme;
 
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::render::tabs::library::{TRACK_HEADER, TRACK_WIDTHS, track_cells, track_table};
@@ -35,9 +36,9 @@ pub fn render_feed(frame: &mut Frame, area: Rect, state: &AppState, data: &mut A
         if i != state.selected_row {
             row
         } else if state.info_pane_selected {
-            row.style(Style::default().bg(Color::Gray).fg(Color::Black))
+            row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
         } else {
-            row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+            row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
         }
     });
     let table = Table::new(rows, col_widths)

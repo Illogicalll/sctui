@@ -1,10 +1,11 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Span,
     widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
 };
+use crate::theme;
 
 use crate::api::Track;
 use crate::tui::logic::filtering::{FilteredViews, is_filter_active};
@@ -89,10 +90,10 @@ pub fn render_library(
                 .border_type(BorderType::Rounded),
         )
         .select(selected_subtab)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::current().fg))
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::current().accent)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_widget(subtabs_widget, subchunks[0]);
@@ -197,7 +198,7 @@ pub fn render_library(
         .enumerate()
         .map(|(i, row)| {
             if i == selected_row {
-                row.style(Style::default().bg(Color::Gray).fg(Color::Black))
+                row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
             } else {
                 row
             }
@@ -359,17 +360,17 @@ pub(super) fn track_table(
                 .map(|(cell, &w)| truncate_with_ellipsis(cell, w)),
         );
         if !track.is_playable() {
-            row = row.style(Style::default().fg(Color::DarkGray));
+            row = row.style(Style::default().fg(theme::current().dim));
         }
         if i == selected {
             row = if track.is_playable() {
                 if focused {
-                    row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
+                    row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
                 } else {
-                    row.style(Style::default().bg(Color::Gray).fg(Color::Black))
+                    row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
                 }
             } else {
-                row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
+                row.style(Style::default().bg(theme::current().dim).fg(theme::current().muted))
             };
         }
         row

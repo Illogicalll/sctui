@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use crate::theme;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use ratatui_image::thread::ThreadProtocol;
 
@@ -89,7 +90,7 @@ fn render_now_playing_overlay(frame: &mut Frame, area: Rect, track: &Track) {
         Span::styled(
             text,
             Style::default()
-                .fg(Color::White)
+                .fg(theme::current().fg)
                 .add_modifier(Modifier::BOLD),
         ),
         Rect::new(x, y, (area.width - 4).min(max as u16), 1),

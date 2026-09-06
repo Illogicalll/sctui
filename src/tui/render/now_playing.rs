@@ -1,12 +1,13 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     symbols::{self},
     text::{Span, Text},
     widgets::{Axis, Block, Chart, Dataset, Gauge, Paragraph},
 };
 use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
+use crate::theme;
 
 use crate::api::format_duration;
 use crate::player::Player;
@@ -115,14 +116,14 @@ pub fn render_now_playing(
             format_duration(state.progress),
             selected_track.duration.clone()
         ),
-        Style::default().fg(Color::White),
+        Style::default().fg(theme::current().fg),
     );
 
     let ratio = (progress_float / max_time).min(1.0).max(0.0);
 
     let progress_bar = Gauge::default()
-        .style(Style::default().bg(Color::LightBlue))
-        .gauge_style(Color::Cyan)
+        .style(Style::default().bg(theme::current().selection_bg))
+        .gauge_style(theme::current().accent)
         .ratio(ratio)
         .label(label);
 
@@ -155,7 +156,7 @@ pub fn render_now_playing(
     let datasets = vec![
         Dataset::default()
             .marker(symbols::Marker::Braille)
-            .style(Style::default().fg(Color::Cyan))
+            .style(Style::default().fg(theme::current().accent))
             .data(&data),
     ];
 

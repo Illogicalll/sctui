@@ -1,12 +1,13 @@
 use ratatui::{
     layout::Constraint,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Cell, Row},
 };
+use crate::theme;
 
 pub fn styled_header(cells: &[&str]) -> Row<'static> {
     let style = Style::default()
-        .fg(Color::Magenta)
+        .fg(theme::current().secondary)
         .add_modifier(Modifier::BOLD);
     let cells: Vec<Cell> = cells
         .iter()

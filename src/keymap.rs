@@ -61,10 +61,11 @@ pub enum Action {
     NewPlaylist,
     RemoveFromPlaylist,
     DeletePlaylist,
+    Themes,
 }
 
 impl Action {
-    pub const ALL: [Action; 36] = [
+    pub const ALL: [Action; 37] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
@@ -101,6 +102,7 @@ impl Action {
         Action::NewPlaylist,
         Action::RemoveFromPlaylist,
         Action::DeletePlaylist,
+        Action::Themes,
     ];
 
     /// Name used in the config file.
@@ -142,6 +144,7 @@ impl Action {
             Action::NewPlaylist => "new_playlist",
             Action::RemoveFromPlaylist => "remove_from_playlist",
             Action::DeletePlaylist => "delete_playlist",
+            Action::Themes => "themes",
         }
     }
 
@@ -184,6 +187,7 @@ impl Action {
             Action::NewPlaylist => "Create an empty playlist (Playlists tab)",
             Action::RemoveFromPlaylist => "Remove the selected track from your open playlist",
             Action::DeletePlaylist => "Delete the selected playlist of yours",
+            Action::Themes => "Choose a colour theme",
         }
     }
 
@@ -232,6 +236,7 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::NewPlaylist, &["shift+c"]),
     (Action::RemoveFromPlaylist, &["shift+d"]),
     (Action::DeletePlaylist, &["shift+x"]),
+    (Action::Themes, &["shift+o"]),
 ];
 
 /// A normalised key press: letters are lowercase with Shift as a modifier,
@@ -509,20 +514,6 @@ impl Keymap {
         warnings
     }
 
-    pub fn config_path() -> std::path::PathBuf {
-        crate::auth::config_dir().join("config.toml")
-    }
-
-    /// Defaults plus the user's `config.toml` if there is one.
-    pub fn load() -> (Keymap, Vec<String>) {
-        let mut km = Keymap::default();
-        let warnings = match std::fs::read_to_string(Self::config_path()) {
-            Ok(text) => km.apply_toml(&text),
-            Err(_) => Vec::new(),
-        };
-        (km, warnings)
-    }
-
     /// Which action owns `chord`, if any.
     pub fn bound_to(&self, chord: Chord) -> Option<Action> {
         self.bindings.get(&chord).copied()
@@ -572,33 +563,18 @@ impl Keymap {
         taken
     }
 
-    /// Write the bindings to `config.toml`. Only actions that differ from the
-    /// defaults are written, so future default changes still reach the user.
-    pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::config_path();
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, self.to_toml(true))
-    }
-
-    /// A complete config file with the defaults, for `sctui --dump-config`.
-    pub fn default_toml() -> String {
-        Keymap::default().to_toml(false)
-    }
-
-    /// The bindings as a commented config file; with `only_overrides`, just
-    /// the actions that differ from the defaults (unlisted = default).
-    pub fn to_toml(&self, only_overrides: bool) -> String {
+    /// The `[keys]` section of the config file, commented; with
+    /// `only_overrides`, just the actions that differ from the defaults
+    /// (unlisted = default).
+    pub fn keys_section(&self, only_overrides: bool) -> String {
         let km = self;
         let defaults = Keymap::default();
         let mut out = String::from(
-            "# sctui key bindings. Save as ~/.config/sctui/config.toml (or $XDG_CONFIG_HOME/sctui/).\n\
-             # Each action takes one chord or a list; an empty list unbinds it.\n\
+            "# Key bindings. Each action takes one chord or a list; an empty list unbinds it.\n\
              # Chords: modifiers shift / ctrl / alt joined with +, then a key: a character, space,\n\
              # enter, tab, esc, backspace, delete, insert, home, end, pageup, pagedown,\n\
              # up, down, left, right, f1..f12. An uppercase letter means shift. Bare + is the plus key.\n\
-             # Note: shift+enter needs a terminal with the kitty keyboard protocol.\n\n[keys]\n",
+             # Note: shift+enter needs a terminal with the kitty keyboard protocol.\n[keys]\n",
         );
         if only_overrides {
             out.push_str("# Only actions listed here are changed; everything else keeps its default.\n\n");
@@ -700,7 +676,7 @@ mod tests {
         assert!(km.chords(Action::Help).is_empty());
         assert!(notes[0].contains("stays with quit"));
         // Saved form lists only the edited actions and reloads identically.
-        let text = km.to_toml(true);
+        let text = km.keys_section(true);
         assert!(text.contains("quit = "), "edited action is written");
         assert!(text.contains("help = []"), "unbound action is written");
         assert!(!text.contains("\nnext_tab = "), "untouched action is left to the defaults");
@@ -712,7 +688,7 @@ mod tests {
 
     #[test]
     fn dumped_config_round_trips() {
-        let text = Keymap::default_toml();
+        let text = crate::config::template();
         let mut km = Keymap::default();
         assert!(km.apply_toml(&text).is_empty(), "dump must re-load cleanly");
         for action in Action::ALL {

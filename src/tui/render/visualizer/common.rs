@@ -103,16 +103,10 @@ pub fn downsample(samples: &[f32], max_points: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Visualiser gradient between the theme's accent and secondary colours.
+/// (Named for what it was before themes existed.)
 pub fn gradient_cyan_magenta(t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    let (r0, g0, b0) = (0u8, 255u8, 255u8);
-    let (r1, g1, b1) = (255u8, 0u8, 255u8);
-
-    let lerp = |a: u8, b: u8| -> u8 {
-        (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
-    };
-
-    Color::Rgb(lerp(r0, r1), lerp(g0, g1), lerp(b0, b1))
+    crate::theme::current().gradient(t)
 }
 
 /// Scale an RGB colour's brightness by `k` (0..1).

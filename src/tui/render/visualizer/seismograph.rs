@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+use crate::theme;
 
 use ratatui::{
     Frame,
@@ -82,8 +83,8 @@ pub fn render_seismograph(frame: &mut Frame, area: Rect, samples: &[f32]) {
             })
             .collect()
     };
-    let left_lines = polyline(&state.left, 1.0, Color::Cyan);
-    let right_lines = polyline(&state.right, -1.0, Color::Magenta);
+    let left_lines = polyline(&state.left, 1.0, theme::current().accent);
+    let right_lines = polyline(&state.right, -1.0, theme::current().secondary);
     drop(state);
 
     let baseline = Line {
@@ -91,7 +92,7 @@ pub fn render_seismograph(frame: &mut Frame, area: Rect, samples: &[f32]) {
         y1: cy,
         x2: w - 1.0,
         y2: cy,
-        color: dim(Color::Rgb(255, 255, 255), 0.2),
+        color: dim(theme::current().fg, 0.2),
     };
 
     let canvas = Canvas::default()

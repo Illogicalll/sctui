@@ -5,14 +5,24 @@ use ratatui::{
     text::Line,
     widgets::{Clear, Paragraph, Wrap},
 };
+use crate::theme;
 
 use crate::tui::logic::state::LyricsStatus;
 
 use super::common::frame_block;
 
-const CURRENT: Color = Color::Cyan;
-const NEAR: Color = Color::Rgb(150, 150, 165);
-const FAR: Color = Color::Rgb(85, 85, 100);
+#[allow(non_snake_case)]
+fn CURRENT() -> Color {
+    theme::current().accent
+}
+#[allow(non_snake_case)]
+fn NEAR() -> Color {
+    theme::current().muted
+}
+#[allow(non_snake_case)]
+fn FAR() -> Color {
+    theme::current().dim
+}
 
 /// Lyrics for the playing track: synced lines keep the current one centred,
 /// plain lyrics scroll with playback, otherwise a one-line notice.
@@ -34,7 +44,7 @@ pub fn render_lyrics(
     let notice = |text: &str| {
         let pad = inner.height / 2;
         let mut lines = vec![Line::raw(""); pad as usize];
-        lines.push(Line::styled(text.to_string(), Style::default().fg(FAR)));
+        lines.push(Line::styled(text.to_string(), Style::default().fg(FAR())));
         Paragraph::new(lines).alignment(Alignment::Center)
     };
 
@@ -62,19 +72,19 @@ pub fn render_lyrics(
                 let text = lines[li as usize].1.as_str();
                 let text = if text.is_empty() { "♪" } else { text };
                 let style = if Some(li as usize) == current {
-                    Style::default().fg(CURRENT).add_modifier(Modifier::BOLD)
+                    Style::default().fg(CURRENT()).add_modifier(Modifier::BOLD)
                 } else if row.abs_diff(centre) <= 2 {
-                    Style::default().fg(NEAR)
+                    Style::default().fg(NEAR())
                 } else {
-                    Style::default().fg(FAR)
+                    Style::default().fg(FAR())
                 };
                 out.push(Line::styled(text.to_string(), style));
             }
             frame.render_widget(Paragraph::new(out).alignment(Alignment::Center), inner);
         }
         LyricsStatus::Found(lyrics) => {
-            let mut out = vec![Line::styled("(unsynced lyrics)", Style::default().fg(FAR)), Line::raw("")];
-            out.extend(lyrics.plain.iter().map(|l| Line::styled(l.clone(), Style::default().fg(NEAR))));
+            let mut out = vec![Line::styled("(unsynced lyrics)", Style::default().fg(FAR())), Line::raw("")];
+            out.extend(lyrics.plain.iter().map(|l| Line::styled(l.clone(), Style::default().fg(NEAR()))));
             let visible = inner.height as usize;
             let overflow = out.len().saturating_sub(visible);
             let fraction = if duration_ms == 0 { 0.0 } else { (progress_ms as f64 / duration_ms as f64).clamp(0.0, 1.0) };

@@ -1,9 +1,10 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
 };
+use crate::theme;
 
 use crate::keymap::Action;
 use crate::tui::logic::state::AppState;
@@ -36,7 +37,7 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
             let keys = state.keymap.labels(*action);
             let mut row = Row::new(vec![action.description().to_string(), keys.clone()]);
             if keys == "unbound" {
-                row = row.style(Style::default().fg(Color::DarkGray));
+                row = row.style(Style::default().fg(theme::current().dim));
             }
             row
         })
@@ -47,22 +48,22 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
         .column_spacing(1)
         .row_highlight_style(
             Style::default()
-                .bg(Color::LightBlue)
-                .fg(Color::White)
+                .bg(theme::current().selection_bg)
+                .fg(theme::current().fg)
                 .add_modifier(Modifier::BOLD),
         );
     let mut table_state = TableState::default().with_selected(Some(state.help_selected));
     frame.render_stateful_widget(table, table_area, &mut table_state);
 
     let (status, status_style) = match (&state.help_capture, &state.help_message) {
-        (Some(_), Some(msg)) => (msg.clone(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        (_, Some(msg)) => (msg.clone(), Style::default().fg(Color::Cyan)),
+        (Some(_), Some(msg)) => (msg.clone(), Style::default().fg(theme::current().warning).add_modifier(Modifier::BOLD)),
+        (_, Some(msg)) => (msg.clone(), Style::default().fg(theme::current().accent)),
         _ => (String::new(), Style::default()),
     };
     frame.render_widget(Paragraph::new(status).style(status_style).alignment(Alignment::Center), status_area);
     frame.render_widget(
         Paragraph::new("Enter: add key   Backspace: unbind   r: default   ↑↓: move   Esc: close   ·  saved to ~/.config/sctui/config.toml")
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme::current().dim))
             .alignment(Alignment::Center),
         hint_area,
     );
