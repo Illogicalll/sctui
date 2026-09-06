@@ -8,13 +8,14 @@ use ratatui::text::Span;
 use ratatui_image::thread::ThreadProtocol;
 
 use crate::api::Track;
-use crate::tui::logic::state::VisualizerMode;
+use crate::tui::logic::state::{LyricsStatus, VisualizerMode};
 
 mod common;
 mod cover;
 mod oscilloscope;
 mod spectrum;
 mod interference;
+mod lyrics;
 mod fountain;
 mod stacked;
 mod seismograph;
@@ -33,6 +34,7 @@ pub fn render_visualizer(
     track: &Track,
     progress_ms: u64,
     cover_art: &mut ThreadProtocol,
+    lyrics: &LyricsStatus,
 ) {
     let samples: Vec<f32> = {
         let buffer = wave_buffer.lock().unwrap();
@@ -52,6 +54,9 @@ pub fn render_visualizer(
         VisualizerMode::StackedScope => stacked::render_stacked_scope(frame, area, &samples),
         VisualizerMode::ParticleFountain => fountain::render_particle_fountain(frame, area, &samples),
         VisualizerMode::InterferenceField => interference::render_interference_field(frame, area, &samples),
+        VisualizerMode::Lyrics => {
+            lyrics::render_lyrics(frame, area, lyrics, progress_ms, track.duration_ms)
+        }
         VisualizerMode::NowPlaying => {
             // Shows title/artist itself; the border overlay would be redundant.
             return cover::render_now_playing(frame, area, track, progress_ms, cover_art);
@@ -109,6 +114,46 @@ mod tests {
             .collect()
     }
 
+    fn sample_lyrics() -> LyricsStatus {
+        LyricsStatus::Found(crate::api::Lyrics {
+            synced: vec![
+                (5_000, "Intro line".into()),
+                (100_000, "Current line".into()),
+                (120_000, "Later line".into()),
+            ],
+            plain: vec![],
+        })
+    }
+
+    #[test]
+    fn lyrics_mode_centres_the_current_line() {
+        let wave = Arc::new(Mutex::new(VecDeque::new()));
+        let track = track();
+        let mut terminal = Terminal::new(TestBackend::new(60, 11)).unwrap();
+        let mut proto = empty_protocol();
+        terminal
+            .draw(|f| {
+                render_visualizer(f, f.area(), &wave, VisualizerMode::Lyrics, &track, 102_000, &mut proto, &sample_lyrics())
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let row = |y: u16| (0..60).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>();
+        let screen: Vec<String> = (0..11).map(row).collect();
+        let current = screen.iter().position(|r| r.contains("Current line")).expect("current line shown");
+        assert_eq!(current, 5, "current line sits in the middle row of the 9-row inner area");
+        assert!(screen[current - 1].contains("Intro line"));
+        assert!(screen[current + 1].contains("Later line"));
+        // Nothing found: the notice.
+        terminal
+            .draw(|f| {
+                render_visualizer(f, f.area(), &wave, VisualizerMode::Lyrics, &track, 0, &mut proto, &LyricsStatus::NotFound)
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let all: String = (0..11).map(|y| (0..60).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>()).collect();
+        assert!(all.contains("No lyrics found for this track"));
+    }
+
     fn empty_protocol() -> ThreadProtocol {
         let (tx, _rx) = std::sync::mpsc::channel();
         ThreadProtocol::new(tx, None)
@@ -140,7 +185,7 @@ mod tests {
                 let mut proto = empty_protocol();
                 terminal
                     .draw(|f| {
-                        render_visualizer(f, f.area(), &wave, mode, &track, 102_000, &mut proto)
+                        render_visualizer(f, f.area(), &wave, mode, &track, 102_000, &mut proto, &sample_lyrics())
                     })
                     .unwrap();
             }
@@ -176,7 +221,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
             let mut proto = empty_protocol();
             terminal
-                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track, 0, &mut proto))
+                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track, 0, &mut proto, &LyricsStatus::NotFound))
                 .unwrap();
         }
     }

@@ -18,6 +18,8 @@ pub use calls::search::{
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
 };
 pub use models::{Activity, Album, Artist, Playlist, Track};
+pub mod lyrics;
+pub use lyrics::{Lyrics, fetch_lyrics};
 pub(crate) use utils::format_duration;
 
 /// Cursor over one `linked_partitioning` list.

@@ -105,9 +105,13 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center">Shift + P opens everything you have listened to this session, newest first. Pick any track to hear it again</p>
 
+### 🎤 Lyrics
+
+<p align="center">A Lyrics mode in the visualiser shows time-synced lyrics from <a href="https://lrclib.net">LRCLIB</a> with the current line centred, falls back to plain lyrics when that is all there is, and says so when there are none. Coverage is best for released music; SoundCloud-only uploads often have nothing</p>
+
 ### 👁️ Audio Visualiser
 
-<p align="center">Choose from one of 13 modes, from oscilloscopes to spectrums and more...</p>
+<p align="center">Choose from one of 14 modes, from oscilloscopes to spectrums and more...</p>
 
 <p align="center"><img src="./media/visualiser.gif" alt="Visualiser" width="480" /></p>
 

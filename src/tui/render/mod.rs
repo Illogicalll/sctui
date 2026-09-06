@@ -53,6 +53,7 @@ pub fn render(
             &player.current_track(),
             state.progress,
             cover_art_async,
+            &state.lyrics,
         );
         overlays::render_overlays(frame, state, data);
         return;

@@ -1,4 +1,5 @@
 use crate::api::{API, Activity, Album, Artist, Playlist, Track};
+use crate::api::Lyrics;
 use crate::keymap::Keymap;
 use ratatui::widgets::TableState;
 use std::collections::{HashSet, VecDeque};
@@ -14,6 +15,16 @@ pub enum PlaybackSource {
     Feed,
     /// Related-track chain started by Shift+Enter or by a list running out.
     Radio,
+}
+
+/// Lyrics for the track that is playing.
+#[derive(Clone, Default)]
+pub enum LyricsStatus {
+    #[default]
+    Idle,
+    Loading,
+    NotFound,
+    Found(Lyrics),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -32,10 +43,11 @@ pub enum VisualizerMode {
     ParticleFountain,
     InterferenceField,
     NowPlaying,
+    Lyrics,
 }
 
 impl VisualizerMode {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Oscilloscope,
         Self::SpectrumBars,
         Self::MirrorSpectrum,
@@ -49,6 +61,7 @@ impl VisualizerMode {
         Self::ParticleFountain,
         Self::InterferenceField,
         Self::NowPlaying,
+        Self::Lyrics,
     ];
 
     pub fn next(self) -> Self {
@@ -345,6 +358,9 @@ pub struct AppState {
     pub engagement_queue: VecDeque<Engagement>,
     pub following_tracks_focus: FollowingTracksFocus,
     pub keymap: Keymap,
+    pub lyrics: LyricsStatus,
+    /// Track the lyrics above belong to (or are being fetched for).
+    pub lyrics_track_urn: Option<String>,
     /// Key editor (the `?` popup): highlighted action, pending capture, last message.
     pub help_selected: usize,
     pub help_capture: Option<crate::keymap::Action>,

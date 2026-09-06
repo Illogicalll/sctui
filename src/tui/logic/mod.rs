@@ -4,6 +4,7 @@ pub(crate) mod state;
 pub(crate) mod utils;
 
 use crate::api::{
+    Lyrics, fetch_lyrics,
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
     fetch_related_tracks,
     API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
@@ -40,7 +41,7 @@ use self::input::helpers::reset_search_rows;
 use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::keymap::Keymap;
 use crate::media::{Media, MediaCommand};
-use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource, PlaylistEdit};
+use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
     active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
@@ -90,6 +91,8 @@ enum Msg {
     Related(u64, Vec<Track>),
     /// A playlist the user just created, to show at the top of the library.
     PlaylistCreated(Playlist),
+    /// Lyrics lookup result for a track URN (`None` = nothing found).
+    Lyrics(String, Option<Lyrics>),
     Engagement(Engagement),
 }
 
@@ -220,6 +223,7 @@ fn start(
     // was last told so it is only updated on change, plus a periodic position re-sync.
     let (mut media, media_rx) = Media::new();
     let mut media_track_urn: Option<String> = None;
+    let mut lyrics_cache: std::collections::HashMap<String, Option<Lyrics>> = std::collections::HashMap::new();
     let mut media_cover: Option<std::path::PathBuf> = None;
     let mut media_playing: Option<bool> = None;
     let mut media_synced_at = Instant::now();
@@ -327,6 +331,15 @@ fn start(
                         data.playlists_state.select(Some(state.selected_row));
                     }
                     data.playlists.insert(0, playlist);
+                }
+                Msg::Lyrics(urn, found) => {
+                    lyrics_cache.insert(urn.clone(), found.clone());
+                    if state.lyrics_track_urn.as_deref() == Some(urn.as_str()) {
+                        state.lyrics = match found {
+                            Some(l) => LyricsStatus::Found(l),
+                            None => LyricsStatus::NotFound,
+                        };
+                    }
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
             }
@@ -807,6 +820,25 @@ fn start(
                     media_playing = None;
                 }
             } else {
+                // Lyrics follow the playing track; looked up once per track per session.
+                if state.lyrics_track_urn.as_deref() != Some(track.track_urn.as_str()) {
+                    state.lyrics_track_urn = Some(track.track_urn.clone());
+                    match lyrics_cache.get(&track.track_urn) {
+                        Some(Some(l)) => state.lyrics = LyricsStatus::Found(l.clone()),
+                        Some(None) => state.lyrics = LyricsStatus::NotFound,
+                        None => {
+                            state.lyrics = LyricsStatus::Loading;
+                            let tx = tx.clone();
+                            let t = track.clone();
+                            async_rt.spawn(async move {
+                                let urn = t.track_urn.clone();
+                                let found = fetch_lyrics(t).await;
+                                let _ = tx.send(Msg::Lyrics(urn, found));
+                            });
+                        }
+                    }
+                }
+
                 let changed_track = media_track_urn.as_deref() != Some(track.track_urn.as_str());
                 // Artwork is sent once its local copy exists (it arrives after the metadata).
                 let cover = last_artwork_file
