@@ -130,12 +130,12 @@ Press `?` in the app for the full list. The defaults:
 | `↑` `↓` or `k` `j` | move; `PageUp` `PageDown` by ten |
 | `Shift+↑` `Shift+↓` or `Shift+K` `Shift+J` | second pane (by ten where there is only one pane); `Alt+↑` `Alt+↓` third pane |
 | `Space`, `Enter`, `Shift+Enter` | play/pause, play selected, start a station |
-| `Shift+→` `Shift+←` or `n` `b` | next / previous track |
+| `Shift+→` `Shift+←` or `Shift+N` `Shift+B` | next / previous track |
 | `Alt+→` `Alt+←` or `Shift+L` `Shift+H` | seek ±10 s |
 | `+` `-` | volume |
 | `Shift+S` `Shift+R` | shuffle, repeat |
 | `Shift+F` | like / follow |
-| `Shift+A` `Shift+N` `Shift+Q` | add to queue, play next, show queue |
+| `Shift+A` `Shift+U` `Shift+Q` | add to queue, play next ("up next"), show queue |
 | `Shift+P` | listening history |
 | `/` | search (Search tab) or filter the list (Library); `Enter`/`Esc` leave the field. Shift-key commands work while typing (uppercase needs Caps Lock) |
 | `Shift+V` | visualiser (`Tab` cycles modes) |
