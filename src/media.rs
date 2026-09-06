@@ -168,7 +168,7 @@ mod win {
         pub fn create() -> Option<Self> {
             let class_name: Vec<u16> = "sctui_media\0".encode_utf16().collect();
             unsafe {
-                let instance = HINSTANCE(GetModuleHandleW(None).ok()?.0);
+                let instance: HINSTANCE = GetModuleHandleW(PCWSTR::null()).ok()?;
                 let class = WNDCLASSW {
                     lpfnWndProc: Some(wnd_proc),
                     hInstance: instance,
