@@ -594,9 +594,8 @@ fn start(
         if state.playback_source == PlaybackSource::Radio
             && state.manual_queue.is_empty()
             && state.auto_queue.len() <= 1
-        {
-            if let Some(seed) = data.playback_tracks.last().map(|t| t.track_urn.clone()) {
-                if state.radio_fetched_for.as_deref() != Some(seed.as_str()) {
+            && let Some(seed) = data.playback_tracks.last().map(|t| t.track_urn.clone())
+                && state.radio_fetched_for.as_deref() != Some(seed.as_str()) {
                     state.radio_fetched_for = Some(seed.clone());
                     state.radio_fetch.cancel();
                     let id = state.radio_fetch.request_id;
@@ -606,8 +605,6 @@ fn start(
                         Msg::Related,
                     ));
                 }
-            }
-        }
 
         // Enter in the feed: keep the queue going with the items after the one playing, in
         // feed order. Track items are appended at once; sets are fetched one at a time.
@@ -951,8 +948,8 @@ fn start(
                     && state.progress < current_track.duration_ms.saturating_sub(100)
                     && state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str());
                 
-                if should_preload {
-                    if let Some(current_idx) = state.current_playing_index {
+                if should_preload
+                    && let Some(current_idx) = state.current_playing_index {
                         let next_track = {
                             let tracks = active_tracks(&state, &data);
                             if state.repeat_enabled {
@@ -981,7 +978,6 @@ fn start(
                             None => {}
                         }
                     }
-                }
 
                 if state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str()) {
                     state.preload_triggered_for_track_urn = None;
@@ -1001,29 +997,27 @@ fn start(
                             player.play(track.clone());
                             state.override_playing = None;
                         }
+                        } else if let Some(queued) = state.manual_queue.pop_front() {
+                        if let Some(current) = queued_from_current(&state, &data) {
+                            state.playback_history.push(current);
+                        }
+                            play_queued_track(queued, &mut state, &mut data, &player, true);
+                        } else if let Some(next_idx) = state.auto_queue.pop_front() {
+                            if let Some(track) = active_tracks(&state, &data).get(next_idx) {
+                                if let Some(current) = queued_from_current(&state, &data) {
+                                    state.playback_history.push(current);
+                                }
+                                player.play(track.clone());
+                                state.override_playing = None;
+                                state.current_playing_index = Some(next_idx);
+                            }
                         } else {
-                            if let Some(queued) = state.manual_queue.pop_front() {
-                            if let Some(current) = queued_from_current(&state, &data) {
-                                state.playback_history.push(current);
+                            // Nothing queued: related tracks are (or are about to be) on
+                            // their way; Msg::Related starts the next one.
+                            if state.playback_source != PlaybackSource::Radio {
+                                enter_radio(&mut state, &mut data, current_track.clone());
                             }
-                                play_queued_track(queued, &mut state, &mut data, &player, true);
-                            } else if let Some(next_idx) = state.auto_queue.pop_front() {
-                                if let Some(track) = active_tracks(&state, &data).get(next_idx) {
-                                    if let Some(current) = queued_from_current(&state, &data) {
-                                        state.playback_history.push(current);
-                                    }
-                                    player.play(track.clone());
-                                    state.override_playing = None;
-                                    state.current_playing_index = Some(next_idx);
-                                }
-                            } else {
-                                // Nothing queued: related tracks are (or are about to be) on
-                                // their way; Msg::Related starts the next one.
-                                if state.playback_source != PlaybackSource::Radio {
-                                    enter_radio(&mut state, &mut data, current_track.clone());
-                                }
-                                state.radio_waiting = true;
-                            }
+                            state.radio_waiting = true;
                         }
                     }
                 }

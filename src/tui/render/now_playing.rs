@@ -106,7 +106,7 @@ pub fn render_now_playing(
 
     frame.render_widget(artist, subsubchunks[3]);
 
-    let max_time: f64 = selected_track.duration_ms.clone() as f64;
+    let max_time: f64 = selected_track.duration_ms as f64;
 
     let progress_float = state.progress as f64;
 
@@ -132,13 +132,11 @@ pub fn render_now_playing(
     let shuffle_indicator = if state.shuffle_enabled { "✔︎" } else { "×" };
     let repeat_indicator = if state.repeat_enabled { "✔︎" } else { "×" };
 
-    let lines = vec![
-        "".to_string(),
+    let lines = ["".to_string(),
         "".to_string(),
         format!("shf:   {}", shuffle_indicator),
         format!("vol: {:.1}", player.get_volume()),
-        format!("rep:   {}", repeat_indicator),
-    ];
+        format!("rep:   {}", repeat_indicator)];
 
     let text = Text::from(lines.join("\n"));
 

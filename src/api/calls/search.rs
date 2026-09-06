@@ -1,9 +1,10 @@
 use chrono::{DateTime, FixedOffset, Utc};
-use reqwest;
 
-use crate::auth::{Token, try_refresh_token};
+use crate::auth::Token;
 
-use super::super::utils::{format_duration, parse_str, parse_track, parse_u64, response_items};
+use super::super::utils::{
+    access_token, format_duration, parse_str, parse_track, parse_u64, response_items,
+};
 use crate::api::{Album, Artist, Playlist, Track};
 use std::sync::{Arc, Mutex};
 
@@ -17,9 +18,7 @@ pub async fn fetch_search_tracks(
     token: Arc<Mutex<Token>>,
     query: String,
 ) -> anyhow::Result<Vec<Track>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
 
     let resp: serde_json::Value = reqwest::Client::new()
         .get("https://api.soundcloud.com/tracks")
@@ -43,9 +42,7 @@ pub async fn fetch_search_albums(
     token: Arc<Mutex<Token>>,
     query: String,
 ) -> anyhow::Result<Vec<Album>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
 
     let resp: serde_json::Value = reqwest::Client::new()
         .get("https://api.soundcloud.com/playlists")
@@ -96,9 +93,7 @@ pub async fn fetch_search_playlists(
     token: Arc<Mutex<Token>>,
     query: String,
 ) -> anyhow::Result<Vec<Playlist>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
 
     let resp: serde_json::Value = reqwest::Client::new()
         .get("https://api.soundcloud.com/playlists")
@@ -146,9 +141,7 @@ pub async fn fetch_search_people(
     token: Arc<Mutex<Token>>,
     query: String,
 ) -> anyhow::Result<Vec<Artist>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
 
     let resp: serde_json::Value = reqwest::Client::new()
         .get("https://api.soundcloud.com/users")

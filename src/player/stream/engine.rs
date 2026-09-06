@@ -104,8 +104,8 @@ impl PlaybackEngine {
     ) -> anyhow::Result<(Arc<HlsManifest>, Arc<Vec<u8>>, Arc<Mutex<SegmentCache>>)> {
         let now = Instant::now();
         
-        if let Some(ref preload) = self.preload_next {
-            if preload.track_urn == track.track_urn {
+        if let Some(ref preload) = self.preload_next
+            && preload.track_urn == track.track_urn {
                 let preload = self.preload_next.take().unwrap();
                 self.cache = Some(preload);
                 let cached = self.cache.as_ref().unwrap();
@@ -115,7 +115,6 @@ impl PlaybackEngine {
                     Arc::clone(&cached.segment_cache),
                 ));
             }
-        }
         
         let cache_valid = self.cache.as_ref().is_some_and(|c| c.is_valid_for(track, now));
 

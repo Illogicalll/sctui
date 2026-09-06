@@ -68,14 +68,13 @@ impl HlsManifest {
 
                     let mut cursor_ms: u64 = 0;
                     for segment in &pl.segments {
-                        if init_url.is_none() {
-                            if let Some(map) = &segment.map {
+                        if init_url.is_none()
+                            && let Some(map) = &segment.map {
                                 init_url = Some(
                                     url.join(&map.uri)
                                         .context("failed to resolve init segment url")?,
                                 );
                             }
-                        }
 
                         let seg_url = url.join(&segment.uri).with_context(|| {
                             format!("failed to resolve media segment url {}", segment.uri)

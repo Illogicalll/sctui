@@ -106,7 +106,7 @@ fn draw_spectrum_bars(
                     row_from_bottom as f32 / (height - 1) as f32
                 };
                 let color = gradient_cyan_magenta(t);
-                buf.get_mut(x, y)
+                buf[(x, y)]
                     .set_symbol(symbol)
                     .set_style(Style::default().fg(color));
             }

@@ -162,8 +162,8 @@ pub(crate) fn handle_next_track(
                 state.playback_history.push(current);
             }
             crate::tui::logic::utils::play_queued_track(queued, state, data, player, true);
-        } else if let Some(next_idx) = state.auto_queue.pop_front() {
-            if let Some(track) = active_tracks.get(next_idx) {
+        } else if let Some(next_idx) = state.auto_queue.pop_front()
+            && let Some(track) = active_tracks.get(next_idx) {
                 if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
                     state.playback_history.push(current);
                 }
@@ -171,7 +171,6 @@ pub(crate) fn handle_next_track(
                 state.override_playing = None;
                 state.current_playing_index = Some(next_idx);
             }
-        }
     }
     InputOutcome::Continue
 }
@@ -181,8 +180,8 @@ pub(crate) fn handle_prev_track(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
-    if state.current_playing_index.is_some() {
-        if let Some(prev) = state.playback_history.pop() {
+    if state.current_playing_index.is_some()
+        && let Some(prev) = state.playback_history.pop() {
             if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
                 let mut current = current;
                 current.user_added = false;
@@ -190,6 +189,5 @@ pub(crate) fn handle_prev_track(
             }
             crate::tui::logic::utils::play_queued_track(prev, state, data, player, true);
         }
-    }
     InputOutcome::Continue
 }

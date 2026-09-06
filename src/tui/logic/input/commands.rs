@@ -123,8 +123,8 @@ pub(crate) fn run_command(
         }
         Action::ToggleQueue => {
             state.queue_visible = !state.queue_visible;
-            if state.queue_visible {
-                if let Some(current_idx) = state.current_playing_index {
+            if state.queue_visible
+                && let Some(current_idx) = state.current_playing_index {
                     // In radio mode an empty queue means related tracks are loading;
                     // rebuilding from the chain would replay what was already heard.
                     if state.auto_queue.is_empty() && state.playback_source != PlaybackSource::Radio {
@@ -135,7 +135,6 @@ pub(crate) fn run_command(
                         );
                     }
                 }
-            }
         }
         Action::TertiaryDown => {
             if state.selected_tab == 0 && state.selected_subtab == 3 {
@@ -145,14 +144,13 @@ pub(crate) fn run_command(
                     data.following_likes_state
                         .select(Some(state.selected_following_like_row));
                 }
-            } else if state.selected_tab == 1 && state.selected_searchfilter == 3 {
-                if state.search_selected_person_like_row + 1 < data.search_people_likes_tracks.len() {
+            } else if state.selected_tab == 1 && state.selected_searchfilter == 3
+                && state.search_selected_person_like_row + 1 < data.search_people_likes_tracks.len() {
                     state.search_selected_person_like_row += 1;
                     state.search_people_tracks_focus = FollowingTracksFocus::Likes;
                     data.search_people_likes_state
                         .select(Some(state.search_selected_person_like_row));
                 }
-            }
         }
         Action::TertiaryUp => {
             if state.selected_tab == 0 && state.selected_subtab == 3 {
@@ -162,14 +160,13 @@ pub(crate) fn run_command(
                     data.following_likes_state
                         .select(Some(state.selected_following_like_row));
                 }
-            } else if state.selected_tab == 1 && state.selected_searchfilter == 3 {
-                if state.search_selected_person_like_row > 0 {
+            } else if state.selected_tab == 1 && state.selected_searchfilter == 3
+                && state.search_selected_person_like_row > 0 {
                     state.search_selected_person_like_row -= 1;
                     state.search_people_tracks_focus = FollowingTracksFocus::Likes;
                     data.search_people_likes_state
                         .select(Some(state.search_selected_person_like_row));
                 }
-            }
         }
         _ => {}
     }
@@ -181,8 +178,8 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
         match state.selected_subtab {
             0 => {
                 let track = filtered_row(state, state.selected_row).and_then(|idx| data.likes.get(idx));
-                if let Some(track) = track {
-                    if let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) {
+                if let Some(track) = track
+                    && let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) {
                         data.liked_track_urns.remove(&track.track_urn);
                         state
                             .engagement_queue
@@ -191,11 +188,10 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                                 track_id,
                             });
                     }
-                }
             }
             1 => {
-                if let Some(playlist) = data.playlists.get(state.selected_row) {
-                    if let Some(playlist_id) =
+                if let Some(playlist) = data.playlists.get(state.selected_row)
+                    && let Some(playlist_id) =
                         soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri)
                     {
                         let is_liked = data.liked_playlist_uris.contains(&playlist.tracks_uri);
@@ -217,12 +213,11 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                                 });
                         }
                     }
-                }
             }
             2 => {
                 let album = filtered_row(state, state.selected_row).and_then(|idx| data.albums.get(idx));
-                if let Some(album) = album {
-                    if let Some(playlist_id) =
+                if let Some(album) = album
+                    && let Some(playlist_id) =
                         soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri)
                     {
                         data.liked_album_uris.remove(&album.tracks_uri);
@@ -231,19 +226,17 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                             playlist_id,
                         });
                     }
-                }
             }
             3 => {
                 let artist = filtered_row(state, state.selected_row).and_then(|idx| data.following.get(idx));
-                if let Some(artist) = artist {
-                    if let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
+                if let Some(artist) = artist
+                    && let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
                         data.followed_user_urns.remove(&artist.urn);
                         state.engagement_queue.push_back(Engagement::UnfollowUser {
                             urn: artist.urn.clone(),
                             user_id,
                         });
                     }
-                }
             }
             _ => {}
         }
@@ -251,8 +244,8 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
         match state.selected_searchfilter {
             0 => toggle_track_like(data.search_tracks.get(state.selected_row).cloned(), state, data),
             1 => {
-                if let Some(album) = data.search_albums.get(state.selected_row) {
-                    if let Some(playlist_id) =
+                if let Some(album) = data.search_albums.get(state.selected_row)
+                    && let Some(playlist_id) =
                         soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri)
                     {
                         let is_liked = data.liked_album_uris.contains(&album.tracks_uri);
@@ -270,11 +263,10 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                             });
                         }
                     }
-                }
             }
             2 => {
-                if let Some(playlist) = data.search_playlists.get(state.selected_row) {
-                    if let Some(playlist_id) =
+                if let Some(playlist) = data.search_playlists.get(state.selected_row)
+                    && let Some(playlist_id) =
                         soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri)
                     {
                         let is_liked = data.liked_playlist_uris.contains(&playlist.tracks_uri);
@@ -294,11 +286,10 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                                 });
                         }
                     }
-                }
             }
             3 => {
-                if let Some(artist) = data.search_people.get(state.selected_row) {
-                    if let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
+                if let Some(artist) = data.search_people.get(state.selected_row)
+                    && let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
                         let is_followed = data.followed_user_urns.contains(&artist.urn);
                         if is_followed {
                             data.followed_user_urns.remove(&artist.urn);
@@ -314,7 +305,6 @@ fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
                             });
                         }
                     }
-                }
             }
             _ => {}
         }

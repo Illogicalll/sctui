@@ -2,17 +2,13 @@ use std::collections::HashMap;
 
 use reqwest::blocking::Client;
 
-use crate::auth::try_refresh_token;
-
-use super::super::utils::{parse_datetime, parse_str, parse_track, response_items};
+use super::super::utils::{access_token, parse_datetime, parse_str, parse_track, response_items};
 use crate::api::{API, Activity, Page};
 
 impl API {
     /// Next page of the stream of posts and reposts from followed users.
     pub fn get_activities(&mut self) -> anyhow::Result<Vec<Activity>> {
-        let _ = try_refresh_token(&self.token);
-
-        let access_token = self.token.lock().unwrap().access_token.clone();
+        let access_token = access_token(&self.token);
 
         let Some(url) = self.feed_page.take_url(
             "https://api.soundcloud.com/me/activities?limit=200&linked_partitioning=true",

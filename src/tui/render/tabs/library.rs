@@ -156,7 +156,12 @@ pub fn render_library(
         ),
     };
 
-    let col_min_widths = calculate_min_widths(&col_widths, width);
+    let table_width = if selected_subtab == 1 {
+        width * 33 / 100
+    } else {
+        width
+    };
+    let col_min_widths = calculate_min_widths(&col_widths, table_width);
 
     let rows = match selected_subtab {
         1 => data.playlists

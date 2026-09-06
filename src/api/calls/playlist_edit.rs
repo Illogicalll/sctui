@@ -7,15 +7,10 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use serde_json::json;
 
-use super::super::utils::{parse_next_href, parse_str, response_items};
+use super::super::utils::{access_token, parse_next_href, parse_str, response_items};
 use super::playlists::parse_playlist;
 use crate::api::Playlist;
-use crate::auth::{Token, try_refresh_token};
-
-fn access_token(token: &Arc<Mutex<Token>>) -> String {
-    let _ = try_refresh_token(token);
-    token.lock().unwrap().access_token.clone()
-}
+use crate::auth::Token;
 
 fn playlist_url(playlist_id: u64) -> String {
     format!("https://api.soundcloud.com/playlists/soundcloud:playlists:{playlist_id}")

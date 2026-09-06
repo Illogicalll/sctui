@@ -1,17 +1,14 @@
 use reqwest::blocking::Client;
-use reqwest;
 
-use crate::auth::{Token, try_refresh_token};
+use crate::auth::Token;
 
-use super::super::utils::{parse_str, parse_track, response_items};
+use super::super::utils::{access_token, parse_str, parse_track, response_items};
 use crate::api::{API, Artist, Page, Track};
 use std::sync::{Arc, Mutex};
 
 impl API {
     pub fn get_following(&mut self) -> anyhow::Result<Vec<Artist>> {
-        let _ = try_refresh_token(&self.token);
-
-        let token_guard = self.token.lock().unwrap();
+        let access_token = access_token(&self.token);
 
         let Some(url) = self.following_page.take_url(
             "https://api.soundcloud.com/me/followings?limit=40&linked_partitioning=true",
@@ -21,12 +18,10 @@ impl API {
 
         let resp: serde_json::Value = Client::new()
             .get(&url)
-            .bearer_auth(&token_guard.access_token)
+            .bearer_auth(&access_token)
             .send()?
             .error_for_status()?
             .json()?;
-
-        drop(token_guard);
 
         self.following_page = Page::from_response(&resp);
 
@@ -61,9 +56,7 @@ pub(crate) async fn fetch_user_tracks(
     user_urn: String,
     suffix: &str,
 ) -> anyhow::Result<Vec<Track>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
     let url = build_user_tracks_url(&user_urn, suffix);
 
     let resp: serde_json::Value = reqwest::Client::new()

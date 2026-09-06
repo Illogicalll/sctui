@@ -112,11 +112,10 @@ impl Player {
     pub fn elapsed(&self) -> u64 {
         let pos = self.position.lock().unwrap();
         let mut elapsed = pos.elapsed;
-        if self.is_playing() {
-            if let Some(start) = pos.last_start {
+        if self.is_playing()
+            && let Some(start) = pos.last_start {
                 elapsed += start.elapsed();
             }
-        }
         elapsed.as_millis().try_into().unwrap()
     }
 

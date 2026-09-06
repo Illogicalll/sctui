@@ -27,7 +27,7 @@ pub fn start_auto_refresh(token: Arc<Mutex<Token>>, reauth_tx: std::sync::mpsc::
 
             if should_refresh {
                 let mut token_guard = token.lock().unwrap();
-                match refresh_token(&*token_guard) {
+                match refresh_token(&token_guard) {
                     Ok(new_token) => {
                         *token_guard = new_token;
                     }
@@ -50,7 +50,11 @@ pub fn try_refresh_token(token: &Arc<Mutex<Token>>) -> Result<()> {
     if token_guard.is_expired() {
         drop(token_guard);
         let mut token_guard = token.lock().unwrap();
-        match refresh_token(&*token_guard) {
+        if !token_guard.is_expired() {
+            // Another thread refreshed it while we waited for the lock.
+            return Ok(());
+        }
+        match refresh_token(&token_guard) {
             Ok(new_token) => {
                 *token_guard = new_token;
                 Ok(())

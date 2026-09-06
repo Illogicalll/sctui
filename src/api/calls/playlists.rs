@@ -1,10 +1,9 @@
 use reqwest::blocking::Client;
-use reqwest;
 
-use crate::auth::{Token, try_refresh_token};
+use crate::auth::Token;
 
 use super::super::utils::{
-    format_duration, parse_datetime, parse_str, parse_track, parse_u64, response_items,
+    access_token, format_duration, parse_datetime, parse_str, parse_track, parse_u64, response_items,
 };
 use crate::api::{API, Page, Playlist, Track};
 use std::sync::{Arc, Mutex};
@@ -23,9 +22,7 @@ pub(crate) fn parse_playlist(playlist: &serde_json::Value, is_owned: bool) -> Pl
 
 impl API {
     pub fn get_playlists(&mut self) -> anyhow::Result<Vec<Playlist>> {
-        let _ = try_refresh_token(&self.token);
-
-        let token_guard = self.token.lock().unwrap();
+        let access_token = access_token(&self.token);
 
         let urls = [
             self.my_playlists_page.url(
@@ -46,7 +43,7 @@ impl API {
             let Some(url) = url else { continue };
             let resp: serde_json::Value = Client::new()
                 .get(url)
-                .bearer_auth(&token_guard.access_token)
+                .bearer_auth(&access_token)
                 .send()?
                 .error_for_status()?
                 .json()?;
@@ -84,9 +81,7 @@ pub async fn fetch_playlist_tracks(
     token: Arc<Mutex<Token>>,
     tracks_uri: String,
 ) -> anyhow::Result<Vec<Track>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
 
     let mut url = if tracks_uri.starts_with("http") {
         tracks_uri

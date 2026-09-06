@@ -302,8 +302,8 @@ pub fn render_search(
 
     let tab_width = width / NUM_SEARCHFILTERS;
     fn center_text_in_width(text: &str, width: usize) -> String {
-        let total_padding = width - text.chars().count();
-        let padding = (total_padding / 2) - 1;
+        let total_padding = width.saturating_sub(text.chars().count());
+        let padding = (total_padding / 2).saturating_sub(1);
         format!("{}{}{}", " ".repeat(padding), text, " ".repeat(padding))
     }
 

@@ -16,24 +16,6 @@ pub fn styled_header(cells: &[&str]) -> Row<'static> {
     Row::new(cells)
 }
 
-pub fn calculate_column_widths(num_columns: usize) -> Vec<Constraint> {
-    if num_columns == 0 {
-        return vec![];
-    }
-
-    if num_columns > 2 {
-        let other_width = 90 / (num_columns as u16 - 1);
-        let mut widths = vec![Constraint::Percentage(other_width); num_columns - 1];
-        widths.push(Constraint::Percentage(10));
-        widths
-    } else {
-        let width = 100 / num_columns as u16;
-        (0..num_columns)
-            .map(|_| Constraint::Percentage(width))
-            .collect()
-    }
-}
-
 pub fn calculate_min_widths(column_widths: &[Constraint], total_width: usize) -> Vec<usize> {
     let fixed_total: usize = column_widths
         .iter()

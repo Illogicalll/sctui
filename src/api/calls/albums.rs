@@ -1,16 +1,11 @@
 use reqwest::blocking::Client;
-use reqwest;
 
-use crate::auth::try_refresh_token;
-
-use super::super::utils::{format_duration, parse_str, parse_u64};
+use super::super::utils::{access_token, format_duration, parse_str, parse_u64};
 use crate::api::{API, Album, Page};
 
 impl API {
     pub fn get_albums(&mut self) -> anyhow::Result<Vec<Album>> {
-        let _ = try_refresh_token(&self.token);
-
-        let token_guard = self.token.lock().unwrap();
+        let access_token = access_token(&self.token);
 
         let Some(url) = self.albums_page.take_url(
             "https://api.soundcloud.com/me/likes/playlists?limit=40&linked_partitioning=true",
@@ -20,12 +15,10 @@ impl API {
 
         let resp: serde_json::Value = Client::new()
             .get(&url)
-            .bearer_auth(&token_guard.access_token)
+            .bearer_auth(&access_token)
             .send()?
             .error_for_status()?
             .json()?;
-
-        drop(token_guard);
 
         self.albums_page = Page::from_response(&resp);
 

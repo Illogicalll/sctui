@@ -39,7 +39,7 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
         } = params;
 
         let mut next_index = start_segment_index.saturating_add(1);
-        while next_index < manifest.segments.len() {
+        'segments: while next_index < manifest.segments.len() {
             if generation.load(Ordering::SeqCst) != generation_value {
                 break;
             }
@@ -70,15 +70,24 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                 } else {
                     drop(cache_guard);
                     let url = &manifest.segments[next_index].url;
-                    let bytes = match client.get(url.as_str()).send() {
-                        Ok(resp) => match resp.error_for_status() {
-                            Ok(ok) => match ok.bytes() {
-                                Ok(b) => b.to_vec(),
-                                Err(_) => break,
-                            },
-                            Err(_) => break,
-                        },
-                        Err(_) => break,
+                    // A failed fetch is treated as transient (dropped connection, timeout,
+                    // momentary CDN error): wait for the network to come back rather than
+                    // ending the track early. ponytail: retries forever, so a segment whose
+                    // URL is permanently bad (expired signed URL, real 404) stalls the track
+                    // until the user skips; add a max-attempt cap if that shows up in practice.
+                    let bytes = loop {
+                        if generation.load(Ordering::SeqCst) != generation_value {
+                            break 'segments;
+                        }
+                        match client
+                            .get(url.as_str())
+                            .send()
+                            .and_then(|r| r.error_for_status())
+                            .and_then(|r| r.bytes())
+                        {
+                            Ok(b) => break b.to_vec(),
+                            Err(_) => std::thread::sleep(Duration::from_millis(500)),
+                        }
                     };
                     let arc = Arc::new(bytes);
                     let mut cache_guard = segment_cache.lock().unwrap();

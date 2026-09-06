@@ -85,11 +85,10 @@ fn start_playback(
     if state.playback_source != source {
         state.playback_history.clear();
         state.manual_queue.clear();
-    } else if let Some(queued) = queued_from_current(state, data) {
-        if !(queued.source == source && queued.index == idx) {
+    } else if let Some(queued) = queued_from_current(state, data)
+        && !(queued.source == source && queued.index == idx) {
             state.playback_history.push(queued);
         }
-    }
 
     player.play(track.clone());
     state.playback_source = source;
