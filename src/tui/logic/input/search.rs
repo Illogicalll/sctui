@@ -76,7 +76,11 @@ pub(crate) fn handle_search_input(
             state.search_query.clear();
             state.search_matches.clear();
         }
-        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+        // Bound Shift/Ctrl/Alt chords stay commands while the filter is open.
+        KeyCode::Char(c)
+            if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !(key.modifiers.contains(KeyModifiers::SHIFT) && state.keymap.action(&key).is_some()) =>
+        {
             state.search_query.push(c);
             state.search_matches = build_search_matches(
                 state.selected_subtab,

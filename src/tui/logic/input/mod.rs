@@ -70,19 +70,24 @@ pub fn handle_key_event(
         return outcome;
     }
 
-    // Search tab: while typing, printable keys (uppercase included) go to the query.
-    // Enter/Esc leave; any other key (arrows, Tab, ...) leaves and is then handled
-    // normally, so moving onto a result is enough to get the commands back.
+    // Search tab: while typing, plain printable keys go to the query. A chord with a
+    // modifier that is bound to an action runs the action instead (so Shift+A queues
+    // the highlighted result mid-search; Caps Lock letters still type on terminals
+    // that report them without Shift). Enter/Esc leave typing; any other key leaves
+    // and is then handled normally.
     if state.selected_tab == 1 && state.search_typing {
+        let modified = key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::CONTROL | KeyModifiers::ALT);
         match key.code {
             KeyCode::Esc | KeyCode::Enter => {
                 state.search_typing = false;
                 return InputOutcome::Continue;
             }
             KeyCode::Backspace => return commands::handle_backspace(state),
+            KeyCode::Char(_) if modified && state.keymap.action(&key).is_some() => {}
             KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
                 return commands::handle_search_char(c, state);
             }
+            KeyCode::Char(_) => {}
             _ => state.search_typing = false,
         }
     }

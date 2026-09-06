@@ -41,7 +41,7 @@ pub fn render_search(
 
     let (input_text, input_style) = if state.search_typing {
         (
-            format!("{}▏   Enter to finish typing", state.query),
+            format!("{}▏", state.query),
             Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
         )
     } else if state.query.is_empty() {

@@ -133,7 +133,7 @@ Press `?` in the app for the full list. The defaults:
 | `Shift+F` | like / follow |
 | `Shift+A` `Shift+N` `Shift+Q` | add to queue, play next, show queue |
 | `Shift+P` | listening history |
-| `/` | search (Search tab) or filter the list (Library); `Enter` finishes typing so the keys below act on results |
+| `/` | search (Search tab) or filter the list (Library); `Enter`/`Esc` leave the field. Shift-key commands work while typing (uppercase needs Caps Lock) |
 | `Shift+V` | visualiser (`Tab` cycles modes) |
 | `Shift+T` `Shift+C` `Shift+D` `Shift+X` | add to playlist, new playlist, remove from playlist, delete playlist |
 | `?` `Esc` | help, quit (Esc closes popups first) |
