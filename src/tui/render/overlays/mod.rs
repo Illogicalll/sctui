@@ -50,6 +50,7 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
             &owned,
             state.playlist_picker_selected,
             state.playlist_picker_title.as_deref(),
+            state.playlist_picker_public,
         );
     }
 

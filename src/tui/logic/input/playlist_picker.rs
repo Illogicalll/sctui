@@ -18,6 +18,7 @@ pub(crate) fn open_picker(state: &mut AppState, track: crate::api::Track) {
     state.playlist_picker_track = Some(track);
     state.playlist_picker_selected = 0;
     state.playlist_picker_title = None;
+    state.playlist_picker_public = false;
     state.playlist_picker_visible = true;
 }
 
@@ -26,6 +27,7 @@ pub(crate) fn open_new_playlist_prompt(state: &mut AppState) {
     state.playlist_picker_track = None;
     state.playlist_picker_selected = 0;
     state.playlist_picker_title = Some(String::new());
+    state.playlist_picker_public = false;
     state.playlist_picker_visible = true;
 }
 
@@ -50,6 +52,9 @@ pub(crate) fn handle_picker_input(
             KeyCode::Backspace => {
                 title.pop();
             }
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+                state.playlist_picker_public = !state.playlist_picker_public;
+            }
             KeyCode::Char(c) => title.push(c),
             KeyCode::Enter => {
                 let title = title.trim().to_string();
@@ -59,6 +64,7 @@ pub(crate) fn handle_picker_input(
                 state.playlist_edit_queue.push_back(PlaylistEdit::Create {
                     title,
                     track_urn: state.playlist_picker_track.take().map(|t| t.track_urn),
+                    public: state.playlist_picker_public,
                 });
                 close_picker(state);
             }

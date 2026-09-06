@@ -103,16 +103,18 @@ pub async fn remove_track_from_playlist(
     put_tracks(&token, playlist_id, &edited_urns(urns, &track_urn, false)).await
 }
 
-/// Creates a private playlist, empty or holding `track_urn`, and returns it as
-/// the library represents playlists.
+/// Creates a playlist, empty or holding `track_urn`, and returns it as the
+/// library represents playlists.
 pub async fn create_playlist(
     token: Arc<Mutex<Token>>,
     title: String,
     track_urn: Option<String>,
+    public: bool,
 ) -> anyhow::Result<Playlist> {
     let tracks: Vec<serde_json::Value> = track_urn.into_iter().map(|u| json!({ "urn": u })).collect();
+    let sharing = if public { "public" } else { "private" };
     let body = json!({
-        "playlist": { "title": title, "sharing": "private", "tracks": tracks }
+        "playlist": { "title": title, "sharing": sharing, "tracks": tracks }
     });
     let resp: serde_json::Value = reqwest::Client::new()
         .post("https://api.soundcloud.com/playlists")

@@ -350,8 +350,8 @@ fn start(
                     PlaylistEdit::Remove { playlist_id, tracks_uri, track_urn } => {
                         let _ = remove_track_from_playlist(token, playlist_id, tracks_uri, track_urn).await;
                     }
-                    PlaylistEdit::Create { title, track_urn } => {
-                        if let Ok(playlist) = create_playlist(token, title, track_urn).await {
+                    PlaylistEdit::Create { title, track_urn, public } => {
+                        if let Ok(playlist) = create_playlist(token, title, track_urn, public).await {
                             let _ = tx.send(Msg::PlaylistCreated(playlist));
                         }
                     }

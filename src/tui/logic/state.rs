@@ -122,7 +122,7 @@ impl ConfirmAction {
 pub enum PlaylistEdit {
     Add { playlist_id: u64, tracks_uri: String, track_urn: String },
     Remove { playlist_id: u64, tracks_uri: String, track_urn: String },
-    Create { title: String, track_urn: Option<String> },
+    Create { title: String, track_urn: Option<String>, public: bool },
     Delete { playlist_id: u64 },
 }
 
@@ -351,6 +351,8 @@ pub struct AppState {
     /// `Some` while a new playlist name is being typed.
     pub playlist_picker_title: Option<String>,
     pub playlist_picker_track: Option<Track>,
+    /// Visibility chosen in the new-playlist prompt. Private by default.
+    pub playlist_picker_public: bool,
     pub confirm: Option<ConfirmAction>,
     /// 0 = Yes, 1 = No.
     pub confirm_selected: usize,
