@@ -206,8 +206,10 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::PageDown, &["pagedown"]),
     (Action::SecondaryUp, &["shift+up", "shift+k"]),
     (Action::SecondaryDown, &["shift+down", "shift+j"]),
-    (Action::TertiaryUp, &["alt+up"]),
-    (Action::TertiaryDown, &["alt+down"]),
+    // macOS sends Option+K / Option+J as ˚ / ∆ unless the terminal maps Option to Alt;
+    // bind both spellings so either setup works.
+    (Action::TertiaryUp, &["alt+up", "alt+k", "˚"]),
+    (Action::TertiaryDown, &["alt+down", "alt+j", "∆"]),
     (Action::PlayPause, &["space"]),
     (Action::PlaySelected, &["enter"]),
     (Action::StartStation, &["shift+enter"]),
@@ -652,6 +654,10 @@ mod tests {
         assert_eq!(km.action(&key(KeyCode::Char('?'), KeyModifiers::SHIFT)), Some(Action::Help));
         assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), Some(Action::Quit));
         assert_eq!(km.action(&key(KeyCode::Char('h'), KeyModifiers::SHIFT)), Some(Action::SeekBackward));
+        // Option+J on macOS, with and without the terminal mapping Option to Alt.
+        assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::ALT)), Some(Action::TertiaryDown));
+        assert_eq!(km.action(&key(KeyCode::Char('∆'), KeyModifiers::NONE)), Some(Action::TertiaryDown));
+        assert_eq!(km.action(&key(KeyCode::Char('˚'), KeyModifiers::NONE)), Some(Action::TertiaryUp));
     }
 
     #[test]
