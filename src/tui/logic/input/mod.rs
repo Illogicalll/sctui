@@ -11,6 +11,8 @@ mod navigation;
 mod movement;
 mod playback;
 mod history;
+mod confirm;
+mod playlist_picker;
 mod queue;
 mod commands;
 
@@ -27,6 +29,16 @@ pub fn handle_key_event(
 ) -> InputOutcome {
     if state.quit_confirm_visible {
         return quit::handle_quit_confirm(key, state);
+    }
+
+    if state.confirm.is_some() {
+        return confirm::handle_confirm_input(key, state, data);
+    }
+
+    if state.playlist_picker_visible {
+        if let Some(outcome) = playlist_picker::handle_picker_input(key, state, data) {
+            return outcome;
+        }
     }
 
     if state.history_visible {

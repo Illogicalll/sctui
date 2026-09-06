@@ -89,8 +89,45 @@ pub enum Engagement {
     UnfollowUser { urn: String, user_id: u64 },
 }
 
+/// A destructive playlist action awaiting Yes/No in the confirm popup.
+#[derive(Clone)]
+pub enum ConfirmAction {
+    RemoveTrack { playlist_idx: usize, track: Track },
+    DeletePlaylist { playlist_idx: usize },
+}
+
+impl ConfirmAction {
+    pub fn message(&self, data: &AppData) -> String {
+        let playlist_title = |idx: usize| {
+            data.playlists
+                .get(idx)
+                .map(|p| p.title.as_str())
+                .unwrap_or("this playlist")
+        };
+        match self {
+            ConfirmAction::RemoveTrack { playlist_idx, track } => format!(
+                "Remove \"{}\" from \"{}\"?",
+                track.title,
+                playlist_title(*playlist_idx)
+            ),
+            ConfirmAction::DeletePlaylist { playlist_idx } => format!(
+                "Delete playlist \"{}\"? This cannot be undone.",
+                playlist_title(*playlist_idx)
+            ),
+        }
+    }
+}
+
+/// A playlist write waiting to be sent. The UI has already been updated.
+pub enum PlaylistEdit {
+    Add { playlist_id: u64, tracks_uri: String, track_urn: String },
+    Remove { playlist_id: u64, tracks_uri: String, track_urn: String },
+    Create { title: String, track_urn: String },
+    Delete { playlist_id: u64 },
+}
+
 /// Clamp a list's cursor after rows were removed from it.
-fn clamp_row(row: &mut usize, table: &mut TableState, len: usize) {
+pub(crate) fn clamp_row(row: &mut usize, table: &mut TableState, len: usize) {
     if len == 0 {
         *row = 0;
     } else if *row >= len {
@@ -308,6 +345,16 @@ pub struct AppState {
     pub following_tracks_focus: FollowingTracksFocus,
     pub queue_visible: bool,
     pub history_visible: bool,
+    pub playlist_picker_visible: bool,
+    /// Row in the picker: 0 = "+ New playlist…", then owned playlists in order.
+    pub playlist_picker_selected: usize,
+    /// `Some` while a new playlist name is being typed.
+    pub playlist_picker_title: Option<String>,
+    pub playlist_picker_track: Option<Track>,
+    pub confirm: Option<ConfirmAction>,
+    /// 0 = Yes, 1 = No.
+    pub confirm_selected: usize,
+    pub playlist_edit_queue: VecDeque<PlaylistEdit>,
     /// Row in the history popup, 0 = newest.
     pub history_selected: usize,
     pub help_visible: bool,

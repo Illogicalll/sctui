@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use rand::seq::SliceRandom;
 
-use crate::api::{Album, Artist, Track};
+use crate::api::{Album, Artist, Playlist, Track};
 use crate::player::Player;
 
 use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
@@ -168,6 +168,12 @@ pub fn build_search_matches(
         }
         _ => Vec::new(),
     }
+}
+
+/// Adjust a playlist's displayed track count by `delta`, never below zero.
+pub(crate) fn bump_track_count(playlist: &mut Playlist, delta: i64) {
+    let n = playlist.track_count.trim().parse::<i64>().unwrap_or(0);
+    playlist.track_count = (n + delta).max(0).to_string();
 }
 
 pub fn soundcloud_id_from_urn(urn: &str) -> Option<u64> {

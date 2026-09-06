@@ -9,6 +9,9 @@ use crate::auth::Token;
 
 pub(crate) use calls::engagement::engage;
 pub(crate) use calls::following::fetch_user_tracks;
+pub use calls::playlist_edit::{
+    add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
+};
 pub use calls::playlists::fetch_playlist_tracks;
 pub use calls::related::fetch_related_tracks;
 pub use calls::search::{

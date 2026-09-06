@@ -2,14 +2,14 @@ use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
 use super::InputOutcome;
 use crate::api::Track;
-use crate::tui::logic::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource};
+use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, FollowingTracksFocus, PlaybackSource};
 use crate::player::Player;
 use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::build_search_matches;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
 use super::helpers::{filtered_row, reset_search_rows};
-use super::queue::{handle_add_to_queue, handle_add_next_to_queue};
+use super::queue::{handle_add_to_queue, handle_add_next_to_queue, selected_queued};
 
 pub(crate) fn handle_char(
     key: KeyEvent,
@@ -95,6 +95,38 @@ fn handle_shift_char(
         }
         'v' | 'V' => {
             state.visualizer_mode = !state.visualizer_mode;
+        }
+        // Playlist management. Both destructive actions go through the confirm popup.
+        't' | 'T' => {
+            if let Some(queued) = selected_queued(state, data) {
+                super::playlist_picker::open_picker(state, queued.track);
+            }
+        }
+        'x' | 'X' => {
+            if state.selected_tab == 0 && state.selected_subtab == 1 {
+                let open_playlist = data.playlists.iter().position(|p| {
+                    Some(p.tracks_uri.as_str()) == data.playlist_tracks_uri.as_deref()
+                });
+                let track = filtered_row(state, state.selected_playlist_track_row)
+                    .and_then(|idx| data.playlist_tracks.get(idx).cloned());
+                if let (Some(playlist_idx), Some(track)) = (open_playlist, track)
+                    && data.playlists[playlist_idx].is_owned
+                {
+                    state.confirm = Some(ConfirmAction::RemoveTrack { playlist_idx, track });
+                    state.confirm_selected = 1;
+                }
+            }
+        }
+        'z' | 'Z' => {
+            if state.selected_tab == 0
+                && state.selected_subtab == 1
+                && data.playlists.get(state.selected_row).is_some_and(|p| p.is_owned)
+            {
+                state.confirm = Some(ConfirmAction::DeletePlaylist {
+                    playlist_idx: state.selected_row,
+                });
+                state.confirm_selected = 1;
+            }
         }
         'p' | 'P' => {
             state.history_visible = !state.history_visible;

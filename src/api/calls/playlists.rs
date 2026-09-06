@@ -9,6 +9,18 @@ use super::super::utils::{
 use crate::api::{API, Page, Playlist, Track};
 use std::sync::{Arc, Mutex};
 
+/// A playlist object from any `/playlists` endpoint, as the library shows it.
+pub(crate) fn parse_playlist(playlist: &serde_json::Value, is_owned: bool) -> Playlist {
+    Playlist {
+        title: parse_str(playlist, "title"),
+        track_count: parse_u64(playlist, "track_count").to_string(),
+        duration: format_duration(parse_u64(playlist, "duration")),
+        created_at: parse_datetime(playlist, "created_at"),
+        tracks_uri: parse_str(playlist, "tracks_uri"),
+        is_owned,
+    }
+}
+
 impl API {
     pub fn get_playlists(&mut self) -> anyhow::Result<Vec<Playlist>> {
         let _ = try_refresh_token(&self.token);
@@ -58,20 +70,7 @@ impl API {
                         continue;
                     }
 
-                    let title = parse_str(&playlist, "title");
-                    let track_count = parse_u64(&playlist, "track_count").to_string();
-                    let duration = format_duration(parse_u64(&playlist, "duration"));
-                    let created_at = parse_datetime(&playlist, "created_at");
-                    let tracks_uri = parse_str(&playlist, "tracks_uri");
-
-                    playlists.push(Playlist {
-                        title,
-                        track_count,
-                        duration,
-                        created_at,
-                        tracks_uri,
-                        is_owned: i == 0,
-                    });
+                    playlists.push(parse_playlist(playlist, i == 0));
                 }
             }
         }

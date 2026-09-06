@@ -1,11 +1,14 @@
+mod confirm;
 mod help;
 mod history;
+mod playlist_picker;
 mod queue;
 mod quit;
 mod utils;
 
 use ratatui::Frame;
 
+use crate::api::Playlist;
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::active_tracks;
 
@@ -37,6 +40,23 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
 
     if state.history_visible {
         history::render_history(frame, &state.playback_history, state.history_selected);
+    }
+
+    if state.playlist_picker_visible {
+        if let Some(track) = &state.playlist_picker_track {
+            let owned: Vec<&Playlist> = data.playlists.iter().filter(|p| p.is_owned).collect();
+            playlist_picker::render_playlist_picker(
+                frame,
+                track,
+                &owned,
+                state.playlist_picker_selected,
+                state.playlist_picker_title.as_deref(),
+            );
+        }
+    }
+
+    if let Some(action) = &state.confirm {
+        confirm::render_confirm(frame, &action.message(data), state.confirm_selected);
     }
 
     if state.help_visible {

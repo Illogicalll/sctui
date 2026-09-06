@@ -93,6 +93,10 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center">Press Shift + Enter on any track to start a station: it plays, then SoundCloud's related tracks follow. When a playlist, album or your likes run out, sctui keeps going with related tracks instead of stopping</p>
 
+### 📝 Playlist Management
+
+<p align="center">Shift + T adds any track to one of your playlists, or to a brand new one. In your own playlists, Shift + X removes a track and Shift + Z deletes the playlist, each behind a confirmation</p>
+
 ### 🕘 History
 
 <p align="center">Shift + P opens everything you have listened to this session, newest first. Pick any track to hear it again</p>

@@ -41,6 +41,9 @@ pub fn render_help(frame: &mut Frame) {
         Row::new(vec!["Shift + F", "Search current view (only works in library)"]),
         Row::new(vec!["Shift + Q", "Toggle queue popup"]),
         Row::new(vec!["Shift + P", "Toggle listening history (Enter replays a track)"]),
+        Row::new(vec!["Shift + T", "Add selected track to a playlist (or a new one)"]),
+        Row::new(vec!["Shift + X", "Remove selected track from the open playlist (yours only)"]),
+        Row::new(vec!["Shift + Z", "Delete the selected playlist (yours only)"]),
         Row::new(vec!["Shift + H", "Toggle help popup"]),
     ];
 

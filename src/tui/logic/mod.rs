@@ -4,6 +4,7 @@ pub(crate) mod state;
 pub(crate) mod utils;
 
 use crate::api::{
+    add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
     fetch_related_tracks,
     API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
@@ -37,7 +38,7 @@ use super::render::render;
 use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::helpers::reset_search_rows;
 use self::input::{handle_key_event, InputOutcome};
-use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource};
+use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
     active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
@@ -74,6 +75,8 @@ enum Msg {
     FeedQueue(u64, Vec<Track>),
     /// Related tracks for the radio seed, to append to the queue.
     Related(u64, Vec<Track>),
+    /// A playlist the user just created, to show at the top of the library.
+    PlaylistCreated(Playlist),
     Engagement(Engagement),
 }
 
@@ -278,20 +281,27 @@ fn start(
                         && state.playback_source == PlaybackSource::Radio
                     {
                         append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks);
-                        if state.radio_waiting {
-                            if let Some(next_idx) = state.auto_queue.pop_front() {
-                                if let Some(track) = data.playback_tracks.get(next_idx).cloned() {
-                                    if let Some(current) = queued_from_current(&state, &data) {
-                                        state.playback_history.push(current);
-                                    }
-                                    player.play(track);
-                                    state.override_playing = None;
-                                    state.current_playing_index = Some(next_idx);
-                                    state.radio_waiting = false;
-                                }
+                        if state.radio_waiting
+                            && let Some(next_idx) = state.auto_queue.pop_front()
+                            && let Some(track) = data.playback_tracks.get(next_idx).cloned()
+                        {
+                            if let Some(current) = queued_from_current(&state, &data) {
+                                state.playback_history.push(current);
                             }
+                            player.play(track);
+                            state.override_playing = None;
+                            state.current_playing_index = Some(next_idx);
+                            state.radio_waiting = false;
                         }
                     }
+                }
+                Msg::PlaylistCreated(playlist) => {
+                    // Keep the cursor on the same playlist as the list shifts down by one.
+                    if state.selected_tab == 0 && state.selected_subtab == 1 && !data.playlists.is_empty() {
+                        state.selected_row += 1;
+                        data.playlists_state.select(Some(state.selected_row));
+                    }
+                    data.playlists.insert(0, playlist);
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
             }
@@ -325,6 +335,29 @@ fn start(
             async_rt.spawn(async move {
                 if engage(token, method, path).await.is_ok() {
                     let _ = tx.send(Msg::Engagement(action));
+                }
+            });
+        }
+
+        while let Some(edit) = state.playlist_edit_queue.pop_front() {
+            let token = auth();
+            let tx = tx.clone();
+            async_rt.spawn(async move {
+                match edit {
+                    PlaylistEdit::Add { playlist_id, tracks_uri, track_urn } => {
+                        let _ = add_track_to_playlist(token, playlist_id, tracks_uri, track_urn).await;
+                    }
+                    PlaylistEdit::Remove { playlist_id, tracks_uri, track_urn } => {
+                        let _ = remove_track_from_playlist(token, playlist_id, tracks_uri, track_urn).await;
+                    }
+                    PlaylistEdit::Create { title, track_urn } => {
+                        if let Ok(playlist) = create_playlist(token, title, track_urn).await {
+                            let _ = tx.send(Msg::PlaylistCreated(playlist));
+                        }
+                    }
+                    PlaylistEdit::Delete { playlist_id } => {
+                        let _ = delete_playlist(token, playlist_id).await;
+                    }
                 }
             });
         }
