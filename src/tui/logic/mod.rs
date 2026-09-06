@@ -97,6 +97,18 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player) -> anyhow::Result<()> {
     result
 }
 
+/// Make the next `draw` rewrite every cell without erasing the screen first.
+/// `Terminal::clear` sends an erase-display sequence, which shows as a blank
+/// flash. Filling the spare buffer with a sentinel and swapping it in as the
+/// "previous frame" makes every cell look changed, so the diff repaints them
+/// all in the same flush as the new frame.
+fn invalidate_screen(terminal: &mut DefaultTerminal) {
+    for cell in terminal.current_buffer_mut().content.iter_mut() {
+        cell.set_symbol("\u{E000}");
+    }
+    terminal.swap_buffers();
+}
+
 fn spawn_fetch<F>(api: Arc<Mutex<API>>, tx: Sender<Msg>, fetch_fn: F)
 where
     F: FnOnce(&mut API) -> anyhow::Result<Msg> + Send + 'static,
@@ -182,7 +194,7 @@ fn start(
     let mut last_tick = Instant::now();
     // A full repaint whenever the visible view changes. ratatui only redraws changed cells,
     // so a glyph the terminal sized differently from unicode-width can leave a ghost behind;
-    // clearing at view boundaries wipes any that slipped past sanitize_display.
+    // repainting at view boundaries wipes any that slipped past sanitize_display.
     let mut last_view = None;
 
     loop {
@@ -722,7 +734,7 @@ fn start(
             state.help_visible,
         );
         if last_view != Some(view) {
-            terminal.clear()?;
+            invalidate_screen(&mut terminal);
             last_view = Some(view);
         }
         terminal.draw(|frame| {
@@ -899,7 +911,7 @@ fn start(
                 state.help_visible,
             );
             if last_view != Some(view) {
-                terminal.clear()?;
+                invalidate_screen(&mut terminal);
                 last_view = Some(view);
             }
             terminal.draw(|frame| {
