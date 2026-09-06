@@ -134,9 +134,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          (cd dist && python3 -m http.server 8000 >/dev/null 2>&1 &)
-          sleep 2
-          export SCTUI_VERSION="$GITHUB_REF_NAME" SCTUI_BASE_URL="http://127.0.0.1:8000"
+          export SCTUI_VERSION="$GITHUB_REF_NAME" SCTUI_BASE_URL="file://$(pwd)/dist"
           sh install.sh
           out=$("$HOME/.local/bin/sctui" --version)
           echo "$out"
