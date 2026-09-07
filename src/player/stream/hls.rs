@@ -1,7 +1,7 @@
 use anyhow::Context;
 use m3u8_rs::Playlist;
 use serde::Deserialize;
-use url::Url;
+use reqwest::Url;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct StreamsResponse {
@@ -14,7 +14,6 @@ pub(crate) struct StreamsResponse {
 #[derive(Debug, Clone)]
 pub(crate) struct HlsSegment {
     pub url: Url,
-    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -69,14 +68,13 @@ impl HlsManifest {
 
                     let mut cursor_ms: u64 = 0;
                     for segment in &pl.segments {
-                        if init_url.is_none() {
-                            if let Some(map) = &segment.map {
+                        if init_url.is_none()
+                            && let Some(map) = &segment.map {
                                 init_url = Some(
                                     url.join(&map.uri)
                                         .context("failed to resolve init segment url")?,
                                 );
                             }
-                        }
 
                         let seg_url = url.join(&segment.uri).with_context(|| {
                             format!("failed to resolve media segment url {}", segment.uri)
@@ -86,10 +84,7 @@ impl HlsManifest {
                         segment_start_ms.push(cursor_ms);
                         cursor_ms = cursor_ms.saturating_add(duration_ms.max(1));
 
-                        segments.push(HlsSegment {
-                            url: seg_url,
-                            duration_ms: duration_ms.max(1),
-                        });
+                        segments.push(HlsSegment { url: seg_url });
                     }
 
                     if segments.is_empty() {

@@ -1,15 +1,13 @@
-use std::io::Cursor;
+use std::sync::mpsc::Sender;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Duration;
 
-use rodio::{Decoder, Sink};
-
+use crate::player::Position;
 use crate::player::stream::cache::SegmentCache;
 use crate::player::stream::hls::HlsManifest;
-use crate::player::stream::sample::TapSource;
 
 pub(crate) const PREFETCH_SEGMENTS: usize = 3;
 
@@ -18,14 +16,12 @@ pub(crate) struct SegmentPumpParams {
     pub generation: Arc<AtomicU64>,
     pub generation_value: u64,
     pub manifest: Arc<HlsManifest>,
-    pub init_bytes: Arc<Vec<u8>>,
     pub segment_cache: Arc<Mutex<SegmentCache>>,
     pub start_segment_index: usize,
-    pub sink_arc: Arc<Mutex<Option<Sink>>>,
-    pub wave_buffer: Arc<Mutex<std::collections::VecDeque<f32>>>,
+    /// Feeds the track's single continuous decoder (see `stream::reader`).
+    pub bytes_tx: Sender<Arc<Vec<u8>>>,
     pub is_playing_flag: Arc<std::sync::atomic::AtomicBool>,
-    pub elapsed_time: Arc<Mutex<Duration>>,
-    pub last_start: Arc<Mutex<Option<std::time::Instant>>>,
+    pub position: Arc<Mutex<Position>>,
 }
 
 pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
@@ -35,26 +31,24 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             generation,
             generation_value,
             manifest,
-            init_bytes,
             segment_cache,
             start_segment_index,
-            sink_arc,
-            wave_buffer,
+            bytes_tx,
             is_playing_flag,
-            elapsed_time,
-            last_start,
+            position,
         } = params;
 
         let mut next_index = start_segment_index.saturating_add(1);
-        while next_index < manifest.segments.len() {
+        'segments: while next_index < manifest.segments.len() {
             if generation.load(Ordering::SeqCst) != generation_value {
                 break;
             }
 
             let approx_pos_ms = {
-                let base = *elapsed_time.lock().unwrap();
+                let pos = position.lock().unwrap();
+                let base = pos.elapsed;
                 if is_playing_flag.load(Ordering::SeqCst) {
-                    if let Some(start) = *last_start.lock().unwrap() {
+                    if let Some(start) = pos.last_start {
                         (base + start.elapsed()).as_millis() as u64
                     } else {
                         base.as_millis() as u64
@@ -76,15 +70,24 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                 } else {
                     drop(cache_guard);
                     let url = &manifest.segments[next_index].url;
-                    let bytes = match client.get(url.as_str()).send() {
-                        Ok(resp) => match resp.error_for_status() {
-                            Ok(ok) => match ok.bytes() {
-                                Ok(b) => b.to_vec(),
-                                Err(_) => break,
-                            },
-                            Err(_) => break,
-                        },
-                        Err(_) => break,
+                    // A failed fetch is treated as transient (dropped connection, timeout,
+                    // momentary CDN error): wait for the network to come back rather than
+                    // ending the track early. ponytail: retries forever, so a segment whose
+                    // URL is permanently bad (expired signed URL, real 404) stalls the track
+                    // until the user skips; add a max-attempt cap if that shows up in practice.
+                    let bytes = loop {
+                        if generation.load(Ordering::SeqCst) != generation_value {
+                            break 'segments;
+                        }
+                        match client
+                            .get(url.as_str())
+                            .send()
+                            .and_then(|r| r.error_for_status())
+                            .and_then(|r| r.bytes())
+                        {
+                            Ok(b) => break b.to_vec(),
+                            Err(_) => std::thread::sleep(Duration::from_millis(500)),
+                        }
                     };
                     let arc = Arc::new(bytes);
                     let mut cache_guard = segment_cache.lock().unwrap();
@@ -93,34 +96,15 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                 }
             };
 
-            let combined = combine_init_and_segment(&init_bytes, &media_bytes);
-            let decoder = match Decoder::new(Cursor::new(combined)) {
-                Ok(d) => d,
-                Err(_) => break,
-            };
-
-            let tapped = TapSource::new(decoder, Arc::clone(&wave_buffer));
             if generation.load(Ordering::SeqCst) != generation_value {
                 break;
             }
-            let guard = sink_arc.lock().unwrap();
-            if generation.load(Ordering::SeqCst) != generation_value {
-                break;
-            }
-            if let Some(ref sink) = *guard {
-                sink.append(tapped);
-            } else {
+            // Receiver gone means the track was stopped or replaced.
+            if bytes_tx.send(media_bytes).is_err() {
                 break;
             }
 
             next_index += 1;
         }
     });
-}
-
-fn combine_init_and_segment(init_bytes: &[u8], segment_bytes: &[u8]) -> Vec<u8> {
-    let mut combined = Vec::with_capacity(init_bytes.len() + segment_bytes.len());
-    combined.extend_from_slice(init_bytes);
-    combined.extend_from_slice(segment_bytes);
-    combined
 }

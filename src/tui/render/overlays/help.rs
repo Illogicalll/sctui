@@ -1,65 +1,70 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint},
-    widgets::{Block, Borders, Clear, Row, Table},
+    layout::{Alignment, Constraint, Layout},
+    style::{Modifier, Style},
+    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
 };
+use crate::theme;
 
+use crate::keymap::Action;
+use crate::tui::logic::state::AppState;
 use crate::tui::render::utils::styled_header;
 
 use super::utils::centered_rect;
 
-pub fn render_help(frame: &mut Frame) {
-    let popup_area = centered_rect(70, 70, frame.area());
+/// Key reference and editor, generated from the live keymap.
+pub fn render_help(frame: &mut Frame, state: &AppState) {
+    let popup_area = centered_rect(76, 80, frame.area());
     frame.render_widget(Clear, popup_area);
 
-    let mut rows: Vec<Row> = vec![
-        Row::new(vec!["Esc", "Quit"]),
-        Row::new(vec!["Tab", "Cycle main tabs / Visualizer view (in visualizer mode)"]),
-        Row::new(vec!["Left/Right", "Change sub-tab"]),
-        Row::new(vec!["Up/Down", "Move selector"]),
-        Row::new(vec!["Space", "Play/Pause"]),
-        Row::new(vec!["Enter", "Play selected track"]),
-        Row::new(vec!["Shift + Right", "Skip song"]),
-        Row::new(vec!["Shift + Left", "Go back a song"]),
-        Row::new(vec!["Option + Right", "Fast forward 10s"]),
-        Row::new(vec!["Option + Left", "Rewind 10s"]),
-        Row::new(vec!["Option + Up/Down", "Move selector by 10"]),
-        Row::new(vec!["Shift + Up/Down", "Move secondary selector"]),
-        Row::new(vec!["Shift + J/K", "Move tertiary selector"]),
-        Row::new(vec!["Shift + U", "Volume up"]),
-        Row::new(vec!["Shift + D", "Volume down"]),
-        Row::new(vec!["Shift + S", "Toggle shuffle queue"]),
-        Row::new(vec!["Shift + R", "Toggle repeat same song"]),
-        Row::new(vec!["Shift + A", "Add selected song to queue"]),
-        Row::new(vec!["Shift + N", "Play next (add to front of queue)"]),
-        Row::new(vec![
-            "Shift + L",
-            "Like selected item (or follow selected person)",
-        ]),
-        Row::new(vec!["Shift + V", "Toggle visualizer mode"]),
-        Row::new(vec!["Shift + F", "Search current view (only works in library)"]),
-        Row::new(vec!["Shift + Q", "Toggle queue popup"]),
-        Row::new(vec!["Shift + H", "Toggle help popup"]),
-    ];
+    let block = Block::default()
+        .title(" Keys ")
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded);
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+    let [table_area, status_area, hint_area] = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
 
-    let max_rows = popup_area.height.saturating_sub(3) as usize;
-    if rows.len() > max_rows {
-        rows.truncate(max_rows);
-    }
+    let rows: Vec<Row> = Action::ALL
+        .iter()
+        .map(|action| {
+            let keys = state.keymap.labels(*action);
+            let mut row = Row::new(vec![action.description().to_string(), keys.clone()]);
+            if keys == "unbound" {
+                row = row.style(Style::default().fg(theme::current().dim));
+            }
+            row
+        })
+        .collect();
 
-    let table = Table::new(
-        rows,
-        vec![Constraint::Percentage(50), Constraint::Percentage(50)],
-    )
-    .header(styled_header(&["Action", "Description"]))
-    .block(
-        Block::default()
-            .title("Help")
-            .title_alignment(Alignment::Center)
-            .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded),
-    )
-    .column_spacing(1);
+    let table = Table::new(rows, vec![Constraint::Percentage(62), Constraint::Percentage(38)])
+        .header(styled_header(&["Action", "Keys"]))
+        .column_spacing(1)
+        .row_highlight_style(
+            Style::default()
+                .bg(theme::current().selection_bg)
+                .fg(theme::current().fg)
+                .add_modifier(Modifier::BOLD),
+        );
+    let mut table_state = TableState::default().with_selected(Some(state.help_selected));
+    frame.render_stateful_widget(table, table_area, &mut table_state);
 
-    frame.render_widget(table, popup_area);
+    let (status, status_style) = match (&state.help_capture, &state.help_message) {
+        (Some(_), Some(msg)) => (msg.clone(), Style::default().fg(theme::current().warning).add_modifier(Modifier::BOLD)),
+        (_, Some(msg)) => (msg.clone(), Style::default().fg(theme::current().accent)),
+        _ => (String::new(), Style::default()),
+    };
+    frame.render_widget(Paragraph::new(status).style(status_style).alignment(Alignment::Center), status_area);
+    frame.render_widget(
+        Paragraph::new("Enter: add key   Backspace: unbind   r: default   ↑↓: move   Esc: close   ·  saved to ~/.config/sctui/config.toml")
+            .style(Style::default().fg(theme::current().dim))
+            .alignment(Alignment::Center),
+        hint_area,
+    );
 }

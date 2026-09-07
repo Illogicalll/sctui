@@ -1,15 +1,20 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Span,
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, Tabs},
 };
+use crate::theme;
 
-use crate::api::{Album, Artist, Playlist, Track};
-use std::collections::HashSet;
+use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, SEARCHFILTERS};
 
 use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
+
+use super::library::{
+    short_track_cells, track_cells, track_table, ALBUM_TRACK_WIDTHS, PUBLISHED_TRACK_WIDTHS,
+    SHORT_TRACK_HEADER, TRACK_HEADER, TRACK_WIDTHS,
+};
 
 const NUM_SEARCHFILTERS: usize = 4;
 
@@ -17,36 +22,12 @@ pub fn render_search(
     frame: &mut Frame,
     area: Rect,
     width: usize,
-    query: &str,
-    searchfilters: &[&str],
-    selected_searchfilter: usize,
-    selected_row: usize,
-    liked_track_urns: &HashSet<String>,
-    liked_album_uris: &HashSet<String>,
-    liked_playlist_uris: &HashSet<String>,
-    followed_user_urns: &HashSet<String>,
-    search_tracks: &Vec<Track>,
-    search_tracks_state: &mut TableState,
-    search_playlists: &Vec<Playlist>,
-    search_playlists_state: &mut TableState,
-    search_playlist_tracks: &Vec<Track>,
-    search_playlist_tracks_state: &mut TableState,
-    search_albums: &Vec<Album>,
-    search_albums_state: &mut TableState,
-    search_album_tracks: &Vec<Track>,
-    search_album_tracks_state: &mut TableState,
-    search_people: &Vec<Artist>,
-    search_people_state: &mut TableState,
-    search_people_tracks: &Vec<Track>,
-    search_people_tracks_state: &mut TableState,
-    search_people_likes_tracks: &Vec<Track>,
-    search_people_likes_state: &mut TableState,
-    selected_playlist_track_row: usize,
-    selected_album_track_row: usize,
-    selected_person_track_row: usize,
-    selected_person_like_row: usize,
-    people_focus_is_likes: bool,
+    state: &AppState,
+    data: &mut AppData,
 ) {
+    let selected_searchfilter = state.selected_searchfilter;
+    let selected_row = state.selected_row;
+    let people_focus_is_likes = state.search_people_tracks_focus == FollowingTracksFocus::Likes;
     let subchunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(
@@ -59,7 +40,18 @@ pub fn render_search(
         )
         .split(area);
 
-    let input = Paragraph::new(query.to_string())
+    let (input_text, input_style) = if state.search_typing {
+        (
+            format!("{}▏", state.query),
+            Style::default().fg(theme::current().fg).add_modifier(Modifier::BOLD),
+        )
+    } else if state.query.is_empty() {
+        ("press / to search".to_string(), Style::default().fg(theme::current().dim))
+    } else {
+        (state.query.clone(), Style::default().fg(theme::current().fg))
+    };
+    let input = Paragraph::new(input_text)
+        .style(input_style)
         .block(
             Block::default()
                 .title("search")
@@ -73,61 +65,37 @@ pub fn render_search(
     let table_area = subchunks[1];
 
     if selected_searchfilter == 0 {
-        let header = styled_header(&["♥", "Title", "Artist(s)", "Duration", "Streams"]);
-        let col_widths = vec![
-            Constraint::Length(1),
-            Constraint::Percentage(53),
-            Constraint::Percentage(26),
-            Constraint::Percentage(11),
-            Constraint::Percentage(10),
-        ];
-        let col_min_widths = calculate_min_widths(&col_widths, width);
-
-        let selected_unplayable = search_tracks
-            .get(selected_row)
-            .map(|track| !track.is_playable())
-            .unwrap_or(false);
-
-        let rows = search_tracks
-            .iter()
-            .enumerate()
-            .map(|(i, track)| {
-                let liked = if liked_track_urns.contains(&track.track_urn) {
+        track_table(
+            frame,
+            table_area,
+            &mut data.search_tracks_state,
+            None,
+            &["♥", "Title", "Artist(s)", "Duration", "Streams"],
+            &[
+                Constraint::Length(1),
+                Constraint::Percentage(53),
+                Constraint::Percentage(26),
+                Constraint::Percentage(11),
+                Constraint::Percentage(10),
+            ],
+            &data.search_tracks,
+            |t| {
+                let liked = if data.liked_track_urns.contains(&t.track_urn) {
                     "♥"
                 } else {
                     ""
                 };
-                let mut row = Row::new(vec![
-                    truncate_with_ellipsis(liked, col_min_widths[0]),
-                    truncate_with_ellipsis(&track.title, col_min_widths[1]),
-                    truncate_with_ellipsis(&track.artists, col_min_widths[2]),
-                    truncate_with_ellipsis(&track.duration, col_min_widths[3]),
-                    truncate_with_ellipsis(&track.playback_count, col_min_widths[4]),
-                ]);
-                if !track.is_playable() {
-                    row = row.style(Style::default().fg(Color::DarkGray));
-                }
-                if i == selected_row {
-                    let style = if selected_unplayable {
-                        Style::default().bg(Color::DarkGray).fg(Color::Gray)
-                    } else {
-                        Style::default().bg(Color::LightBlue).fg(Color::White)
-                    };
-                    row = row.style(style);
-                }
-                row
-            })
-            .collect::<Vec<_>>();
-
-        let table = Table::new(rows, col_widths)
-            .header(header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
-            )
-            .column_spacing(1);
-        frame.render_stateful_widget(table, table_area, search_tracks_state);
+                vec![
+                    liked,
+                    t.title.as_str(),
+                    t.artists.as_str(),
+                    t.duration.as_str(),
+                    t.playback_count.as_str(),
+                ]
+            },
+            selected_row,
+            true,
+        );
     } else if selected_searchfilter == 2 {
         let columns = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
@@ -143,11 +111,11 @@ pub fn render_search(
         ];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let left_rows = search_playlists
+        let left_rows = data.search_playlists
             .iter()
             .enumerate()
             .map(|(i, playlist)| {
-                let liked = if liked_playlist_uris.contains(&playlist.tracks_uri) {
+                let liked = if data.liked_playlist_uris.contains(&playlist.tracks_uri) {
                     "♥"
                 } else {
                     ""
@@ -159,7 +127,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&playlist.duration, left_min_widths[3]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
+                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
                 }
                 row
             })
@@ -173,49 +141,20 @@ pub fn render_search(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], search_playlists_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.search_playlists_state);
 
-        let track_header = styled_header(&["Title", "Artist(s)", "Duration", "Streams"]);
-        let track_width = columns[1].width as usize;
-        let track_col_widths = vec![
-            Constraint::Percentage(55),
-            Constraint::Percentage(25),
-            Constraint::Percentage(10),
-            Constraint::Percentage(10),
-        ];
-        let track_min_widths = calculate_min_widths(&track_col_widths, track_width);
-        let track_rows = search_playlist_tracks
-            .iter()
-            .enumerate()
-            .map(|(i, track)| {
-                let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&track.title, track_min_widths[0]),
-                    truncate_with_ellipsis(&track.artists, track_min_widths[1]),
-                    truncate_with_ellipsis(&track.duration, track_min_widths[2]),
-                    truncate_with_ellipsis(&track.playback_count, track_min_widths[3]),
-                ]);
-                if !track.is_playable() {
-                    row = row.style(Style::default().fg(Color::DarkGray));
-                }
-                if i == selected_playlist_track_row {
-                    row = if track.is_playable() {
-                        row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-                    } else {
-                        row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
-                    };
-                }
-                row
-            })
-            .collect::<Vec<_>>();
-        let right_table = Table::new(track_rows, track_col_widths)
-            .header(track_header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
-            )
-            .column_spacing(1);
-        frame.render_stateful_widget(right_table, columns[1], search_playlist_tracks_state);
+        track_table(
+            frame,
+            columns[1],
+            &mut data.search_playlist_tracks_state,
+            None,
+            TRACK_HEADER,
+            &TRACK_WIDTHS,
+            &data.search_playlist_tracks,
+            track_cells,
+            state.search_selected_playlist_track_row,
+            true,
+        );
     } else if selected_searchfilter == 1 {
         let columns = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
@@ -233,11 +172,11 @@ pub fn render_search(
         ];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let left_rows = search_albums
+        let left_rows = data.search_albums
             .iter()
             .enumerate()
             .map(|(i, album)| {
-                let liked = if liked_album_uris.contains(&album.tracks_uri) {
+                let liked = if data.liked_album_uris.contains(&album.tracks_uri) {
                     "♥"
                 } else {
                     ""
@@ -251,7 +190,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&album.duration, left_min_widths[5]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
+                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
                 }
                 row
             })
@@ -265,47 +204,20 @@ pub fn render_search(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], search_albums_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.search_albums_state);
 
-        let track_header = styled_header(&["Title", "Duration", "Streams"]);
-        let track_width = columns[1].width as usize;
-        let track_col_widths = vec![
-            Constraint::Percentage(55),
-            Constraint::Percentage(25),
-            Constraint::Percentage(20),
-        ];
-        let track_min_widths = calculate_min_widths(&track_col_widths, track_width);
-        let track_rows = search_album_tracks
-            .iter()
-            .enumerate()
-            .map(|(i, track)| {
-                let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&track.title, track_min_widths[0]),
-                    truncate_with_ellipsis(&track.duration, track_min_widths[1]),
-                    truncate_with_ellipsis(&track.playback_count, track_min_widths[2]),
-                ]);
-                if !track.is_playable() {
-                    row = row.style(Style::default().fg(Color::DarkGray));
-                }
-                if i == selected_album_track_row {
-                    row = if track.is_playable() {
-                        row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-                    } else {
-                        row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
-                    };
-                }
-                row
-            })
-            .collect::<Vec<_>>();
-        let right_table = Table::new(track_rows, track_col_widths)
-            .header(track_header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
-            )
-            .column_spacing(1);
-        frame.render_stateful_widget(right_table, columns[1], search_album_tracks_state);
+        track_table(
+            frame,
+            columns[1],
+            &mut data.search_album_tracks_state,
+            None,
+            SHORT_TRACK_HEADER,
+            &ALBUM_TRACK_WIDTHS,
+            &data.search_album_tracks,
+            short_track_cells,
+            state.search_selected_album_track_row,
+            true,
+        );
     } else if selected_searchfilter == 3 {
         let columns = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
@@ -320,11 +232,11 @@ pub fn render_search(
         let left_col_widths = vec![Constraint::Length(1), Constraint::Percentage(100)];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let left_rows = search_people
+        let left_rows = data.search_people
             .iter()
             .enumerate()
             .map(|(i, artist)| {
-                let liked = if followed_user_urns.contains(&artist.urn) {
+                let liked = if data.followed_user_urns.contains(&artist.urn) {
                     "♥"
                 } else {
                     ""
@@ -334,7 +246,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&artist.name, left_min_widths[1]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(Color::Gray).fg(Color::Black));
+                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
                 }
                 row
             })
@@ -348,103 +260,33 @@ pub fn render_search(
                     .border_type(BorderType::Rounded),
             )
             .column_spacing(1);
-        frame.render_stateful_widget(left_table, columns[0], search_people_state);
+        frame.render_stateful_widget(left_table, columns[0], &mut data.search_people_state);
 
-        let published_width = columns[1].width as usize;
-        let published_header = styled_header(&["Title", "Duration", "Streams"]);
-        let published_col_widths = vec![
-            Constraint::Percentage(70),
-            Constraint::Percentage(15),
-            Constraint::Percentage(15),
-        ];
-        let published_min_widths = calculate_min_widths(&published_col_widths, published_width);
-        let published_rows = search_people_tracks
-            .iter()
-            .enumerate()
-            .map(|(i, track)| {
-                let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&track.title, published_min_widths[0]),
-                    truncate_with_ellipsis(&track.duration, published_min_widths[1]),
-                    truncate_with_ellipsis(&track.playback_count, published_min_widths[2]),
-                ]);
-                if !track.is_playable() {
-                    row = row.style(Style::default().fg(Color::DarkGray));
-                }
-                if i == selected_person_track_row {
-                    let focused = !people_focus_is_likes;
-                    row = if track.is_playable() {
-                        if focused {
-                            row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-                        } else {
-                            row.style(Style::default().bg(Color::Gray).fg(Color::Black))
-                        }
-                    } else {
-                        row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
-                    };
-                }
-                row
-            })
-            .collect::<Vec<_>>();
-        let published_table = Table::new(published_rows, published_col_widths)
-            .header(published_header)
-            .block(
-                Block::default()
-                    .title("tracks")
-                    .title_alignment(Alignment::Center)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
-            )
-            .column_spacing(1);
-        frame.render_stateful_widget(published_table, columns[1], search_people_tracks_state);
+        track_table(
+            frame,
+            columns[1],
+            &mut data.search_people_tracks_state,
+            Some("tracks"),
+            SHORT_TRACK_HEADER,
+            &PUBLISHED_TRACK_WIDTHS,
+            &data.search_people_tracks,
+            short_track_cells,
+            state.search_selected_person_track_row,
+            !people_focus_is_likes,
+        );
 
-        let likes_width = columns[2].width as usize;
-        let track_header = styled_header(&["Title", "Artist(s)", "Duration", "Streams"]);
-        let likes_col_widths = vec![
-            Constraint::Percentage(55),
-            Constraint::Percentage(25),
-            Constraint::Percentage(10),
-            Constraint::Percentage(10),
-        ];
-        let likes_min_widths = calculate_min_widths(&likes_col_widths, likes_width);
-        let likes_rows = search_people_likes_tracks
-            .iter()
-            .enumerate()
-            .map(|(i, track)| {
-                let mut row = Row::new(vec![
-                    truncate_with_ellipsis(&track.title, likes_min_widths[0]),
-                    truncate_with_ellipsis(&track.artists, likes_min_widths[1]),
-                    truncate_with_ellipsis(&track.duration, likes_min_widths[2]),
-                    truncate_with_ellipsis(&track.playback_count, likes_min_widths[3]),
-                ]);
-                if !track.is_playable() {
-                    row = row.style(Style::default().fg(Color::DarkGray));
-                }
-                if i == selected_person_like_row {
-                    let focused = people_focus_is_likes;
-                    row = if track.is_playable() {
-                        if focused {
-                            row.style(Style::default().bg(Color::LightBlue).fg(Color::White))
-                        } else {
-                            row.style(Style::default().bg(Color::Gray).fg(Color::Black))
-                        }
-                    } else {
-                        row.style(Style::default().bg(Color::DarkGray).fg(Color::Gray))
-                    };
-                }
-                row
-            })
-            .collect::<Vec<_>>();
-        let likes_table = Table::new(likes_rows, likes_col_widths)
-            .header(track_header)
-            .block(
-                Block::default()
-                    .title("liked")
-                    .title_alignment(Alignment::Center)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded),
-            )
-            .column_spacing(1);
-        frame.render_stateful_widget(likes_table, columns[2], search_people_likes_state);
+        track_table(
+            frame,
+            columns[2],
+            &mut data.search_people_likes_state,
+            Some("liked"),
+            TRACK_HEADER,
+            &TRACK_WIDTHS,
+            &data.search_people_likes_tracks,
+            track_cells,
+            state.search_selected_person_like_row,
+            people_focus_is_likes,
+        );
     } else {
         let header = Row::new(vec![] as Vec<Cell>);
         let table = Table::new(Vec::<Row>::new(), vec![Constraint::Percentage(100)])
@@ -460,12 +302,12 @@ pub fn render_search(
 
     let tab_width = width / NUM_SEARCHFILTERS;
     fn center_text_in_width(text: &str, width: usize) -> String {
-        let total_padding = width - text.chars().count();
-        let padding = (total_padding / 2) - 1;
+        let total_padding = width.saturating_sub(text.chars().count());
+        let padding = (total_padding / 2).saturating_sub(1);
         format!("{}{}{}", " ".repeat(padding), text, " ".repeat(padding))
     }
 
-    let searchfilter: Vec<Span<'static>> = searchfilters
+    let searchfilter: Vec<Span<'static>> = SEARCHFILTERS
         .iter()
         .map(|filter| Span::raw(center_text_in_width(filter, tab_width)))
         .collect();
@@ -478,10 +320,10 @@ pub fn render_search(
                 .border_type(ratatui::widgets::BorderType::Rounded),
         )
         .select(selected_searchfilter)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::current().fg))
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::current().accent)
                 .add_modifier(Modifier::BOLD),
         );
     frame.render_widget(searchfilter_widget, subchunks[2]);

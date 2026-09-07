@@ -1,58 +1,58 @@
-use chrono::{DateTime, FixedOffset, Utc};
 use reqwest::blocking::Client;
-use reqwest;
 
-use crate::auth::{Token, try_refresh_token};
+use crate::auth::Token;
 
-use super::super::utils::{format_duration, format_playback_count, parse_next_href, parse_str, parse_u64};
-use crate::api::{API, Playlist, Track};
+use super::super::utils::{
+    access_token, format_duration, parse_datetime, parse_str, parse_track, parse_u64, response_items,
+};
+use crate::api::{API, Page, Playlist, Track};
 use std::sync::{Arc, Mutex};
+
+/// A playlist object from any `/playlists` endpoint, as the library shows it.
+pub(crate) fn parse_playlist(playlist: &serde_json::Value, is_owned: bool) -> Playlist {
+    Playlist {
+        title: parse_str(playlist, "title"),
+        track_count: parse_u64(playlist, "track_count").to_string(),
+        duration: format_duration(parse_u64(playlist, "duration")),
+        created_at: parse_datetime(playlist, "created_at"),
+        tracks_uri: parse_str(playlist, "tracks_uri"),
+        is_owned,
+    }
+}
 
 impl API {
     pub fn get_playlists(&mut self) -> anyhow::Result<Vec<Playlist>> {
-        let _ = try_refresh_token(&self.token);
+        let access_token = access_token(&self.token);
 
-        let token_guard = self.token.lock().unwrap();
+        let urls = [
+            self.my_playlists_page.url(
+                "https://api.soundcloud.com/me/playlists?linked_partitioning=true&limit=40&show_tracks=false",
+            ),
+            self.others_playlists_page.url(
+                "https://api.soundcloud.com/me/likes/playlists?limit=40&linked_partitioning=true",
+            ),
+        ];
 
-        let should_fetch_my =
-            !self.my_first_playlist_page_fetched || self.my_playlists_next_href.is_some();
-        let should_fetch_others =
-            !self.others_first_playlist_page_fetched || self.others_playlists_next_href.is_some();
-
-        if !should_fetch_my && !should_fetch_others {
+        if urls.iter().all(Option::is_none) {
             return Ok(Vec::new());
         }
-
-        let urls = vec![
-            self.my_playlists_next_href.clone().unwrap_or_else(|| {
-                "https://api.soundcloud.com/me/playlists?linked_partitioning=true&limit=40&show_tracks=false".to_string()
-            }),
-            self.others_playlists_next_href.clone().unwrap_or_else(|| {
-                "https://api.soundcloud.com/me/likes/playlists?limit=40&linked_partitioning=true"
-                    .to_string()
-            }),
-        ];
 
         let mut playlists = Vec::new();
 
         for (i, url) in urls.iter().enumerate() {
-            if (i == 0 && !should_fetch_my) || (i == 1 && !should_fetch_others) {
-                continue;
-            }
+            let Some(url) = url else { continue };
             let resp: serde_json::Value = Client::new()
                 .get(url)
-                .bearer_auth(&token_guard.access_token)
+                .bearer_auth(&access_token)
                 .send()?
                 .error_for_status()?
                 .json()?;
 
-            let next_href = parse_next_href(&resp);
+            let page = Page::from_response(&resp);
             if i == 0 {
-                self.my_playlists_next_href = next_href;
-                self.my_first_playlist_page_fetched = true;
+                self.my_playlists_page = page;
             } else {
-                self.others_playlists_next_href = next_href;
-                self.others_first_playlist_page_fetched = true;
+                self.others_playlists_page = page;
             }
 
             if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
@@ -67,26 +67,7 @@ impl API {
                         continue;
                     }
 
-                    let title = parse_str(&playlist, "title");
-                    let track_count = parse_u64(&playlist, "track_count").to_string();
-                    let duration = format_duration(parse_u64(&playlist, "duration"));
-                    let created_at = DateTime::parse_from_str(
-                        &parse_str(&playlist, "created_at"),
-                        "%Y/%m/%d %H:%M:%S %z",
-                    )
-                    .unwrap_or_else(|_| {
-                        Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap())
-                    });
-                    let tracks_uri = parse_str(&playlist, "tracks_uri");
-
-                    playlists.push(Playlist {
-                        title,
-                        track_count,
-                        duration,
-                        created_at,
-                        tracks_uri,
-                        is_owned: i == 0,
-                    });
+                    playlists.push(parse_playlist(playlist, i == 0));
                 }
             }
         }
@@ -94,93 +75,13 @@ impl API {
         playlists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(playlists)
     }
-
-    pub fn get_playlist_tracks(&mut self, tracks_uri: &str) -> anyhow::Result<Vec<Track>> {
-        let _ = try_refresh_token(&self.token);
-
-        let token_guard = self.token.lock().unwrap();
-
-        let mut url = if tracks_uri.starts_with("http") {
-            tracks_uri.to_string()
-        } else {
-            format!("https://api.soundcloud.com{}", tracks_uri)
-        };
-        if url.contains('?') {
-            if !url.contains("linked_partitioning") {
-                url.push_str("&linked_partitioning=true");
-            }
-            if !url.contains("limit=") {
-                url.push_str("&limit=200");
-            }
-        } else {
-            url.push_str("?linked_partitioning=true&limit=200");
-        }
-
-        let resp: serde_json::Value = Client::new()
-            .get(&url)
-            .bearer_auth(&token_guard.access_token)
-            .send()?
-            .error_for_status()?
-            .json()?;
-
-        drop(token_guard);
-
-        let items = if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
-            collection.clone()
-        } else if let Some(array) = resp.as_array() {
-            array.clone()
-        } else {
-            Vec::new()
-        };
-
-        let mut tracks = Vec::new();
-        for track in items {
-            let title = parse_str(&track, "title");
-
-            let artists = parse_str(&track, "metadata_artist");
-            let artists = if !artists.is_empty() {
-                artists
-            } else {
-                parse_str(
-                    track.get("user").unwrap_or(&serde_json::Value::Null),
-                    "username",
-                )
-            };
-            let duration = format_duration(parse_u64(&track, "duration"));
-            let duration_ms = parse_u64(&track, "duration");
-
-            let playback_count = parse_u64(&track, "playback_count");
-            let playback_count = format_playback_count(playback_count);
-
-            let artwork_url = parse_str(&track, "artwork_url");
-            let stream_url = parse_str(&track, "stream_url");
-            let access = parse_str(&track, "access");
-            let track_urn = parse_str(&track, "urn");
-
-            tracks.push(Track {
-                title,
-                artists,
-                duration,
-                duration_ms,
-                playback_count,
-                artwork_url,
-                stream_url,
-                access,
-                track_urn,
-            });
-        }
-
-        Ok(tracks)
-    }
 }
 
 pub async fn fetch_playlist_tracks(
     token: Arc<Mutex<Token>>,
     tracks_uri: String,
 ) -> anyhow::Result<Vec<Track>> {
-    let _ = try_refresh_token(&token);
-
-    let access_token = { token.lock().unwrap().access_token.clone() };
+    let access_token = access_token(&token);
 
     let mut url = if tracks_uri.starts_with("http") {
         tracks_uri
@@ -210,50 +111,5 @@ pub async fn fetch_playlist_tracks(
         .json()
         .await?;
 
-    let items = if let Some(collection) = resp.get("collection").and_then(|v| v.as_array()) {
-        collection.clone()
-    } else if let Some(array) = resp.as_array() {
-        array.clone()
-    } else {
-        Vec::new()
-    };
-
-    let mut tracks = Vec::new();
-    for track in items {
-        let title = parse_str(&track, "title");
-
-        let artists = parse_str(&track, "metadata_artist");
-        let artists = if !artists.is_empty() {
-            artists
-        } else {
-            parse_str(
-                track.get("user").unwrap_or(&serde_json::Value::Null),
-                "username",
-            )
-        };
-        let duration = format_duration(parse_u64(&track, "duration"));
-        let duration_ms = parse_u64(&track, "duration");
-
-        let playback_count = parse_u64(&track, "playback_count");
-        let playback_count = format_playback_count(playback_count);
-
-        let artwork_url = parse_str(&track, "artwork_url");
-        let stream_url = parse_str(&track, "stream_url");
-        let access = parse_str(&track, "access");
-        let track_urn = parse_str(&track, "urn");
-
-        tracks.push(Track {
-            title,
-            artists,
-            duration,
-            duration_ms,
-            playback_count,
-            artwork_url,
-            stream_url,
-            access,
-            track_urn,
-        });
-    }
-
-    Ok(tracks)
+    Ok(response_items(&resp).into_iter().map(|v| parse_track(&v)).collect())
 }

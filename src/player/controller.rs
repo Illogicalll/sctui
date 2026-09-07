@@ -13,13 +13,18 @@ use std::time::{Duration, Instant};
 use super::commands::PlayerCommand;
 use super::worker::player_loop;
 
+#[derive(Default)]
+pub(crate) struct Position {
+    pub elapsed: Duration,
+    pub last_start: Option<Instant>,
+    pub track: Option<Track>,
+}
+
 pub struct Player {
     tx: Sender<PlayerCommand>,
     is_playing_flag: Arc<AtomicBool>,
     is_seeking_flag: Arc<AtomicBool>,
-    elapsed_time: Arc<Mutex<Duration>>,
-    last_start: Arc<Mutex<Option<Instant>>>,
-    current_track: Arc<Mutex<Option<Track>>>,
+    position: Arc<Mutex<Position>>,
     sink: Arc<Mutex<Option<Sink>>>,
     wave_buffer: Arc<Mutex<VecDeque<f32>>>,
 }
@@ -30,18 +35,14 @@ impl Player {
         let is_playing_flag = Arc::new(AtomicBool::new(false));
         let is_seeking_flag = Arc::new(AtomicBool::new(false));
         let sink = Arc::new(Mutex::new(None));
-        let elapsed_time = Arc::new(Mutex::new(Duration::ZERO));
-        let last_start = Arc::new(Mutex::new(None));
-        let current_track = Arc::new(Mutex::new(None));
+        let position = Arc::new(Mutex::new(Position::default()));
         let wave_buffer = Arc::new(Mutex::new(VecDeque::new()));
 
         {
             let flag_clone = Arc::clone(&is_playing_flag);
             let sink_clone = Arc::clone(&sink);
             let token_clone = Arc::clone(&token);
-            let elapsed_clone = Arc::clone(&elapsed_time);
-            let last_start_clone = Arc::clone(&last_start);
-            let track_clone = Arc::clone(&current_track);
+            let position_clone = Arc::clone(&position);
             let seeking_clone = Arc::clone(&is_seeking_flag);
             let wave_buffer_clone = Arc::clone(&wave_buffer);
 
@@ -52,9 +53,7 @@ impl Player {
                     flag_clone,
                     seeking_clone,
                     sink_clone,
-                    elapsed_clone,
-                    last_start_clone,
-                    track_clone,
+                    position_clone,
                     wave_buffer_clone,
                 );
             });
@@ -64,9 +63,7 @@ impl Player {
             tx,
             is_playing_flag,
             is_seeking_flag,
-            elapsed_time,
-            last_start,
-            current_track,
+            position,
             sink,
             wave_buffer,
         }
@@ -92,14 +89,6 @@ impl Player {
         let _ = self.tx.send(PlayerCommand::VolumeDown);
     }
 
-    pub fn next_song(&self) {
-        let _ = self.tx.send(PlayerCommand::NextSong);
-    }
-
-    pub fn prev_song(&self) {
-        let _ = self.tx.send(PlayerCommand::PrevSong);
-    }
-
     pub fn fast_forward(&self) {
         let _ = self.tx.send(PlayerCommand::FastForward);
     }
@@ -121,19 +110,20 @@ impl Player {
     }
 
     pub fn elapsed(&self) -> u64 {
-        let mut elapsed = *self.elapsed_time.lock().unwrap();
-        if self.is_playing() {
-            if let Some(start) = *self.last_start.lock().unwrap() {
+        let pos = self.position.lock().unwrap();
+        let mut elapsed = pos.elapsed;
+        if self.is_playing()
+            && let Some(start) = pos.last_start {
                 elapsed += start.elapsed();
             }
-        }
         elapsed.as_millis().try_into().unwrap()
     }
 
     pub fn current_track(&self) -> Track {
-        self.current_track
+        self.position
             .lock()
             .unwrap()
+            .track
             .clone()
             .unwrap_or_else(|| Track {
                 title: "No Track Playing - Press <ENTER> on Something to Play!".to_string(),
@@ -142,7 +132,6 @@ impl Player {
                 duration_ms: 1,
                 playback_count: "0".to_string(),
                 artwork_url: "".to_string(),
-                stream_url: "".to_string(),
                 access: "playable".to_string(),
                 track_urn: "".to_string(),
             })

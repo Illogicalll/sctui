@@ -103,7 +103,6 @@ pub fn build_search_matches(
     selected_subtab: usize,
     query: &str,
     likes: &Vec<Track>,
-    playlists: &Vec<Playlist>,
     playlist_tracks: &Vec<Track>,
     albums: &Vec<Album>,
     following: &Vec<Artist>,
@@ -169,6 +168,12 @@ pub fn build_search_matches(
         }
         _ => Vec::new(),
     }
+}
+
+/// Adjust a playlist's displayed track count by `delta`, never below zero.
+pub(crate) fn bump_track_count(playlist: &mut Playlist, delta: i64) {
+    let n = playlist.track_count.trim().parse::<i64>().unwrap_or(0);
+    playlist.track_count = (n + delta).max(0).to_string();
 }
 
 pub fn soundcloud_id_from_urn(urn: &str) -> Option<u64> {
@@ -257,6 +262,23 @@ pub fn build_queue(
     }
 }
 
+/// Extend the playing list with `incoming`, queueing each new playable track after what is
+/// already queued. Tracks already present (by urn) or unplayable are dropped.
+pub(crate) fn append_feed_tracks(
+    playback_tracks: &mut Vec<Track>,
+    auto_queue: &mut VecDeque<usize>,
+    incoming: Vec<Track>,
+) {
+    for track in incoming {
+        let seen = playback_tracks.iter().any(|t| t.track_urn == track.track_urn);
+        if seen || !track.is_playable() {
+            continue;
+        }
+        auto_queue.push_back(playback_tracks.len());
+        playback_tracks.push(track);
+    }
+}
+
 pub fn play_queued_track(
     queued: QueuedTrack,
     state: &mut AppState,
@@ -290,12 +312,16 @@ pub fn play_queued_track(
         PlaybackSource::Playlist
         | PlaybackSource::Album
         | PlaybackSource::FollowingPublished
-        | PlaybackSource::FollowingLikes => {
+        | PlaybackSource::FollowingLikes
+        | PlaybackSource::Feed
+        | PlaybackSource::Radio => {
             let tracks = queued.tracks_snapshot.unwrap_or_else(|| match queued.source {
                 PlaybackSource::Playlist => data.playlist_tracks.clone(),
                 PlaybackSource::Album => data.album_tracks.clone(),
                 PlaybackSource::FollowingPublished => data.following_tracks.clone(),
                 PlaybackSource::FollowingLikes => data.following_likes_tracks.clone(),
+                PlaybackSource::Feed => data.feed_tracks.clone(),
+                PlaybackSource::Radio => data.playback_tracks.clone(),
                 PlaybackSource::Likes => Vec::new(),
             });
             if tracks.is_empty() || queued.index >= tracks.len() {
@@ -347,76 +373,101 @@ pub fn play_queued_track(
     }
 }
 
+pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Track] {
+    match state.playback_source {
+        PlaybackSource::Likes => &data.likes,
+        PlaybackSource::Playlist
+        | PlaybackSource::Album
+        | PlaybackSource::FollowingPublished
+        | PlaybackSource::FollowingLikes
+        | PlaybackSource::Feed
+        | PlaybackSource::Radio => &data.playback_tracks,
+    }
+}
+
+/// Hand playback over to related tracks, seeded by `seed` (the track playing now, index 0).
+/// The main loop notices the near-empty radio queue and fetches related tracks for the seed.
+pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seed: Track) {
+    state.playback_source = PlaybackSource::Radio;
+    state.override_playing = None;
+    state.current_playing_index = Some(0);
+    state.auto_queue.clear();
+    state.radio_fetched_for = None;
+    state.radio_waiting = false;
+    data.playback_tracks = vec![seed];
+    data.playback_playlist_uri = None;
+    data.playback_album_uri = None;
+    data.playback_following_user_urn = None;
+}
+
 pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if let Some(override_track) = state.override_playing.as_ref() {
         return Some(override_track.clone());
     }
     let idx = state.current_playing_index?;
-    match state.playback_source {
-        PlaybackSource::Likes => {
-            let track = data.likes.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::Likes,
-                index: idx,
-                track,
-                tracks_snapshot: None,
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: None,
-                user_added: false,
-            })
+    let source = state.playback_source;
+    let track = active_tracks(state, data).get(idx)?;
+    let (tracks_snapshot, playlist_uri, album_uri, following_user_urn) = match source {
+        PlaybackSource::Likes => (None, None, None, None),
+        PlaybackSource::Playlist => (
+            Some(&data.playback_tracks),
+            data.playback_playlist_uri.clone(),
+            None,
+            None,
+        ),
+        PlaybackSource::Album => (
+            Some(&data.playback_tracks),
+            None,
+            data.playback_album_uri.clone(),
+            None,
+        ),
+        PlaybackSource::FollowingPublished | PlaybackSource::FollowingLikes => (
+            Some(&data.playback_tracks),
+            None,
+            None,
+            data.playback_following_user_urn.clone(),
+        ),
+        PlaybackSource::Feed | PlaybackSource::Radio => (Some(&data.playback_tracks), None, None, None),
+    };
+    Some(QueuedTrack::new(
+        source, idx, track, tracks_snapshot, playlist_uri, album_uri, following_user_urn, false,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(urn: &str, access: &str) -> Track {
+        Track {
+            title: urn.to_string(),
+            artists: String::new(),
+            duration: String::new(),
+            duration_ms: 0,
+            playback_count: String::new(),
+            artwork_url: String::new(),
+            access: access.to_string(),
+            track_urn: urn.to_string(),
         }
-        PlaybackSource::Playlist => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::Playlist,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: data.playback_playlist_uri.clone(),
-                album_uri: None,
-                following_user_urn: None,
-                user_added: false,
-            })
-        }
-        PlaybackSource::Album => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::Album,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: None,
-                album_uri: data.playback_album_uri.clone(),
-                following_user_urn: None,
-                user_added: false,
-            })
-        }
-        PlaybackSource::FollowingPublished => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::FollowingPublished,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: data.playback_following_user_urn.clone(),
-                user_added: false,
-            })
-        }
-        PlaybackSource::FollowingLikes => {
-            let track = data.playback_tracks.get(idx)?.clone();
-            Some(QueuedTrack {
-                source: PlaybackSource::FollowingLikes,
-                index: idx,
-                track,
-                tracks_snapshot: Some(data.playback_tracks.clone()),
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: data.playback_following_user_urn.clone(),
-                user_added: false,
-            })
-        }
+    }
+
+    #[test]
+    fn append_feed_tracks_queues_new_playable_tracks_after_existing_queue() {
+        let mut playing = vec![track("a", "playable"), track("b", "playable")];
+        let mut queue = VecDeque::from([1]);
+        append_feed_tracks(
+            &mut playing,
+            &mut queue,
+            vec![
+                track("a", "playable"), // duplicate of what is playing: dropped
+                track("c", "blocked"),  // unplayable: dropped
+                track("d", "playable"),
+                track("e", ""),
+                track("d", "playable"), // duplicate within the batch: dropped
+            ],
+        );
+        let urns: Vec<&str> = playing.iter().map(|t| t.track_urn.as_str()).collect();
+        assert_eq!(urns, ["a", "b", "d", "e"]);
+        assert_eq!(queue, VecDeque::from([1, 2, 3]));
     }
 }

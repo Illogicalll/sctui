@@ -1,40 +1,26 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     symbols::{self},
     text::{Span, Text},
     widgets::{Axis, Block, Chart, Dataset, Gauge, Paragraph},
 };
 use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
+use crate::theme;
 
-use crate::api::Track;
-
-fn format_duration(duration_ms: u64) -> String {
-    let duration_sec = duration_ms / 1000;
-    let hours = duration_sec / 3600;
-    let minutes = (duration_sec % 3600) / 60;
-    let seconds = duration_sec % 60;
-
-    if hours > 0 {
-        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
-    } else {
-        format!("{:02}:{:02}", minutes, seconds)
-    }
-}
+use crate::api::format_duration;
+use crate::player::Player;
+use crate::tui::logic::state::AppState;
 
 pub fn render_now_playing(
     frame: &mut Frame,
     area: Rect,
-    data: &mut Vec<(f64, f64)>,
-    window: &mut [f64; 2],
-    progress: &mut u64,
-    selected_track: Track,
+    state: &AppState,
+    player: &Player,
     cover_art_async: &mut ThreadProtocol,
-    current_volume: f32,
-    shuffle_enabled: bool,
-    repeat_enabled: bool,
 ) {
+    let selected_track = player.current_track();
     let subchunks = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints(
@@ -120,39 +106,37 @@ pub fn render_now_playing(
 
     frame.render_widget(artist, subsubchunks[3]);
 
-    let max_time: f64 = selected_track.duration_ms.clone() as f64;
+    let max_time: f64 = selected_track.duration_ms as f64;
 
-    let progress_float = *progress as f64;
+    let progress_float = state.progress as f64;
 
     let label = Span::styled(
         format!(
             "{} / {}",
-            format_duration(*progress),
+            format_duration(state.progress),
             selected_track.duration.clone()
         ),
-        Style::default().fg(Color::White),
+        Style::default().fg(theme::current().fg),
     );
 
     let ratio = (progress_float / max_time).min(1.0).max(0.0);
 
     let progress_bar = Gauge::default()
-        .style(Style::default().bg(Color::LightBlue))
-        .gauge_style(Color::Cyan)
+        .style(Style::default().bg(theme::current().selection_bg))
+        .gauge_style(theme::current().accent)
         .ratio(ratio)
         .label(label);
 
     frame.render_widget(progress_bar, subsubchunks[5]);
 
-    let shuffle_indicator = if shuffle_enabled { "✔︎" } else { "×" };
-    let repeat_indicator = if repeat_enabled { "✔︎" } else { "×" };
+    let shuffle_indicator = if state.shuffle_enabled { "✔︎" } else { "×" };
+    let repeat_indicator = if state.repeat_enabled { "✔︎" } else { "×" };
 
-    let lines = vec![
-        "".to_string(),
+    let lines = ["".to_string(),
         "".to_string(),
         format!("shf:   {}", shuffle_indicator),
-        format!("vol: {:.1}", current_volume),
-        format!("rep:   {}", repeat_indicator),
-    ];
+        format!("vol: {:.1}", player.get_volume()),
+        format!("rep:   {}", repeat_indicator)];
 
     let text = Text::from(lines.join("\n"));
 
@@ -161,16 +145,22 @@ pub fn render_now_playing(
         .alignment(ratatui::layout::Alignment::Right);
 
     frame.render_widget(song_name, horizontal_split[5]);
+    let data: Vec<(f64, f64)> = (0..200)
+        .map(|i| {
+            let x = state.tick + i as f64 * 0.1;
+            (x, (x / 2.0).sin() * 10.0)
+        })
+        .collect();
     let datasets = vec![
         Dataset::default()
             .marker(symbols::Marker::Braille)
-            .style(Style::default().fg(Color::Cyan))
+            .style(Style::default().fg(theme::current().accent))
             .data(&data),
     ];
 
     let chart = Chart::new(datasets)
         .block(Block::default())
-        .x_axis(Axis::default().bounds([window[0], window[1]]))
+        .x_axis(Axis::default().bounds([state.tick, state.tick + 20.0]))
         .y_axis(Axis::default().bounds([-10.0, 10.0]));
 
     frame.render_widget(&chart, subchunks[2]);

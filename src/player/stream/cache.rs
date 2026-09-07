@@ -10,15 +10,13 @@ pub(crate) const HLS_CACHE_TTL: std::time::Duration = std::time::Duration::from_
 
 #[derive(Debug)]
 pub(crate) struct SegmentCache {
-    cap: usize,
     order: VecDeque<usize>,
     map: HashMap<usize, Arc<Vec<u8>>>,
 }
 
 impl SegmentCache {
-    pub(crate) fn new(cap: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            cap: cap.max(1),
             order: VecDeque::new(),
             map: HashMap::new(),
         }
@@ -40,7 +38,7 @@ impl SegmentCache {
         self.order.push_back(idx);
         self.map.insert(idx, bytes);
 
-        while self.order.len() > self.cap {
+        while self.order.len() > SEGMENT_CACHE_CAP {
             if let Some(evict) = self.order.pop_front() {
                 self.map.remove(&evict);
             }

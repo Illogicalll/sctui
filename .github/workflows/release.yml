@@ -1,0 +1,173 @@
+name: Release
+
+# On a `v*` tag: check the tag matches Cargo.toml, run the test suite on every OS,
+# build every target, smoke-install each archive on its OS through the real
+# installer scripts, and only then publish the GitHub Release. Any failure
+# leaves no release behind.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          v=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "Cargo.toml is $v but the tag is $GITHUB_REF_NAME - bump the version first"
+            exit 1
+          fi
+
+  test:
+    name: test ${{ matrix.os }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --all-targets
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          name=sctui-${{ matrix.target }}
+          mkdir -p dist/$name
+          cp target/${{ matrix.target }}/release/sctui LICENSE README.md dist/$name/
+          tar -C dist -czf dist/$name.tar.gz $name
+          (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "sctui-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path dist/$name | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/sctui.exe, LICENSE, README.md dist/$name/
+          Compress-Archive -Path dist/$name -DestinationPath dist/$name.zip
+          $hash = (Get-FileHash dist/$name.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii -NoNewline dist/$name.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+  # Installs the freshly built archive on each OS exactly as a user would, from a
+  # local HTTP server standing in for GitHub Releases, then runs the binary.
+  smoke:
+    name: smoke ${{ matrix.target }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist
+
+      - name: Install Linux runtime dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2
+
+      - name: Install via install.sh and run
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export SCTUI_VERSION="$GITHUB_REF_NAME" SCTUI_BASE_URL="file://$(pwd)/dist"
+          sh install.sh
+          out=$("$HOME/.local/bin/sctui" --version)
+          echo "$out"
+          [ "$out" = "sctui ${GITHUB_REF_NAME#v}" ] || { echo "unexpected --version output"; exit 1; }
+
+      - name: Install via install.ps1 and run
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process python -ArgumentList '-m','http.server','8000' -WorkingDirectory dist -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $env:SCTUI_VERSION = $env:GITHUB_REF_NAME
+          $env:SCTUI_BASE_URL = "http://127.0.0.1:8000"
+          ./install.ps1
+          $out = & "$env:LOCALAPPDATA\sctui\bin\sctui.exe" --version
+          Write-Host $out
+          $expected = "sctui " + $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($out -ne $expected) { throw "unexpected --version output: '$out' (expected '$expected')" }
+
+  release:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          # v0.1.0-rc.1 etc. stay out of `releases/latest`, so installers and the
+          # in-app updater ignore them: safe dry runs of this whole pipeline.
+          prerelease: ${{ contains(github.ref_name, '-') }}

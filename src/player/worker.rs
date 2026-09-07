@@ -1,4 +1,3 @@
-use crate::api::Track;
 use crate::auth::Token;
 use rodio::Sink;
 use std::collections::VecDeque;
@@ -9,6 +8,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use super::Position;
 use super::commands::PlayerCommand;
 use super::stream::{PlaybackEngine, open_output_stream};
 
@@ -18,9 +18,7 @@ pub(crate) fn player_loop(
     is_playing_flag: Arc<AtomicBool>,
     is_seeking_flag: Arc<AtomicBool>,
     sink_arc: Arc<Mutex<Option<Sink>>>,
-    elapsed_time: Arc<Mutex<Duration>>,
-    last_start: Arc<Mutex<Option<Instant>>>,
-    current_track: Arc<Mutex<Option<Track>>>,
+    position: Arc<Mutex<Position>>,
     wave_buffer: Arc<Mutex<VecDeque<f32>>>,
 ) {
     let stream = open_output_stream();
@@ -35,23 +33,7 @@ pub(crate) fn player_loop(
                     &token,
                     &sink_arc,
                     &is_playing_flag,
-                    &elapsed_time,
-                    &last_start,
-                    &current_track,
-                    &wave_buffer,
-                );
-            }
-
-            PlayerCommand::PlayFromPosition(track, position_ms) => {
-                engine.play_from_position(
-                    &track,
-                    position_ms,
-                    &token,
-                    &sink_arc,
-                    &is_playing_flag,
-                    &elapsed_time,
-                    &last_start,
-                    &current_track,
+                    &position,
                     &wave_buffer,
                 );
             }
@@ -65,11 +47,11 @@ pub(crate) fn player_loop(
                     s.pause();
                     is_playing_flag.store(false, Ordering::SeqCst);
 
-                    if let Some(start) = *last_start.lock().unwrap() {
-                        let mut elapsed = elapsed_time.lock().unwrap();
-                        *elapsed += start.elapsed();
+                    let mut pos = position.lock().unwrap();
+                    if let Some(start) = pos.last_start {
+                        pos.elapsed += start.elapsed();
                     }
-                    *last_start.lock().unwrap() = None;
+                    pos.last_start = None;
                 }
             }
 
@@ -77,7 +59,7 @@ pub(crate) fn player_loop(
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.play();
                     is_playing_flag.store(true, Ordering::SeqCst);
-                    *last_start.lock().unwrap() = Some(Instant::now());
+                    position.lock().unwrap().last_start = Some(Instant::now());
                 }
             }
 
@@ -95,41 +77,37 @@ pub(crate) fn player_loop(
                 }
             }
 
-            PlayerCommand::NextSong => {}
-
-            PlayerCommand::PrevSong => {}
-
             PlayerCommand::FastForward => {
                 if is_seeking_flag.swap(true, Ordering::SeqCst) {
                     continue;
                 }
-                let current_track_guard = current_track.lock().unwrap();
-                if let Some(track) = current_track_guard.clone() {
-                    drop(current_track_guard);
-
-                    let elapsed = elapsed_time.lock().unwrap();
+                let pos = position.lock().unwrap();
+                if let Some(track) = pos.track.clone() {
                     let current_elapsed = if is_playing_flag.load(Ordering::SeqCst) {
-                        if let Some(start) = *last_start.lock().unwrap() {
-                            *elapsed + start.elapsed()
+                        if let Some(start) = pos.last_start {
+                            pos.elapsed + start.elapsed()
                         } else {
-                            *elapsed
+                            pos.elapsed
                         }
                     } else {
-                        *elapsed
+                        pos.elapsed
                     };
 
                     let new_elapsed = current_elapsed + Duration::from_secs(10);
                     let max_duration = Duration::from_millis(track.duration_ms);
 
-                    drop(elapsed);
+                    drop(pos);
 
                     if new_elapsed >= max_duration {
+                        // Leave the track in the same state as a natural end-of-track
+                        // (is_playing still true, elapsed == duration) so the TUI tick's
+                        // end-of-track handling advances to the next track.
                         if let Some(ref s) = *sink_arc.lock().unwrap() {
                             s.stop();
                         }
-                        is_playing_flag.store(false, Ordering::SeqCst);
-                        *elapsed_time.lock().unwrap() = max_duration;
-                        *last_start.lock().unwrap() = None;
+                        let mut pos = position.lock().unwrap();
+                        pos.elapsed = max_duration;
+                        pos.last_start = None;
                     } else {
                         let new_position_ms = new_elapsed.as_millis() as u64;
                         engine.play_from_position(
@@ -138,9 +116,7 @@ pub(crate) fn player_loop(
                             &token,
                             &sink_arc,
                             &is_playing_flag,
-                            &elapsed_time,
-                            &last_start,
-                            &current_track,
+                            &position,
                             &wave_buffer,
                         );
                     }
@@ -152,19 +128,16 @@ pub(crate) fn player_loop(
                 if is_seeking_flag.swap(true, Ordering::SeqCst) {
                     continue;
                 }
-                let current_track_guard = current_track.lock().unwrap();
-                if let Some(track) = current_track_guard.clone() {
-                    drop(current_track_guard);
-
-                    let elapsed = elapsed_time.lock().unwrap();
+                let pos = position.lock().unwrap();
+                if let Some(track) = pos.track.clone() {
                     let current_elapsed = if is_playing_flag.load(Ordering::SeqCst) {
-                        if let Some(start) = *last_start.lock().unwrap() {
-                            *elapsed + start.elapsed()
+                        if let Some(start) = pos.last_start {
+                            pos.elapsed + start.elapsed()
                         } else {
-                            *elapsed
+                            pos.elapsed
                         }
                     } else {
-                        *elapsed
+                        pos.elapsed
                     };
 
                     let rewind_duration = Duration::from_secs(10);
@@ -174,7 +147,7 @@ pub(crate) fn player_loop(
                         Duration::ZERO
                     };
 
-                    drop(elapsed);
+                    drop(pos);
 
                     let new_position_ms = new_elapsed.as_millis() as u64;
                     engine.play_from_position(
@@ -183,9 +156,7 @@ pub(crate) fn player_loop(
                         &token,
                         &sink_arc,
                         &is_playing_flag,
-                        &elapsed_time,
-                        &last_start,
-                        &current_track,
+                        &position,
                         &wave_buffer,
                     );
                 }

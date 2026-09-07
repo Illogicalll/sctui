@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
+use crate::theme;
 
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint},
-    style::{Color, Style},
+    style::{Style},
     widgets::{Block, Borders, Clear, Row, Table},
 };
 
@@ -15,7 +16,7 @@ use super::utils::centered_rect;
 
 pub fn render_queue(
     frame: &mut Frame,
-    queue_tracks: &Vec<Track>,
+    queue_tracks: &[Track],
     manual_queue: &VecDeque<QueuedTrack>,
     auto_queue: &VecDeque<usize>,
     current_playing_track: Option<Track>,
@@ -37,11 +38,11 @@ pub fn render_queue(
                 truncate_with_ellipsis(&track.artists, artist_width),
                 track.duration.clone(),
             ])
-            .style(Style::default().fg(Color::DarkGray)),
+            .style(Style::default().fg(theme::current().dim)),
         );
     } else {
         rows.push(
-            Row::new(vec!["Previous: None", "", ""]).style(Style::default().fg(Color::DarkGray)),
+            Row::new(vec!["Previous: None", "", ""]).style(Style::default().fg(theme::current().dim)),
         );
     }
 
@@ -52,7 +53,7 @@ pub fn render_queue(
                 truncate_with_ellipsis(&track.artists, artist_width),
                 track.duration.clone(),
             ])
-            .style(Style::default().bg(Color::LightBlue).fg(Color::White)),
+            .style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg)),
         );
     } else {
         rows.push(Row::new(vec!["Now Playing: None", "", ""]));
@@ -72,7 +73,7 @@ pub fn render_queue(
             track.duration.clone(),
         ]);
         if !track.is_playable() {
-            row = row.style(Style::default().fg(Color::DarkGray));
+            row = row.style(Style::default().fg(theme::current().dim));
         }
         rows.push(row);
         remaining -= 1;
@@ -89,7 +90,7 @@ pub fn render_queue(
                 track.duration.clone(),
             ]);
             if !track.is_playable() {
-                row = row.style(Style::default().fg(Color::DarkGray));
+                row = row.style(Style::default().fg(theme::current().dim));
             }
             rows.push(row);
             remaining -= 1;

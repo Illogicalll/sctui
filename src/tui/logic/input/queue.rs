@@ -1,27 +1,12 @@
-use super::helpers::insert_manual_queue;
-use crate::api::Track;
+use super::helpers::{filtered_row, insert_manual_queue};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, QueuedTrack, FollowingTracksFocus};
 
 pub(crate) fn handle_add_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
-    if state.selected_tab == 0 {
-        match state.selected_subtab {
-            0 => add_likes_to_queue(state, data),
-            1 => add_playlist_to_queue(state, data),
-            2 => add_album_to_queue(state, data),
-            3 => add_following_to_queue(state, data),
-            _ => {}
-        }
-    } else if state.selected_tab == 1 {
-        match state.selected_searchfilter {
-            0 => add_search_tracks_to_queue(state, data),
-            1 => add_search_album_to_queue(state, data),
-            2 => add_search_playlist_to_queue(state, data),
-            3 => add_search_people_to_queue(state, data),
-            _ => {}
-        }
+    if let Some(queued) = selected_queued(state, data) {
+        insert_manual_queue(state, queued);
     }
 }
 
@@ -29,461 +14,121 @@ pub(crate) fn handle_add_next_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
-    let mut queued: Option<QueuedTrack> = None;
-    if state.selected_tab == 0 {
-        match state.selected_subtab {
-            0 => queued = get_likes_queued(state, data),
-            1 => queued = get_playlist_queued(state, data),
-            2 => queued = get_album_queued(state, data),
-            3 => queued = get_following_queued(state, data),
-            _ => {}
-        }
-    } else if state.selected_tab == 1 {
-        match state.selected_searchfilter {
-            0 => queued = get_search_tracks_queued(state, data),
-            1 => queued = get_search_album_queued(state, data),
-            2 => queued = get_search_playlist_queued(state, data),
-            3 => queued = get_search_people_queued(state, data),
-            _ => {}
-        }
-    }
-
-    if let Some(queued) = queued {
+    if let Some(queued) = selected_queued(state, data) {
         state.manual_queue.push_front(queued);
     }
 }
 
-fn add_search_tracks_to_queue(state: &mut AppState, data: &mut AppData) {
-    if let Some(track) = data.search_tracks.get(state.selected_row) {
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::Playlist,
-                    index: state.selected_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.search_tracks.clone()),
-                    playlist_uri: None,
-                    album_uri: None,
-                    following_user_urn: None,
-                    user_added: true,
-                },
-            );
+pub(crate) fn selected_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    if state.selected_tab == 0 {
+        match state.selected_subtab {
+            0 => get_likes_queued(state, data),
+            1 => get_playlist_queued(state, data),
+            2 => get_album_queued(state, data),
+            3 => get_following_queued(state, data),
+            _ => None,
         }
+    } else if state.selected_tab == 1 {
+        match state.selected_searchfilter {
+            0 => get_search_tracks_queued(state, data),
+            1 => get_search_album_queued(state, data),
+            2 => get_search_playlist_queued(state, data),
+            3 => get_search_people_queued(state, data),
+            _ => None,
+        }
+    } else {
+        get_feed_queued(state, data)
     }
 }
 
-fn add_search_playlist_to_queue(state: &mut AppState, data: &mut AppData) {
-    if let Some(track) = data
-        .search_playlist_tracks
-        .get(state.search_selected_playlist_track_row)
-    {
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::Playlist,
-                    index: state.search_selected_playlist_track_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.search_playlist_tracks.clone()),
-                    playlist_uri: data.search_playlist_tracks_uri.clone(),
-                    album_uri: None,
-                    following_user_urn: None,
-                    user_added: true,
-                },
-            );
-        }
-    }
+fn get_feed_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    let idx = state.selected_info_row;
+    let track = data.feed_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Feed, idx, track, Some(&data.feed_tracks), None, None, None, true,
+    ))
 }
 
-fn add_search_album_to_queue(state: &mut AppState, data: &mut AppData) {
-    if let Some(track) = data
-        .search_album_tracks
-        .get(state.search_selected_album_track_row)
-    {
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::Album,
-                    index: state.search_selected_album_track_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.search_album_tracks.clone()),
-                    playlist_uri: None,
-                    album_uri: data.search_album_tracks_uri.clone(),
-                    following_user_urn: None,
-                    user_added: true,
-                },
-            );
-        }
-    }
+fn get_search_tracks_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    let idx = state.selected_row;
+    let track = data.search_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Playlist, idx, track, Some(&data.search_tracks), None, None, None, true,
+    ))
 }
 
-fn add_search_people_to_queue(state: &mut AppState, data: &mut AppData) {
-    if state.search_people_tracks_focus == FollowingTracksFocus::Likes {
-        if let Some(track) = data
-            .search_people_likes_tracks
-            .get(state.search_selected_person_like_row)
-        {
-            if track.is_playable() {
-                insert_manual_queue(
-                    state,
-                    QueuedTrack {
-                        source: PlaybackSource::FollowingLikes,
-                        index: state.search_selected_person_like_row,
-                        track: track.clone(),
-                        tracks_snapshot: Some(data.search_people_likes_tracks.clone()),
-                        playlist_uri: None,
-                        album_uri: None,
-                        following_user_urn: data.search_people_likes_user_urn.clone(),
-                        user_added: true,
-                    },
-                );
-            }
-        }
-    } else if let Some(track) = data
-        .search_people_tracks
-        .get(state.search_selected_person_track_row)
-    {
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::FollowingPublished,
-                    index: state.search_selected_person_track_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.search_people_tracks.clone()),
-                    playlist_uri: None,
-                    album_uri: None,
-                    following_user_urn: data.search_people_tracks_user_urn.clone(),
-                    user_added: true,
-                },
-            );
-        }
-    }
-}
-
-fn get_search_tracks_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
-    let track = data.search_tracks.get(state.selected_row)?;
-    if !track.is_playable() {
-        return None;
-    }
-    Some(QueuedTrack {
-        source: PlaybackSource::Playlist,
-        index: state.selected_row,
-        track: track.clone(),
-        tracks_snapshot: Some(data.search_tracks.clone()),
-        playlist_uri: None,
-        album_uri: None,
-        following_user_urn: None,
-        user_added: true,
-    })
-}
-
-fn get_search_playlist_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+fn get_search_playlist_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     let idx = state.search_selected_playlist_track_row;
-    let track = data.search_playlist_tracks.get(idx)?;
-    if !track.is_playable() {
-        return None;
-    }
-    Some(QueuedTrack {
-        source: PlaybackSource::Playlist,
-        index: idx,
-        track: track.clone(),
-        tracks_snapshot: Some(data.search_playlist_tracks.clone()),
-        playlist_uri: data.search_playlist_tracks_uri.clone(),
-        album_uri: None,
-        following_user_urn: None,
-        user_added: true,
-    })
+    let track = data.search_playlist_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Playlist, idx, track, Some(&data.search_playlist_tracks),
+        data.search_playlist_tracks_uri.clone(), None, None, true,
+    ))
 }
 
-fn get_search_album_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+fn get_search_album_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     let idx = state.search_selected_album_track_row;
-    let track = data.search_album_tracks.get(idx)?;
-    if !track.is_playable() {
-        return None;
-    }
-    Some(QueuedTrack {
-        source: PlaybackSource::Album,
-        index: idx,
-        track: track.clone(),
-        tracks_snapshot: Some(data.search_album_tracks.clone()),
-        playlist_uri: None,
-        album_uri: data.search_album_tracks_uri.clone(),
-        following_user_urn: None,
-        user_added: true,
-    })
+    let track = data.search_album_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Album, idx, track, Some(&data.search_album_tracks),
+        None, data.search_album_tracks_uri.clone(), None, true,
+    ))
 }
 
-fn get_search_people_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
+fn get_search_people_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if state.search_people_tracks_focus == FollowingTracksFocus::Likes {
         let idx = state.search_selected_person_like_row;
-        let track = data.search_people_likes_tracks.get(idx)?;
-        if !track.is_playable() {
-            return None;
-        }
-        return Some(QueuedTrack {
-            source: PlaybackSource::FollowingLikes,
-            index: idx,
-            track: track.clone(),
-            tracks_snapshot: Some(data.search_people_likes_tracks.clone()),
-            playlist_uri: None,
-            album_uri: None,
-            following_user_urn: data.search_people_likes_user_urn.clone(),
-            user_added: true,
-        });
+        let track = data.search_people_likes_tracks.get(idx).filter(|t| t.is_playable())?;
+        return Some(QueuedTrack::new(
+            PlaybackSource::FollowingLikes, idx, track, Some(&data.search_people_likes_tracks),
+            None, None, data.search_people_likes_user_urn.clone(), true,
+        ));
     }
-
     let idx = state.search_selected_person_track_row;
-    let track = data.search_people_tracks.get(idx)?;
-    if !track.is_playable() {
-        return None;
-    }
-    Some(QueuedTrack {
-        source: PlaybackSource::FollowingPublished,
-        index: idx,
-        track: track.clone(),
-        tracks_snapshot: Some(data.search_people_tracks.clone()),
-        playlist_uri: None,
-        album_uri: None,
-        following_user_urn: data.search_people_tracks_user_urn.clone(),
-        user_added: true,
-    })
+    let track = data.search_people_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::FollowingPublished, idx, track, Some(&data.search_people_tracks),
+        None, None, data.search_people_tracks_user_urn.clone(), true,
+    ))
 }
 
-fn add_likes_to_queue(state: &mut AppState, data: &mut AppData) {
-    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-    let selected_idx = if search_active {
-        state.search_matches.get(state.selected_row).copied()
-    } else {
-        Some(state.selected_row)
-    };
-    if let Some(idx) = selected_idx {
-        if let Some(track) = data.likes.get(idx) {
-            if track.is_playable() {
-                insert_manual_queue(
-                    state,
-                    QueuedTrack {
-                        source: PlaybackSource::Likes,
-                        index: idx,
-                        track: track.clone(),
-                        tracks_snapshot: None,
-                        playlist_uri: None,
-                        album_uri: None,
-                        following_user_urn: None,
-                        user_added: true,
-                    },
-                );
-            }
-        }
-    }
+fn get_likes_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    let idx = filtered_row(state, state.selected_row)?;
+    let track = data.likes.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(PlaybackSource::Likes, idx, track, None, None, None, None, true))
 }
 
-fn add_playlist_to_queue(state: &mut AppState, data: &mut AppData) {
-    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-    let selected_idx = if search_active {
-        state
-            .search_matches
-            .get(state.selected_playlist_track_row)
-            .copied()
-    } else {
-        Some(state.selected_playlist_track_row)
-    };
-    if let Some(selected_idx) = selected_idx {
-        let track = match data.playlist_tracks.get(selected_idx) {
-            Some(track) => track,
-            None => return,
-        };
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::Playlist,
-                    index: selected_idx,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.playlist_tracks.clone()),
-                    playlist_uri: data.playlist_tracks_uri.clone(),
-                    album_uri: None,
-                    following_user_urn: None,
-                    user_added: true,
-                },
-            );
-        }
-    }
+fn get_playlist_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    let idx = filtered_row(state, state.selected_playlist_track_row)?;
+    let track = data.playlist_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Playlist, idx, track, Some(&data.playlist_tracks),
+        data.playlist_tracks_uri.clone(), None, None, true,
+    ))
 }
 
-fn add_album_to_queue(state: &mut AppState, data: &mut AppData) {
-    if let Some(track) = data.album_tracks.get(state.selected_album_track_row) {
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::Album,
-                    index: state.selected_album_track_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.album_tracks.clone()),
-                    playlist_uri: None,
-                    album_uri: data.album_tracks_uri.clone(),
-                    following_user_urn: None,
-                    user_added: true,
-                },
-            );
-        }
-    }
+fn get_album_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    let idx = state.selected_album_track_row;
+    let track = data.album_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::Album, idx, track, Some(&data.album_tracks),
+        None, data.album_tracks_uri.clone(), None, true,
+    ))
 }
 
-fn add_following_to_queue(state: &mut AppState, data: &mut AppData) {
+fn get_following_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if state.following_tracks_focus == FollowingTracksFocus::Likes {
-        if let Some(track) = data
-            .following_likes_tracks
-            .get(state.selected_following_like_row)
-        {
-            if track.is_playable() {
-                insert_manual_queue(
-                    state,
-                    QueuedTrack {
-                        source: PlaybackSource::FollowingLikes,
-                        index: state.selected_following_like_row,
-                        track: track.clone(),
-                        tracks_snapshot: Some(data.following_likes_tracks.clone()),
-                        playlist_uri: None,
-                        album_uri: None,
-                        following_user_urn: data.following_likes_user_urn.clone(),
-                        user_added: true,
-                    },
-                );
-            }
-        }
-    } else if let Some(track) = data
-        .following_tracks
-        .get(state.selected_following_track_row)
-    {
-        if track.is_playable() {
-            insert_manual_queue(
-                state,
-                QueuedTrack {
-                    source: PlaybackSource::FollowingPublished,
-                    index: state.selected_following_track_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.following_tracks.clone()),
-                    playlist_uri: None,
-                    album_uri: None,
-                    following_user_urn: data.following_tracks_user_urn.clone(),
-                    user_added: true,
-                },
-            );
-        }
+        let idx = state.selected_following_like_row;
+        let track = data.following_likes_tracks.get(idx).filter(|t| t.is_playable())?;
+        return Some(QueuedTrack::new(
+            PlaybackSource::FollowingLikes, idx, track, Some(&data.following_likes_tracks),
+            None, None, data.following_likes_user_urn.clone(), true,
+        ));
     }
-}
-
-fn get_likes_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
-    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-    let selected_idx = if search_active {
-        state.search_matches.get(state.selected_row).copied()
-    } else {
-        Some(state.selected_row)
-    };
-    if let Some(idx) = selected_idx {
-        if let Some(track) = data.likes.get(idx) {
-            if track.is_playable() {
-                return Some(QueuedTrack {
-                    source: PlaybackSource::Likes,
-                    index: idx,
-                    track: track.clone(),
-                    tracks_snapshot: None,
-                    playlist_uri: None,
-                    album_uri: None,
-                    following_user_urn: None,
-                    user_added: true,
-                });
-            }
-        }
-    }
-    None
-}
-
-fn get_playlist_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
-    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-    let selected_idx = if search_active {
-        state
-            .search_matches
-            .get(state.selected_playlist_track_row)
-            .copied()
-    } else {
-        Some(state.selected_playlist_track_row)
-    };
-    if let Some(selected_idx) = selected_idx {
-        let track = data.playlist_tracks.get(selected_idx)?;
-        if track.is_playable() {
-            return Some(QueuedTrack {
-                source: PlaybackSource::Playlist,
-                index: selected_idx,
-                track: track.clone(),
-                tracks_snapshot: Some(data.playlist_tracks.clone()),
-                playlist_uri: data.playlist_tracks_uri.clone(),
-                album_uri: None,
-                following_user_urn: None,
-                user_added: true,
-            });
-        }
-    }
-    None
-}
-
-fn get_album_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
-    if let Some(track) = data.album_tracks.get(state.selected_album_track_row) {
-        if track.is_playable() {
-            return Some(QueuedTrack {
-                source: PlaybackSource::Album,
-                index: state.selected_album_track_row,
-                track: track.clone(),
-                tracks_snapshot: Some(data.album_tracks.clone()),
-                playlist_uri: None,
-                album_uri: data.album_tracks_uri.clone(),
-                following_user_urn: None,
-                user_added: true,
-            });
-        }
-    }
-    None
-}
-
-fn get_following_queued(state: &mut AppState, data: &mut AppData) -> Option<QueuedTrack> {
-    if state.following_tracks_focus == FollowingTracksFocus::Likes {
-        if let Some(track) = data
-            .following_likes_tracks
-            .get(state.selected_following_like_row)
-        {
-            if track.is_playable() {
-                return Some(QueuedTrack {
-                    source: PlaybackSource::FollowingLikes,
-                    index: state.selected_following_like_row,
-                    track: track.clone(),
-                    tracks_snapshot: Some(data.following_likes_tracks.clone()),
-                    playlist_uri: None,
-                    album_uri: None,
-                    following_user_urn: data.following_likes_user_urn.clone(),
-                    user_added: true,
-                });
-            }
-        }
-    } else if let Some(track) = data
-        .following_tracks
-        .get(state.selected_following_track_row)
-    {
-        if track.is_playable() {
-            return Some(QueuedTrack {
-                source: PlaybackSource::FollowingPublished,
-                index: state.selected_following_track_row,
-                track: track.clone(),
-                tracks_snapshot: Some(data.following_tracks.clone()),
-                playlist_uri: None,
-                album_uri: None,
-                following_user_urn: data.following_tracks_user_urn.clone(),
-                user_added: true,
-            });
-        }
-    }
-    None
+    let idx = state.selected_following_track_row;
+    let track = data.following_tracks.get(idx).filter(|t| t.is_playable())?;
+    Some(QueuedTrack::new(
+        PlaybackSource::FollowingPublished, idx, track, Some(&data.following_tracks),
+        None, None, data.following_tracks_user_urn.clone(), true,
+    ))
 }

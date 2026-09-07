@@ -1,4 +1,3 @@
-use dasp_sample::ToSample;
 use rodio::Source;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -16,33 +15,21 @@ impl<S> TapSource<S> {
     }
 }
 
-impl<S> Iterator for TapSource<S>
-where
-    S: Source,
-    S::Item: ToSample<f32>,
-{
-    type Item = S::Item;
+impl<S: Source> Iterator for TapSource<S> {
+    type Item = f32;
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next(&mut self) -> Option<f32> {
         let sample = self.inner.next()?;
-        let sample_f32: f32 = sample.to_sample_();
         let mut buffer = self.buffer.lock().unwrap();
         if buffer.len() >= WAVE_BUFFER_CAP {
-            let overflow = buffer.len() + 1 - WAVE_BUFFER_CAP;
-            for _ in 0..overflow {
-                buffer.pop_front();
-            }
+            buffer.pop_front();
         }
-        buffer.push_back(sample_f32);
+        buffer.push_back(sample);
         Some(sample)
     }
 }
 
-impl<S> Source for TapSource<S>
-where
-    S: Source,
-    S::Item: ToSample<f32>,
-{
+impl<S: Source> Source for TapSource<S> {
     fn current_span_len(&self) -> Option<usize> {
         self.inner.current_span_len()
     }

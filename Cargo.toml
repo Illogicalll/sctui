@@ -16,18 +16,29 @@ rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 tiny_http = "0.12"
-url = "2"
 webbrowser = "1.1"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
-dotenvy = "0.15"
+# rustls instead of the platform OpenSSL so Linux release binaries run on any distro.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "charset", "http2"] }
 serde_json = "1.0.149"
+toml = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
-stream-download = { version = "0.23.0", features = ["reqwest-native-tls"] }
 tokio = {version = "1.47.1", features = ["rt-multi-thread"] }
 rodio = "0.21.1"
-futures = "0.3.31"
 ratatui-image = "8.0.1"
 image = "0.25.9"
-dasp_sample = "0.11"
 m3u8-rs = "6.0"
 rustfft = "6.4.1"
+
+# OS media integration: MPNowPlayingInfoCenter (macOS), SMTC (Windows), MPRIS (Linux, zbus).
+souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Hidden window for SMTC; version matches souvlaki's.
+windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+strip = true
+lto = "thin"

@@ -1,4 +1,31 @@
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
+
+use super::utils::format_age;
+
+/// One row of the Feed tab: something a followed user posted or reposted.
+#[derive(Debug, Clone)]
+pub struct Activity {
+    /// Reposter for reposts once resolved, uploader otherwise.
+    pub user: String,
+    /// SoundCloud gives reposters as bare urns; the fetch resolves them to `user`.
+    pub reposter_urn: Option<String>,
+    /// "Post" or "Repost".
+    pub action: &'static str,
+    /// "Track", "Playlist" or "Album".
+    pub media: &'static str,
+    pub created_at: DateTime<FixedOffset>,
+    /// Present for track items; shown in the info pane without a fetch.
+    pub track: Option<Track>,
+    /// Track urn, or the set's `tracks_uri` to fetch its tracks. Keys the info-pane fetch.
+    pub key: String,
+}
+
+impl Activity {
+    pub fn age(&self) -> String {
+        let secs = (Utc::now() - self.created_at.with_timezone(&Utc)).num_seconds();
+        format_age(secs.max(0) as u64)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Track {
@@ -8,7 +35,6 @@ pub struct Track {
     pub duration_ms: u64,
     pub playback_count: String,
     pub artwork_url: String,
-    pub stream_url: String,
     pub access: String,
     pub track_urn: String,
 }

@@ -2,49 +2,81 @@ mod utils;
 mod models;
 mod calls;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::auth::Token;
 
-pub use calls::albums::fetch_album_tracks;
-pub use calls::engagement::{
-    follow_user, like_playlist, like_track, unfollow_user, unlike_playlist, unlike_track,
+pub(crate) use calls::engagement::engage;
+pub(crate) use calls::following::fetch_user_tracks;
+pub use calls::playlist_edit::{
+    add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
 };
-pub use calls::following::{fetch_following_liked_tracks, fetch_following_tracks};
 pub use calls::playlists::fetch_playlist_tracks;
+pub use calls::related::fetch_related_tracks;
 pub use calls::search::{
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
 };
-pub use models::{Album, Artist, Playlist, Track};
+pub use models::{Activity, Album, Artist, Playlist, Track};
+pub mod lyrics;
+pub use lyrics::{Lyrics, fetch_lyrics};
+pub(crate) use utils::format_duration;
+
+/// Cursor over one `linked_partitioning` list.
+enum Page {
+    Start,
+    Next(String),
+    Done,
+}
+
+impl Page {
+    /// URL of the next page to fetch, or `None` once the list is exhausted.
+    fn url(&self, base: &str) -> Option<String> {
+        match self {
+            Page::Start => Some(base.to_string()),
+            Page::Next(href) => Some(href.clone()),
+            Page::Done => None,
+        }
+    }
+
+    /// Like `url`, but `Start` becomes `Done` before the request is made, so a
+    /// failed first fetch is not retried.
+    fn take_url(&mut self, base: &str) -> Option<String> {
+        let url = self.url(base);
+        if matches!(self, Page::Start) {
+            *self = Page::Done;
+        }
+        url
+    }
+
+    fn from_response(resp: &serde_json::Value) -> Page {
+        utils::parse_next_href(resp).map_or(Page::Done, Page::Next)
+    }
+}
 
 pub struct API {
     token: Arc<Mutex<Token>>,
-    liked_tracks_next_href: Option<String>,
-    first_liked_tracks_page_fetched: bool,
-    my_playlists_next_href: Option<String>,
-    my_first_playlist_page_fetched: bool,
-    others_playlists_next_href: Option<String>,
-    others_first_playlist_page_fetched: bool,
-    albums_next_href: Option<String>,
-    first_albums_page_fetched: bool,
-    following_next_href: Option<String>,
-    first_following_page_fetched: bool,
+    liked_tracks_page: Page,
+    my_playlists_page: Page,
+    others_playlists_page: Page,
+    albums_page: Page,
+    following_page: Page,
+    feed_page: Page,
+    /// User urn → username, for feed reposters.
+    user_names: HashMap<String, String>,
 }
 
 impl API {
     pub fn init(token: Arc<Mutex<Token>>) -> Self {
         Self {
             token,
-            liked_tracks_next_href: None,
-            first_liked_tracks_page_fetched: false,
-            my_playlists_next_href: None,
-            my_first_playlist_page_fetched: false,
-            others_playlists_next_href: None,
-            others_first_playlist_page_fetched: false,
-            albums_next_href: None,
-            first_albums_page_fetched: false,
-            following_next_href: None,
-            first_following_page_fetched: false,
+            liked_tracks_page: Page::Start,
+            my_playlists_page: Page::Start,
+            others_playlists_page: Page::Start,
+            albums_page: Page::Start,
+            following_page: Page::Start,
+            feed_page: Page::Start,
+            user_names: HashMap::new(),
         }
     }
 
