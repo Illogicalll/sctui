@@ -6,6 +6,7 @@ use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, Fol
 use crate::player::Player;
 use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::build_search_matches;
+use crate::tui::logic::utils::queued_from_current;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
 use super::helpers::{filtered_row, reset_search_rows};
@@ -54,6 +55,10 @@ pub(crate) fn run_command(
         Action::ToggleLike => {
             enqueue_like_follow_selected(state, data);
         }
+        Action::ToggleLikePlaying => {
+            let playing = queued_from_current(state, data).map(|q| q.track);
+            toggle_track_like(playing, state, data);
+        }
         Action::Search => {
             if state.selected_tab == 1 {
                 state.search_typing = true;
@@ -82,6 +87,11 @@ pub(crate) fn run_command(
         // Playlist management. Both destructive actions go through the confirm popup.
         Action::AddToPlaylist => {
             if let Some(queued) = selected_queued(state, data) {
+                super::playlist_picker::open_picker(state, queued.track);
+            }
+        }
+        Action::AddToPlaylistPlaying => {
+            if let Some(queued) = queued_from_current(state, data) {
                 super::playlist_picker::open_picker(state, queued.track);
             }
         }

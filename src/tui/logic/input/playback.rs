@@ -1,11 +1,28 @@
 use super::InputOutcome;
 use super::helpers::filtered_row;
-use crate::api::Track;
+use crate::api::{Artist, Track};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, FollowingTracksFocus};
 use crate::player::Player;
 use crate::tui::logic::utils::{build_queue, enter_radio, queued_from_current};
 
 use super::queue::selected_queued;
+
+/// The artist row itself, when it (not either track pane) has the cursor.
+fn focused_artist(state: &AppState, data: &AppData) -> Option<Artist> {
+    if state.selected_tab == 0
+        && state.selected_subtab == 3
+        && state.following_tracks_focus == FollowingTracksFocus::Artists
+    {
+        data.following.get(state.selected_row).cloned()
+    } else if state.selected_tab == 1
+        && state.selected_searchfilter == 3
+        && state.search_people_tracks_focus == FollowingTracksFocus::Artists
+    {
+        data.search_people.get(state.selected_row).cloned()
+    } else {
+        None
+    }
+}
 
 pub(crate) fn handle_enter(
     state: &mut AppState,
@@ -29,11 +46,17 @@ pub(crate) fn handle_enter(
 }
 
 /// Shift+Enter (or Shift+G): play the selected track as a station — related tracks follow.
+/// On a focused artist row, starts an artist station instead; the loop fetches it in the
+/// background (there is no synchronous path from here to the network).
 pub(crate) fn handle_station(
     state: &mut AppState,
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
+    if let Some(artist) = focused_artist(state, data) {
+        state.artist_station_request = Some(artist);
+        return InputOutcome::Continue;
+    }
     let Some(queued) = selected_queued(state, data) else {
         return InputOutcome::Continue;
     };
@@ -45,7 +68,7 @@ pub(crate) fn handle_station(
     }
     state.manual_queue.clear();
     player.play(queued.track.clone());
-    enter_radio(state, data, queued.track);
+    enter_radio(state, data, vec![queued.track]);
     InputOutcome::Continue
 }
 

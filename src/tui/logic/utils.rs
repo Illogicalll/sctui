@@ -385,16 +385,17 @@ pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Tra
     }
 }
 
-/// Hand playback over to related tracks, seeded by `seed` (the track playing now, index 0).
-/// The main loop notices the near-empty radio queue and fetches related tracks for the seed.
-pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seed: Track) {
+/// Hand playback over to related tracks, seeded by `seeds` (index 0 is playing now). A single
+/// seed leaves nothing queued, so the main loop's near-empty check fires right away and fetches
+/// related tracks for it; a pre-built mix (an artist station) plays through those first.
+pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seeds: Vec<Track>) {
     state.playback_source = PlaybackSource::Radio;
     state.override_playing = None;
     state.current_playing_index = Some(0);
-    state.auto_queue.clear();
     state.radio_fetched_for = None;
     state.radio_waiting = false;
-    data.playback_tracks = vec![seed];
+    state.auto_queue = build_queue(0, &seeds, state.shuffle_enabled);
+    data.playback_tracks = seeds;
     data.playback_playlist_uri = None;
     data.playback_album_uri = None;
     data.playback_following_user_urn = None;

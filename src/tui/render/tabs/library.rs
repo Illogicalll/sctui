@@ -198,12 +198,17 @@ pub fn render_library(
         _ => vec![],
     };
 
+    let artists_focused = selected_subtab == 3 && state.following_tracks_focus == FollowingTracksFocus::Artists;
     let rows: Vec<_> = rows
         .into_iter()
         .enumerate()
         .map(|(i, row)| {
             if i == selected_row {
-                row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
+                if artists_focused {
+                    row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
+                } else {
+                    row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
+                }
             } else {
                 row
             }
