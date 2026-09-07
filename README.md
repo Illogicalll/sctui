@@ -15,31 +15,19 @@ a soundcloud client for the terminal
 curl -fsSL https://raw.githubusercontent.com/Illogicalll/sctui/main/install.sh | sh
 ```
 
-Downloads the latest release for your platform, verifies its checksum and installs it to `~/.local/bin/sctui`. Set `SCTUI_INSTALL_DIR` to change the location or `SCTUI_VERSION=v0.1.0` to pin a release.
-
 ### Windows
 
 ```powershell
 irm https://raw.githubusercontent.com/Illogicalll/sctui/main/install.ps1 | iex
 ```
 
-Installs to `%LOCALAPPDATA%\sctui\bin` and adds it to your user `PATH`.
-
 ### Manual download
 
 Grab the archive for your platform from the [latest release](https://github.com/Illogicalll/sctui/releases/latest), extract it and put `sctui` somewhere on your `PATH`.
 
-| Platform              | File                                     |
-| --------------------- | ---------------------------------------- |
-| macOS (Apple Silicon) | `sctui-aarch64-apple-darwin.tar.gz`      |
-| macOS (Intel)         | `sctui-x86_64-apple-darwin.tar.gz`       |
-| Linux (x86_64)        | `sctui-x86_64-unknown-linux-gnu.tar.gz`  |
-| Linux (ARM64)         | `sctui-aarch64-unknown-linux-gnu.tar.gz` |
-| Windows (x86_64)      | `sctui-x86_64-pc-windows-msvc.zip`       |
-
 ### From source
 
-Needs [Rust](https://rustup.rs) 1.85 or newer. On Linux, install the ALSA headers first: `sudo apt install libasound2-dev pkg-config` (Debian/Ubuntu) or `sudo dnf install alsa-lib-devel` (Fedora).
+Needs [Rust](https://rustup.rs) 1.85+. On Linux, install the ALSA headers first: `sudo apt install libasound2-dev pkg-config`
 
 ```sh
 cargo install --git https://github.com/Illogicalll/sctui
@@ -50,7 +38,7 @@ cargo install --git https://github.com/Illogicalll/sctui
 <details>
 <summary><b>Updating</b></summary>
 
-sctui checks GitHub for a newer release every time it starts and asks before installing it: `y` updates in place and relaunches, `n` carries on, `s` stops asking about that version. Pass `--no-update-check` to skip the check, or re-run the installer above to update by hand. `sctui --version` shows what you have.
+sctui checks GitHub for a newer release every time it starts and asks before installing it. Pass `--no-update-check` to skip the check, or re-run the installer above to update by hand. `sctui --version` shows what you have.
 
 </details>
 
@@ -58,7 +46,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 <summary><b>Requirements</b></summary>
 
 - **A SoundCloud account.** The free tier is fine.
-- **A modern terminal with true colour.** Cover art needs a terminal that supports an image protocol: kitty, WezTerm, Ghostty, iTerm2 or foot. Any other terminal falls back to block-character art.
+- **A modern terminal with true colour.** Cover art needs a terminal that supports an image protocol.
 - **A font with Unicode block and braille glyphs** for the visualisers. Any Nerd Font, JetBrains Mono or Fira Code works.
 - **Linux:** the ALSA runtime (`libasound2`), which every desktop distro ships. PipeWire and PulseAudio work through their ALSA plugin.
 - **macOS 11+** or **Windows 10+**.
@@ -91,11 +79,11 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ### 📻 Stations
 
-<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing Shift + Enter on any track will start a queue of related tracks</p>
+<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing Shift + Enter on any track or artist will start a queue of related tracks</p>
 
-### 🎛️ Media Keys
+### 🎛️ Native Media Integration
 
-<p align="center">The current track shows in your system's media panel with artwork and a live position. The play/pause, skip and seek buttons on your keyboard, headphones integrate directly</p>
+<p align="center">The current track shows in your system's media panel with artwork and a live position. The play/pause/ skip buttons on your keyboard, headphones integrate directly</p>
 
 ### 🎤 Lyrics
 
@@ -111,48 +99,43 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center"><img src="./media/spectrum.gif" alt="Visualiser 2" width="480" /></p>
 
-<p align="center">and more...</p>
+<p align="center">+ 12 more...</p>
 
-## Configuration
+<details>
+<summary><b>Configuration</b></summary>
 
+Configuration lives in `~/.config/sctui/config.toml` / 
+  
 ### Themes
 
-Press `Shift+O` to pick a colour theme with a live preview: `default` (your terminal's own ANSI colours), `tokyonight`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `solarized-dark`, `one-dark`, `rose-pine`. Enter keeps it, Esc reverts. The choice is saved to `~/.config/sctui/config.toml`, where single roles can also be overridden:
-
-```toml
-[theme]
-name = "tokyonight"
-[theme.colors]
-accent = "#ff9e64"   # roles: fg, muted, dim, accent, secondary, selection_bg, selection_fg, warning
-```
-
-The terminal background is never painted, so transparent terminals stay transparent.
+Press `Shift+O` to pick a colour theme with a live preview: `default`, `tokyonight`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `solarized-dark`, `one-dark`, `rose-pine`.
 
 ### Keybindings
 
-Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default. Changes are saved straight to `~/.config/sctui/config.toml`.
+Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default.
+
+</details>
 
 ## Limitations
 
-### ❌ Playback of Go+ Tracks
+### ❌ Playback of Certain Tracks
 
-- Due to SoundCloud API limitations, Go+ tracks are not playable from the application
+- Due to SoundCloud API limitations, Go+ tracks are not playable from the application (no matter what account type you have)
+- If a creator has disabled off-app streaming, then a track will not be playable via the API
 
 ### ❌ Downloads
 
-- Due to the SoundCloud API Terms of Use, the download and offline playback of tracks is not supported
+- Due to the SoundCloud API Terms of Use, the downloads and offline playback is not supported
 
 ## Privacy
 
-sctui talks to SoundCloud directly for everything except login. Login and hourly token refresh go through a small relay (source in [`worker/`](./worker)) that adds the app secret and passes SoundCloud's reply straight back without reading or storing it. Your password never leaves soundcloud.com. You can revoke sctui's access at any time from your SoundCloud settings.
+sctui talks to SoundCloud directly for everything except login. Login and hourly token refresh go through a small relay (source in [`worker/`](./worker)) that adds the app secret and passes SoundCloud's reply straight back without reading or storing it.
 
-## Dev Diary
-
-find the dev diary to follow along the development ~~struggle~~ process [here](./DEV_DIARY.md)
+Your password never leaves soundcloud.com. You can revoke sctui's access at any time from your SoundCloud settings.
 
 ## License
 
-Copyright (c) Will Murphy <contact@w-murphy.com>
+Copyright © Will Murphy <contact@w-murphy.com>
 
 This project is licensed under the MIT license ([LICENSE] or <http://opensource.org/licenses/MIT>)
 
