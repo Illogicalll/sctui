@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::toggles_binary_choice;
 use crate::tui::logic::state::{AppData, AppState, ConfirmAction, PlaylistEdit, clamp_row};
 use crate::tui::logic::utils::{bump_track_count, soundcloud_playlist_id_from_tracks_uri};
 
@@ -12,9 +13,6 @@ pub(crate) fn handle_confirm_input(
 ) -> InputOutcome {
     match key.code {
         KeyCode::Esc => state.confirm = None,
-        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-            state.confirm_selected = if state.confirm_selected == 0 { 1 } else { 0 };
-        }
         KeyCode::Enter => {
             let action = state.confirm.take();
             if state.confirm_selected == 0
@@ -22,6 +20,9 @@ pub(crate) fn handle_confirm_input(
             {
                 perform(action, state, data);
             }
+        }
+        _ if toggles_binary_choice(&key, &state.keymap) => {
+            state.confirm_selected = if state.confirm_selected == 0 { 1 } else { 0 };
         }
         _ => {}
     }

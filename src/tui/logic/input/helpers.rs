@@ -1,4 +1,7 @@
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
+
 use crate::api::Track;
+use crate::keymap::{Action, Keymap};
 use crate::tui::logic::state::{AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
 
 impl QueuedTrack {
@@ -51,4 +54,53 @@ pub(crate) fn reset_search_rows(state: &mut AppState) {
     state.search_selected_person_track_row = 0;
     state.search_selected_person_like_row = 0;
     state.search_people_tracks_focus = FollowingTracksFocus::Published;
+}
+
+/// Arrow keys always flip a two-option Yes/No choice, plus whatever the user has bound to
+/// left/right/up/down (default h/j/k/l) so a Vim-bound user doesn't have to reach for arrows.
+pub(crate) fn toggles_binary_choice(key: &KeyEvent, keymap: &Keymap) -> bool {
+    matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down)
+        || matches!(
+            keymap.action(key),
+            Some(Action::SubTabLeft | Action::SubTabRight | Action::Up | Action::Down)
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyModifiers;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn arrows_and_keymap_bound_hjkl_toggle_but_other_keys_dont() {
+        let km = Keymap::default();
+        assert!(toggles_binary_choice(&key(KeyCode::Left), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Right), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Up), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Down), &km));
+        // Default keymap: SubTabLeft/SubTabRight/Up/Down are h/l/k/j.
+        assert!(toggles_binary_choice(&key(KeyCode::Char('h')), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Char('j')), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Char('k')), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Char('l')), &km));
+        assert!(!toggles_binary_choice(&key(KeyCode::Char('x')), &km));
+        assert!(!toggles_binary_choice(&key(KeyCode::Enter), &km));
+    }
+
+    #[test]
+    fn rebound_direction_keys_are_honoured() {
+        let mut km = Keymap::default();
+        km.clear(Action::SubTabLeft);
+        km.clear(Action::SubTabRight);
+        assert!(km.add_chord(Action::SubTabLeft, crate::keymap::Chord::parse("a").unwrap()).is_ok());
+        assert!(km.add_chord(Action::SubTabRight, crate::keymap::Chord::parse("d").unwrap()).is_ok());
+        assert!(toggles_binary_choice(&key(KeyCode::Char('a')), &km));
+        assert!(toggles_binary_choice(&key(KeyCode::Char('d')), &km));
+        // The old default no longer does anything for this action.
+        assert!(!toggles_binary_choice(&key(KeyCode::Char('h')), &km));
+    }
 }
