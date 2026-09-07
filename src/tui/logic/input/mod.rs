@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::keymap::Action;
 use crate::player::Player;
@@ -50,6 +50,11 @@ pub fn handle_key_event(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
+    if key.kind != KeyEventKind::Press {
+        // Windows emits both Press and Release events per keystroke; Unix
+        // ttys only ever emit Press, so this is a no-op there.
+        return InputOutcome::Continue;
+    }
     if state.quit_confirm_visible {
         return quit::handle_quit_confirm(key, state);
     }
