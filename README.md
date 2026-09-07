@@ -7,7 +7,7 @@ a soundcloud client for the terminal
 ## Installation
 
 <details>
-<summary><b>Installation instructions</b></summary>
+<summary><b>Instructions</b></summary>
 
 ### macOS / Linux
 
@@ -104,7 +104,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 <details>
 <summary><b>Configuration</b></summary>
 
-Configuration lives in `~/.config/sctui/config.toml` / 
+Configuration lives in `~/.config/sctui/config.toml` / `C:\Users\<you>\.config\sctui\config.toml`
   
 ### Themes
 
