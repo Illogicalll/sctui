@@ -134,7 +134,9 @@ fn handle_album_down(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
 
 fn handle_following_down(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
     if key.modifiers.contains(KeyModifiers::SHIFT) {
-        step(&mut state.selected_row, data.following.len(), 1, &mut data.following_state);
+        if step(&mut state.selected_row, data.following.len(), 1, &mut data.following_state) {
+            state.following_tracks_focus = FollowingTracksFocus::Artists;
+        }
     } else if key.modifiers.contains(KeyModifiers::ALT) {
         if page(&mut state.selected_following_track_row, data.following_tracks.len(), 10, &mut data.following_tracks_state) {
             state.following_tracks_focus = FollowingTracksFocus::Published;
@@ -195,7 +197,9 @@ fn handle_album_up(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
 
 fn handle_following_up(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
     if key.modifiers.contains(KeyModifiers::SHIFT) {
-        step(&mut state.selected_row, data.following.len(), -1, &mut data.following_state);
+        if step(&mut state.selected_row, data.following.len(), -1, &mut data.following_state) {
+            state.following_tracks_focus = FollowingTracksFocus::Artists;
+        }
     } else if key.modifiers.contains(KeyModifiers::ALT) {
         state.following_tracks_focus = FollowingTracksFocus::Published;
         page(&mut state.selected_following_track_row, data.following_tracks.len(), -10, &mut data.following_tracks_state);
@@ -252,7 +256,9 @@ fn handle_search_down(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
         }
         3 => {
             if key.modifiers.contains(KeyModifiers::SHIFT) {
-                step(&mut state.selected_row, data.search_people.len(), 1, &mut data.search_people_state);
+                if step(&mut state.selected_row, data.search_people.len(), 1, &mut data.search_people_state) {
+                    state.search_people_tracks_focus = FollowingTracksFocus::Artists;
+                }
             } else if key.modifiers.contains(KeyModifiers::ALT) {
                 if page(&mut state.search_selected_person_track_row, data.search_people_tracks.len(), 10, &mut data.search_people_tracks_state) {
                     state.search_people_tracks_focus = FollowingTracksFocus::Published;
@@ -295,7 +301,9 @@ fn handle_search_up(key: KeyEvent, state: &mut AppState, data: &mut AppData) {
         }
         3 => {
             if key.modifiers.contains(KeyModifiers::SHIFT) {
-                step(&mut state.selected_row, data.search_people.len(), -1, &mut data.search_people_state);
+                if step(&mut state.selected_row, data.search_people.len(), -1, &mut data.search_people_state) {
+                    state.search_people_tracks_focus = FollowingTracksFocus::Artists;
+                }
             } else if key.modifiers.contains(KeyModifiers::ALT) {
                 state.search_people_tracks_focus = FollowingTracksFocus::Published;
                 page(&mut state.search_selected_person_track_row, data.search_people_tracks.len(), -10, &mut data.search_people_tracks_state);

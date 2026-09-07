@@ -13,7 +13,7 @@ pub use calls::playlist_edit::{
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
 };
 pub use calls::playlists::fetch_playlist_tracks;
-pub use calls::related::fetch_related_tracks;
+pub use calls::related::{fetch_related_tracks, fetch_related_users};
 pub use calls::search::{
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
 };

@@ -51,6 +51,7 @@ pub enum Action {
     ToggleShuffle,
     ToggleRepeat,
     ToggleLike,
+    ToggleLikePlaying,
     AddToQueue,
     PlayNext,
     ToggleQueue,
@@ -58,6 +59,7 @@ pub enum Action {
     Search,
     ToggleVisualizer,
     AddToPlaylist,
+    AddToPlaylistPlaying,
     NewPlaylist,
     RemoveFromPlaylist,
     DeletePlaylist,
@@ -65,7 +67,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 37] = [
+    pub const ALL: [Action; 39] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
@@ -92,6 +94,7 @@ impl Action {
         Action::ToggleShuffle,
         Action::ToggleRepeat,
         Action::ToggleLike,
+        Action::ToggleLikePlaying,
         Action::AddToQueue,
         Action::PlayNext,
         Action::ToggleQueue,
@@ -99,6 +102,7 @@ impl Action {
         Action::Search,
         Action::ToggleVisualizer,
         Action::AddToPlaylist,
+        Action::AddToPlaylistPlaying,
         Action::NewPlaylist,
         Action::RemoveFromPlaylist,
         Action::DeletePlaylist,
@@ -134,6 +138,7 @@ impl Action {
             Action::ToggleShuffle => "toggle_shuffle",
             Action::ToggleRepeat => "toggle_repeat",
             Action::ToggleLike => "toggle_like",
+            Action::ToggleLikePlaying => "toggle_like_playing",
             Action::AddToQueue => "add_to_queue",
             Action::PlayNext => "play_next",
             Action::ToggleQueue => "toggle_queue",
@@ -141,6 +146,7 @@ impl Action {
             Action::Search => "search",
             Action::ToggleVisualizer => "toggle_visualizer",
             Action::AddToPlaylist => "add_to_playlist",
+            Action::AddToPlaylistPlaying => "add_to_playlist_playing",
             Action::NewPlaylist => "new_playlist",
             Action::RemoveFromPlaylist => "remove_from_playlist",
             Action::DeletePlaylist => "delete_playlist",
@@ -167,7 +173,7 @@ impl Action {
             Action::TertiaryDown => "Move the third pane's selection down (likes of a person)",
             Action::PlayPause => "Play / pause",
             Action::PlaySelected => "Play the selected track",
-            Action::StartStation => "Start a station from the selected track",
+            Action::StartStation => "Start a station from the selected track (or artist)",
             Action::NextTrack => "Next track",
             Action::PrevTrack => "Previous track",
             Action::SeekForward => "Seek forward 10s",
@@ -177,6 +183,7 @@ impl Action {
             Action::ToggleShuffle => "Toggle shuffle",
             Action::ToggleRepeat => "Toggle repeat",
             Action::ToggleLike => "Like / unlike, follow / unfollow the selection",
+            Action::ToggleLikePlaying => "Like / unlike the currently playing track",
             Action::AddToQueue => "Add the selected track to the queue",
             Action::PlayNext => "Play the selected track next",
             Action::ToggleQueue => "Toggle the queue popup",
@@ -184,6 +191,7 @@ impl Action {
             Action::Search => "Search: type a query (Search tab) / filter the list (Library)",
             Action::ToggleVisualizer => "Toggle the visualiser",
             Action::AddToPlaylist => "Add the selected track to a playlist (or a new one)",
+            Action::AddToPlaylistPlaying => "Add the currently playing track to a playlist (or a new one)",
             Action::NewPlaylist => "Create an empty playlist (Playlists tab)",
             Action::RemoveFromPlaylist => "Remove the selected track from your open playlist",
             Action::DeletePlaylist => "Delete the selected playlist of yours",
@@ -226,6 +234,8 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::ToggleShuffle, &["shift+s"]),
     (Action::ToggleRepeat, &["shift+r"]),
     (Action::ToggleLike, &["shift+f"]),
+    // macOS sends Option+F as ƒ unless the terminal maps Option to Alt; bind both.
+    (Action::ToggleLikePlaying, &["alt+f", "ƒ"]),
     (Action::AddToQueue, &["shift+a"]),
     (Action::PlayNext, &["shift+u"]),
     (Action::ToggleQueue, &["shift+q"]),
@@ -233,6 +243,8 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::Search, &["/"]),
     (Action::ToggleVisualizer, &["shift+v"]),
     (Action::AddToPlaylist, &["shift+t"]),
+    // macOS sends Option+T as † unless the terminal maps Option to Alt; bind both.
+    (Action::AddToPlaylistPlaying, &["alt+t", "†"]),
     (Action::NewPlaylist, &["shift+c"]),
     (Action::RemoveFromPlaylist, &["shift+d"]),
     (Action::DeletePlaylist, &["shift+x"]),
@@ -629,6 +641,12 @@ mod tests {
         assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::ALT)), Some(Action::TertiaryDown));
         assert_eq!(km.action(&key(KeyCode::Char('∆'), KeyModifiers::NONE)), Some(Action::TertiaryDown));
         assert_eq!(km.action(&key(KeyCode::Char('˚'), KeyModifiers::NONE)), Some(Action::TertiaryUp));
+        // Option+F on macOS, with and without the terminal mapping Option to Alt.
+        assert_eq!(km.action(&key(KeyCode::Char('f'), KeyModifiers::ALT)), Some(Action::ToggleLikePlaying));
+        assert_eq!(km.action(&key(KeyCode::Char('ƒ'), KeyModifiers::NONE)), Some(Action::ToggleLikePlaying));
+        // Option+T on macOS, with and without the terminal mapping Option to Alt.
+        assert_eq!(km.action(&key(KeyCode::Char('t'), KeyModifiers::ALT)), Some(Action::AddToPlaylistPlaying));
+        assert_eq!(km.action(&key(KeyCode::Char('†'), KeyModifiers::NONE)), Some(Action::AddToPlaylistPlaying));
     }
 
     #[test]

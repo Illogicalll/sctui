@@ -6,12 +6,14 @@ pub(crate) mod utils;
 use crate::api::{
     Lyrics, fetch_lyrics,
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
-    fetch_related_tracks,
+    fetch_related_tracks, fetch_related_users,
     API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
     fetch_user_tracks,
 };
+use crate::auth::Token;
 use crate::player::Player;
+use rand::seq::SliceRandom;
 use ratatui::crossterm::{
     event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
     execute,
@@ -40,7 +42,7 @@ use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
 use self::input::helpers::reset_search_rows;
 use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
-use self::state::{AppData, AppState, Engagement, FollowingTracksFocus, LyricsStatus, PlaybackSource, PlaylistEdit};
+use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
     active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
@@ -91,6 +93,9 @@ enum Msg {
     FeedQueue(u64, Vec<Track>),
     /// Related tracks for the radio seed, to append to the queue.
     Related(u64, Vec<Track>),
+    /// A mix built for an artist station: the seed artist plus a few related artists,
+    /// one playable track apiece.
+    ArtistStation(u64, Vec<Track>),
     /// A playlist the user just created, to show at the top of the library.
     PlaylistCreated(Playlist),
     /// Lyrics lookup result for a track URN (`None` = nothing found).
@@ -160,6 +165,68 @@ fn spawn_tracks(
             let _ = tx.send(wrap(request_id, tracks));
         }
     })
+}
+
+/// Up to this many of the seed artist's own tracks go into a station mix.
+const ARTIST_STATION_OWN_TRACKS: usize = 15;
+/// Total tracks in a station mix.
+const ARTIST_STATION_SIZE: usize = 50;
+/// How many related artists to pull tracks from, to fill out the rest of the mix.
+const ARTIST_STATION_RELATED_ARTISTS: usize = 10;
+/// Tracks taken from each related artist's own catalog.
+const ARTIST_STATION_TRACKS_PER_RELATED_ARTIST: usize = 3;
+
+/// A 50-track mix for an artist station: up to 15 of the seed artist's own tracks, the rest
+/// backfilled from SoundCloud's track-level "related" recommendations plus a few tracks apiece
+/// from artists SoundCloud considers similar — the closest a public-API client gets to
+/// SoundCloud's own (private-API) "Artist station". Failures for individual sources are
+/// swallowed; a partial mix (down to just the seed artist) still beats none.
+async fn fetch_artist_station_tracks(token: Arc<Mutex<Token>>, seed_urn: String) -> anyhow::Result<Vec<Track>> {
+    let seed_tracks = fetch_user_tracks(Arc::clone(&token), seed_urn.clone(), "tracks")
+        .await
+        .unwrap_or_default();
+
+    let mut own_tracks: Vec<Track> = seed_tracks.iter().filter(|t| t.is_playable()).cloned().collect();
+    own_tracks.shuffle(&mut rand::thread_rng());
+    own_tracks.truncate(ARTIST_STATION_OWN_TRACKS);
+    let mut seen: std::collections::HashSet<String> =
+        own_tracks.iter().map(|t| t.track_urn.clone()).collect();
+
+    let related_users = fetch_related_users(Arc::clone(&token), seed_urn.clone())
+        .await
+        .unwrap_or_default();
+
+    let mut fetches = tokio::task::JoinSet::new();
+    if let Some(track_urn) = seed_tracks.iter().find(|t| t.is_playable()).map(|t| t.track_urn.clone()) {
+        let token = Arc::clone(&token);
+        fetches.spawn(async move { fetch_related_tracks(token, track_urn).await.unwrap_or_default() });
+    }
+    for artist_urn in related_users.into_iter().take(ARTIST_STATION_RELATED_ARTISTS).map(|a| a.urn) {
+        let token = Arc::clone(&token);
+        fetches.spawn(async move {
+            let mut tracks = fetch_user_tracks(token, artist_urn, "tracks").await.unwrap_or_default();
+            tracks.retain(Track::is_playable);
+            tracks.truncate(ARTIST_STATION_TRACKS_PER_RELATED_ARTIST);
+            tracks
+        });
+    }
+
+    let mut related_pool = Vec::new();
+    while let Some(result) = fetches.join_next().await {
+        let Ok(tracks) = result else { continue };
+        for track in tracks {
+            if track.is_playable() && seen.insert(track.track_urn.clone()) {
+                related_pool.push(track);
+            }
+        }
+    }
+    related_pool.shuffle(&mut rand::thread_rng());
+    related_pool.truncate(ARTIST_STATION_SIZE.saturating_sub(own_tracks.len()));
+
+    let mut tracks = own_tracks;
+    tracks.extend(related_pool);
+    tracks.shuffle(&mut rand::thread_rng());
+    Ok(tracks)
 }
 
 fn start(
@@ -327,6 +394,18 @@ fn start(
                             state.current_playing_index = Some(next_idx);
                             state.radio_waiting = false;
                         }
+                    }
+                }
+                Msg::ArtistStation(id, tracks) => {
+                    if id == state.artist_station_fetch.request_id
+                        && let Some(seed) = tracks.first().cloned()
+                    {
+                        if let Some(current) = queued_from_current(&state, &data) {
+                            state.playback_history.push(current);
+                        }
+                        state.manual_queue.clear();
+                        player.play(seed);
+                        enter_radio(&mut state, &mut data, tracks);
                     }
                 }
                 Msg::PlaylistCreated(playlist) => {
@@ -533,7 +612,9 @@ fn start(
 
         if state.selected_tab == 0 && state.selected_subtab == 3 {
             let selected = following_ref.get(state.selected_row).map(|a| a.urn.clone());
-            let reset = state.following_tracks_fetch.refetch(
+            // Switching artists only happens via Shift+Up/Down, which already sets the focus
+            // (Artists, or a stale Published/Likes from before); nothing here should override it.
+            state.following_tracks_fetch.refetch(
                 &mut data.following_tracks,
                 &mut data.following_tracks_state,
                 &mut data.following_tracks_user_urn,
@@ -545,9 +626,6 @@ fn start(
                     Msg::FollowingTracks,
                 ),
             );
-            if reset {
-                state.following_tracks_focus = FollowingTracksFocus::Published;
-            }
             state.following_likes_fetch.refetch(
                 &mut data.following_likes_tracks,
                 &mut data.following_likes_state,
@@ -605,6 +683,18 @@ fn start(
                         Msg::Related,
                     ));
                 }
+
+        // Shift+Enter on a focused artist row: fetch its station mix in the background, then
+        // Msg::ArtistStation starts playback once it lands.
+        if let Some(artist) = state.artist_station_request.take() {
+            state.artist_station_fetch.cancel();
+            let id = state.artist_station_fetch.request_id;
+            state.artist_station_fetch.task = Some(spawn_tracks(
+                &async_rt, &tx, id,
+                fetch_artist_station_tracks(auth(), artist.urn),
+                Msg::ArtistStation,
+            ));
+        }
 
         // Enter in the feed: keep the queue going with the items after the one playing, in
         // feed order. Track items are appended at once; sets are fetched one at a time.
@@ -772,7 +862,9 @@ fn start(
 
         if state.selected_tab == 1 && state.selected_searchfilter == 3 {
             let selected = data.search_people.get(state.selected_row).map(|a| a.urn.clone());
-            let reset = state.search_people_tracks_fetch.refetch(
+            // Switching people only happens via Shift+Up/Down, which already sets the focus;
+            // nothing here should override it.
+            state.search_people_tracks_fetch.refetch(
                 &mut data.search_people_tracks,
                 &mut data.search_people_tracks_state,
                 &mut data.search_people_tracks_user_urn,
@@ -784,9 +876,6 @@ fn start(
                     Msg::SearchPeopleTracks,
                 ),
             );
-            if reset {
-                state.search_people_tracks_focus = FollowingTracksFocus::Published;
-            }
             state.search_people_likes_fetch.refetch(
                 &mut data.search_people_likes_tracks,
                 &mut data.search_people_likes_state,
@@ -973,7 +1062,7 @@ fn start(
                             // The list is running out: hand over to related tracks now so the
                             // radio fetch lands before this track ends.
                             None if state.playback_source != PlaybackSource::Radio => {
-                                enter_radio(&mut state, &mut data, current_track.clone());
+                                enter_radio(&mut state, &mut data, vec![current_track.clone()]);
                             }
                             None => {}
                         }
@@ -1015,7 +1104,7 @@ fn start(
                             // Nothing queued: related tracks are (or are about to be) on
                             // their way; Msg::Related starts the next one.
                             if state.playback_source != PlaybackSource::Radio {
-                                enter_radio(&mut state, &mut data, current_track.clone());
+                                enter_radio(&mut state, &mut data, vec![current_track.clone()]);
                             }
                             state.radio_waiting = true;
                         }

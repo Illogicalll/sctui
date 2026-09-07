@@ -88,6 +88,8 @@ pub enum FollowingTracksFocus {
     #[default]
     Published,
     Likes,
+    /// The artist name list itself, not either track pane.
+    Artists,
 }
 
 /// A like/follow request; the same value comes back once the server accepted it
@@ -344,6 +346,9 @@ pub struct AppState {
     pub radio_fetched_for: Option<String>,
     /// The radio queue ran dry before related tracks arrived; play as soon as they do.
     pub radio_waiting: bool,
+    /// Set by Shift+Enter on a focused artist row; the loop fetches its station tracks from here.
+    pub artist_station_request: Option<Artist>,
+    pub artist_station_fetch: FetchTask,
     /// Set by Enter in the feed: index of the activity being played; the loop expands from there.
     pub feed_expand_from: Option<usize>,
     pub progress: u64,

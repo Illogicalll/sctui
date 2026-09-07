@@ -232,6 +232,7 @@ pub fn render_search(
         let left_col_widths = vec![Constraint::Length(1), Constraint::Percentage(100)];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
+        let people_focus_is_artists = state.search_people_tracks_focus == FollowingTracksFocus::Artists;
         let left_rows = data.search_people
             .iter()
             .enumerate()
@@ -246,7 +247,11 @@ pub fn render_search(
                     truncate_with_ellipsis(&artist.name, left_min_widths[1]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
+                    row = if people_focus_is_artists {
+                        row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
+                    } else {
+                        row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
+                    };
                 }
                 row
             })
