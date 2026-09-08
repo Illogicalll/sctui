@@ -260,7 +260,9 @@ fn start(
         api.get_activities().map(Msg::Feed)
     });
 
-    let mut picker = Picker::from_query_stdio()?;
+    // Nested/multiplexed terminals often can't report font size (no pixel dims in the
+    // winsize, query escape not forwarded); run without cover art instead of refusing to start.
+    let mut picker = Picker::from_query_stdio().ok();
 
     let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
     let (tx_main, rx_main) = mpsc::channel::<AppEvent>();
@@ -499,14 +501,14 @@ fn start(
                     }
                     last_artwork_file = file.map(|path| (url.clone(), path));
                     last_artwork_url = Some(url);
-                    match image {
-                        Some(image) => {
+                    match (image, picker.as_mut()) {
+                        (Some(image), Some(picker)) => {
                             let resize_proto = picker.new_resize_protocol(image.clone());
                             cover_art_async =
                                 ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
                             last_artwork_image = Some(image);
                         }
-                        None => {
+                        _ => {
                             cover_art_async.empty_protocol();
                             last_artwork_image = None;
                         }
@@ -1009,8 +1011,8 @@ fn start(
                     }
                 }
                 Event::Resize(_, _) => {
-                    picker = Picker::from_query_stdio()?;
-                    if let Some(image) = last_artwork_image.as_ref() {
+                    picker = Picker::from_query_stdio().ok();
+                    if let (Some(image), Some(picker)) = (last_artwork_image.as_ref(), picker.as_mut()) {
                         let resize_proto = picker.new_resize_protocol(image.clone());
                         cover_art_async =
                             ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
