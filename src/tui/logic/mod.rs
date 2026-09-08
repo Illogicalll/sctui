@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use ratatui_image::{
     errors::Errors,
-    picker::Picker,
+    picker::{Picker, ProtocolType},
     thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
 };
 use reqwest::Method;
@@ -121,6 +121,19 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loa
     }
     ratatui::restore();
     result
+}
+
+/// Terminal image support. Multiplexers that can't report the cell size in pixels
+/// (herdr < 0.9 or with graphics off, tmux without passthrough, Windows ConPTY) fail
+/// the query; fall back to unicode half-blocks, which need no real font size, instead
+/// of dropping cover art or refusing to start.
+fn make_picker() -> Picker {
+    Picker::from_query_stdio().unwrap_or_else(|_| {
+        // ratatui-image's own default: any ~1:2 size works for half-blocks.
+        let mut picker = Picker::from_fontsize((10, 20));
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+        picker
+    })
 }
 
 /// Make the next `draw` rewrite every cell without erasing the screen first.
@@ -260,9 +273,7 @@ fn start(
         api.get_activities().map(Msg::Feed)
     });
 
-    // Nested/multiplexed terminals often can't report font size (no pixel dims in the
-    // winsize, query escape not forwarded); run without cover art instead of refusing to start.
-    let mut picker = Picker::from_query_stdio().ok();
+    let mut picker = make_picker();
 
     let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
     let (tx_main, rx_main) = mpsc::channel::<AppEvent>();
@@ -501,14 +512,14 @@ fn start(
                     }
                     last_artwork_file = file.map(|path| (url.clone(), path));
                     last_artwork_url = Some(url);
-                    match (image, picker.as_mut()) {
-                        (Some(image), Some(picker)) => {
+                    match image {
+                        Some(image) => {
                             let resize_proto = picker.new_resize_protocol(image.clone());
                             cover_art_async =
                                 ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
                             last_artwork_image = Some(image);
                         }
-                        _ => {
+                        None => {
                             cover_art_async.empty_protocol();
                             last_artwork_image = None;
                         }
@@ -1011,8 +1022,8 @@ fn start(
                     }
                 }
                 Event::Resize(_, _) => {
-                    picker = Picker::from_query_stdio().ok();
-                    if let (Some(image), Some(picker)) = (last_artwork_image.as_ref(), picker.as_mut()) {
+                    picker = make_picker();
+                    if let Some(image) = last_artwork_image.as_ref() {
                         let resize_proto = picker.new_resize_protocol(image.clone());
                         cover_art_async =
                             ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
