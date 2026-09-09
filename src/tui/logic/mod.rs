@@ -38,7 +38,7 @@ use reqwest::Method;
 use image::DynamicImage;
 
 use super::render::render;
-use self::filtering::{build_filtered_views, clamp_selection, is_filter_active};
+use self::filtering::{build_filtered_views, clamp_selection, is_filter_active, prune_unplayable};
 use self::input::helpers::reset_search_rows;
 use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
@@ -239,10 +239,14 @@ fn start(
     state.keymap = config.keymap;
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
+    state.settings = config.settings;
 
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;
     drop(api_guard);
+    if state.settings.hide_unplayable {
+        prune_unplayable(&mut state, &mut data);
+    }
 
     let async_rt = tokio::runtime::Runtime::new().unwrap();
     // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
@@ -256,9 +260,13 @@ fn start(
     spawn_fetch(Arc::clone(api), tx.clone(), |api| {
         api.get_playlists().map(Msg::Playlists)
     });
-    spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-        api.get_activities().map(Msg::Feed)
-    });
+    // Later feed pages are only fetched while the feed tab is on screen, so a hidden
+    // feed tab costs nothing beyond this first page - skip that too.
+    if !state.settings.hide_feed_tab {
+        spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+            api.get_activities().map(Msg::Feed)
+        });
+    }
 
     let mut picker = Picker::from_query_stdio()?;
 
@@ -302,7 +310,11 @@ fn start(
     let mut media_synced_pos: u64 = 0;
 
     loop {
+        // Rows that arrived this iteration; the hide-unplayable setting prunes them
+        // once here rather than in each of the arms below.
+        let mut fetched = false;
         while let Ok(msg) = rx.try_recv() {
+            fetched = true;
             match msg {
                 Msg::Likes(new) => {
                     for t in &new {
@@ -427,6 +439,9 @@ fn start(
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
             }
+        }
+        if fetched && state.settings.hide_unplayable {
+            prune_unplayable(&mut state, &mut data);
         }
 
         while let Some(action) = state.engagement_queue.pop_front() {

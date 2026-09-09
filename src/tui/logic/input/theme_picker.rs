@@ -30,7 +30,12 @@ pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> 
             state.theme_name = chosen.name.to_string();
             state.theme_picker_previous = None;
             state.theme_picker_visible = false;
-            state.help_message = crate::config::save(&state.keymap, &state.theme_name, &state.theme_overrides)
+            state.help_message = crate::config::save(
+                &state.keymap,
+                &state.theme_name,
+                &state.theme_overrides,
+                &state.settings,
+            )
                 .err()
                 .map(|e| format!("theme not saved: {e}"));
         }
