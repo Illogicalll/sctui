@@ -133,8 +133,9 @@ fn has_second_pane(state: &AppState) -> bool {
     }
 }
 
-/// Dispatch one action. Movement handlers still take a `KeyEvent` whose
-/// modifiers select the variant (plain = step, Alt = page, Shift = second pane).
+/// Dispatch one action. Plain Up/Down go through the held-key ramp; the page and
+/// secondary variants still call the movement handlers with a `KeyEvent` whose
+/// modifiers select the variant (Alt = page, Shift = second pane).
 pub(crate) fn run_action(
     action: Action,
     state: &mut AppState,
@@ -156,8 +157,8 @@ pub(crate) fn run_action(
         Action::PrevTab => navigation::handle_tab_switch_back(state),
         Action::SubTabLeft => navigation::sub_tab_left(state, data),
         Action::SubTabRight => navigation::sub_tab_right(state, data),
-        Action::Up => movement::handle_up_key(key(KeyCode::Up, KeyModifiers::NONE), state, data),
-        Action::Down => movement::handle_down_key(key(KeyCode::Down, KeyModifiers::NONE), state, data),
+        Action::Up => movement::handle_step_key(-1, state, data),
+        Action::Down => movement::handle_step_key(1, state, data),
         Action::PageUp => movement::handle_up_key(key(KeyCode::Up, KeyModifiers::ALT), state, data),
         Action::PageDown => movement::handle_down_key(key(KeyCode::Down, KeyModifiers::ALT), state, data),
         // Second pane where there is one; otherwise behave like PageUp/PageDown.

@@ -1,5 +1,6 @@
-use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::TableState;
+use std::time::Instant;
 
 use super::InputOutcome;
 use crate::tui::logic::state::{AppData, AppState, table_rows_count, FollowingTracksFocus};
@@ -36,6 +37,23 @@ fn main_state(subtab: usize, data: &mut AppData) -> &mut TableState {
         3 => &mut data.following_state,
         _ => &mut data.likes_state,
     }
+}
+
+/// Plain Up/Down (`dir` = ±1). Holding the key repeats the single-row step as many times
+/// as the hold ramp asks for, so long lists scroll faster the longer it is held. Repeating
+/// `handle_up_key`/`handle_down_key` rather than scaling the delta keeps every pane's
+/// bounds and focus behaviour identical to a tap.
+pub(crate) fn handle_step_key(dir: isize, state: &mut AppState, data: &mut AppData) -> InputOutcome {
+    let code = if dir < 0 { KeyCode::Up } else { KeyCode::Down };
+    let key = KeyEvent::new(code, KeyModifiers::NONE);
+    for _ in 0..state.move_accel.step_rows(dir, Instant::now()) {
+        if dir < 0 {
+            handle_up_key(key, state, data);
+        } else {
+            handle_down_key(key, state, data);
+        }
+    }
+    InputOutcome::Continue
 }
 
 pub(crate) fn handle_down_key(
