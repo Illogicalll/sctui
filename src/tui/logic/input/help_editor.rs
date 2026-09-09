@@ -111,19 +111,20 @@ fn handle_settings_input(
     InputOutcome::Continue
 }
 
-/// Move a duration row by `delta` seconds, within its allowed range.
-fn adjust(row: SettingRow, state: &mut AppState, data: &mut AppData, player: &Player, delta: i16) {
+/// Move a duration row by `steps` half-seconds, within its allowed range. The current
+/// value is snapped onto the grid first, so a duration hand-edited to something off it
+/// lands on a round figure rather than carrying the offset for ever.
+fn adjust(row: SettingRow, state: &mut AppState, data: &mut AppData, player: &Player, steps: i8) {
     let SettingRow::Secs(label, field) = row else { return };
+    let snapped = state.settings.crossfade_secs_snapped();
     let secs = {
         let value = field(&mut state.settings);
-        *value = (i16::from(*value) + delta).clamp(
-            i16::from(Settings::CROSSFADE_SECS_MIN),
-            i16::from(Settings::CROSSFADE_SECS_MAX),
-        ) as u8;
+        *value = (snapped + f32::from(steps) * Settings::CROSSFADE_SECS_STEP)
+            .clamp(Settings::CROSSFADE_SECS_MIN, Settings::CROSSFADE_SECS_MAX);
         *value
     };
     apply_settings(state, data, player);
-    state.help_message = Some(saved(state, format!("{label}: {secs}s")));
+    state.help_message = Some(saved(state, format!("{label}: {secs:.1}s")));
 }
 
 /// Make a just-changed setting take effect on what is already loaded.
