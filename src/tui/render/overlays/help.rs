@@ -196,6 +196,13 @@ fn render_page(
     frame.render_stateful_widget(table, table_area, &mut table_state);
 }
 
+/// Width `Tabs` draws for the popup's pages: each title padded a space either side,
+/// with a one-cell divider between them.
+fn tab_bar_width() -> u16 {
+    let titles: u16 = HelpPage::TITLES.iter().map(|t| t.chars().count() as u16 + 2).sum();
+    titles + HelpPage::TITLES.len() as u16 - 1
+}
+
 /// Lines the hint needs at this width. It is the longest thing on the popup and
 /// a centred single line just loses both ends off the sides, so it wraps instead.
 fn hint_height(hint: &str, width: u16) -> u16 {
@@ -212,9 +219,9 @@ fn render_shell(frame: &mut Frame, state: &AppState, hint: &str) -> Rect {
     let popup_area = centered_rect(76, 80, frame.area());
     frame.render_widget(Clear, popup_area);
 
+    // No title: the tab bar below names the page, and a heading over it said nothing
+    // the tabs do not.
     let block = Block::default()
-        .title(" Help ")
-        .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded);
     let inner = block.inner(popup_area);
@@ -227,18 +234,21 @@ fn render_shell(frame: &mut Frame, state: &AppState, hint: &str) -> Rect {
     ])
     .areas(inner);
 
-    // The same switcher the main window uses for Library/Search/Feed, minus its
-    // block: the popup's own border is already around it.
+    // The same switcher the main window uses for Library/Search/Feed, centred over a
+    // rule. `Tabs` has no alignment of its own, so it is given exactly the width it
+    // draws and that is centred instead.
+    let rule = Block::default().borders(Borders::BOTTOM);
+    let tabs_line = rule.inner(tabs_area);
+    frame.render_widget(rule, tabs_area);
     let tabs: Vec<_> = HelpPage::TITLES.iter().map(|t| Span::raw(*t)).collect();
     frame.render_widget(
         Tabs::new(tabs)
-            .block(Block::default().borders(Borders::BOTTOM))
             .select(state.help_page.index())
             .style(Style::default().fg(theme::current().fg))
             .highlight_style(
                 Style::default().fg(theme::current().accent).add_modifier(Modifier::BOLD),
             ),
-        tabs_area,
+        centered_rect_fixed(tab_bar_width(), 1, tabs_line),
     );
 
     let (status, status_style) = match (&state.help_capture, &state.help_message) {
@@ -325,6 +335,29 @@ mod tests {
         let (settings, keys) = (col_of("Settings"), col_of("Keys"));
         assert!(accented.contains(&settings), "the open page is not highlighted");
         assert!(!accented.contains(&keys), "a closed page is highlighted");
+
+        // Centred in the popup, and nothing titling the border above it.
+        let gap = |l: &str| l.chars().filter(|c| *c != '\u{2502}').collect::<String>();
+        let bar = gap(bar);
+        let lead = bar.chars().take_while(|c| *c == ' ').count();
+        let trail = bar.chars().rev().take_while(|c| *c == ' ').count();
+        assert!(lead.abs_diff(trail) <= 1, "the tab bar is not centred: {bar:?}");
+        let border = s.lines().find(|l| l.contains('\u{256d}')).expect("the popup's top border");
+        assert!(
+            border.chars().all(|c| " ╭╮─".contains(c)),
+            "something is titling the popup: {border:?}"
+        );
+    }
+
+    #[test]
+    fn the_tab_bar_width_matches_what_tabs_draws() {
+        // Every page name, each padded a space either side, with dividers between.
+        let (s, _) = page(100, 30, HelpPage::Keys);
+        let bar = s.lines().find(|l| l.contains("Equaliser")).unwrap();
+        // Between the popup's two borders, keeping the dividers between page names.
+        let inner = &bar[bar.find('\u{2502}').unwrap() + 3..bar.rfind('\u{2502}').unwrap()];
+        // Tabs pads either end of its rect with a space, which trimming takes off.
+        assert_eq!(tab_bar_width() as usize, inner.trim().chars().count() + 2);
     }
 
     /// The keys hint is longer than the popup is wide; centred on one line it used
