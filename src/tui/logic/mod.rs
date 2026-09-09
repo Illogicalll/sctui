@@ -12,7 +12,7 @@ use crate::api::{
     fetch_user_tracks,
 };
 use crate::auth::Token;
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 use rand::seq::SliceRandom;
 use ratatui::crossterm::{
     event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
@@ -45,7 +45,7 @@ use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
-    active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
+    active_tracks, append_feed_tracks, next_track_trigger_ms, play_queued_track, queued_from_current,
 };
 
 /// How long a track must have been playing before its lyrics are looked up.
@@ -240,6 +240,7 @@ fn start(
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
+    player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
     state.eq = config.eq;
     crate::player::eq::set(state.eq.gains);
 
@@ -401,7 +402,7 @@ fn start(
                             if let Some(current) = queued_from_current(&state, &data) {
                                 state.playback_history.push(current);
                             }
-                            player.play(track);
+                            player.play(track, TrackChange::Natural);
                             state.override_playing = None;
                             state.current_playing_index = Some(next_idx);
                             state.radio_waiting = false;
@@ -416,7 +417,7 @@ fn start(
                             state.playback_history.push(current);
                         }
                         state.manual_queue.clear();
-                        player.play(seed);
+                        player.play(seed, TrackChange::UserSkip);
                         enter_radio(&mut state, &mut data, tracks);
                     }
                 }
@@ -1047,7 +1048,17 @@ fn start(
 
             let current_track = player.current_track();
             if is_playing && !current_track.track_urn.is_empty() {
-                let preload_threshold = (current_track.duration_ms as f64 * 0.8) as u64;
+                // Repeat replays the same track, which the player still reads as a
+                // seek (same urn) rather than a track change, so there is nothing to
+                // overlap even though the intent now reaches the engine.
+                // ponytail: repeat would need a second decode of the same track to
+                // fade into itself; do that only if anyone asks for it.
+                let crossfade_ms = if state.repeat_enabled { 0 } else { state.settings.crossfade_ms() };
+                let handover_ms = next_track_trigger_ms(current_track.duration_ms, crossfade_ms);
+                // Whichever comes first: the usual four fifths in, or long enough
+                // before the handover that a crossfade has the next track ready.
+                let preload_threshold = ((current_track.duration_ms as f64 * 0.8) as u64)
+                    .min(handover_ms.saturating_sub(10_000));
                 let should_preload = state.progress >= preload_threshold 
                     && state.progress < current_track.duration_ms.saturating_sub(100)
                     && state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str());
@@ -1087,8 +1098,7 @@ fn start(
                     state.preload_triggered_for_track_urn = None;
                 }
 
-                let at_end = state.progress >= current_track.duration_ms.saturating_sub(50)
-                    && current_track.duration_ms > 0;
+                let at_end = state.progress >= handover_ms && current_track.duration_ms > 0;
 
                 if !at_end {
                     state.end_handled_track_urn = None;
@@ -1098,20 +1108,27 @@ fn start(
                     if let Some(current_idx) = state.current_playing_index {
                         if state.repeat_enabled {
                         if let Some(track) = active_tracks(&state, &data).get(current_idx) {
-                            player.play(track.clone());
+                            player.play(track.clone(), TrackChange::Natural);
                             state.override_playing = None;
                         }
                         } else if let Some(queued) = state.manual_queue.pop_front() {
                         if let Some(current) = queued_from_current(&state, &data) {
                             state.playback_history.push(current);
                         }
-                            play_queued_track(queued, &mut state, &mut data, &player, true);
+                            play_queued_track(
+                                queued,
+                                &mut state,
+                                &mut data,
+                                &player,
+                                true,
+                                TrackChange::Natural,
+                            );
                         } else if let Some(next_idx) = state.auto_queue.pop_front() {
                             if let Some(track) = active_tracks(&state, &data).get(next_idx) {
                                 if let Some(current) = queued_from_current(&state, &data) {
                                     state.playback_history.push(current);
                                 }
-                                player.play(track.clone());
+                                player.play(track.clone(), TrackChange::Natural);
                                 state.override_playing = None;
                                 state.current_playing_index = Some(next_idx);
                             }

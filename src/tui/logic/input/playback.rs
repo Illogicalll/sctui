@@ -2,7 +2,7 @@ use super::InputOutcome;
 use super::helpers::filtered_row;
 use crate::api::{Artist, Track};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, FollowingTracksFocus};
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 use crate::tui::logic::utils::{build_queue, enter_radio, queued_from_current};
 
 use super::queue::selected_queued;
@@ -67,7 +67,7 @@ pub(crate) fn handle_station(
         state.playback_history.push(current);
     }
     state.manual_queue.clear();
-    player.play(queued.track.clone());
+    player.play(queued.track.clone(), TrackChange::UserSkip);
     enter_radio(state, data, vec![queued.track]);
     InputOutcome::Continue
 }
@@ -113,7 +113,7 @@ fn start_playback(
             state.playback_history.push(queued);
         }
 
-    player.play(track.clone());
+    player.play(track.clone(), TrackChange::UserSkip);
     state.playback_source = source;
     state.override_playing = None;
     state.current_playing_index = Some(idx);

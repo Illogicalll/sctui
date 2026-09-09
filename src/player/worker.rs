@@ -9,7 +9,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use super::Position;
-use super::commands::PlayerCommand;
+use super::commands::{PlayerCommand, TrackChange};
 use super::stream::{PlaybackEngine, open_output_stream};
 
 /// Pulls the next command to act on. Spam-skipping next/prev queues a burst of `Play`
@@ -22,10 +22,10 @@ fn next_command(rx: &Receiver<PlayerCommand>, pending: &mut Option<PlayerCommand
         Some(msg) => msg,
         None => rx.recv().ok()?,
     };
-    Some(if matches!(msg, PlayerCommand::Play(_)) {
+    Some(if matches!(msg, PlayerCommand::Play(..)) {
         let mut latest = msg;
         while let Ok(next) = rx.try_recv() {
-            if matches!(next, PlayerCommand::Play(_)) {
+            if matches!(next, PlayerCommand::Play(..)) {
                 latest = next;
             } else {
                 *pending = Some(next);
@@ -53,10 +53,11 @@ pub(crate) fn player_loop(
     let mut pending: Option<PlayerCommand> = None;
     while let Some(msg) = next_command(&rx, &mut pending) {
         match msg {
-            PlayerCommand::Play(track) => {
+            PlayerCommand::Play(track, change) => {
                 engine.play_from_position(
                     &track,
                     0,
+                    change,
                     &token,
                     &sink_arc,
                     &is_playing_flag,
@@ -67,6 +68,10 @@ pub(crate) fn player_loop(
 
             PlayerCommand::PreloadNext(track) => {
                 let _ = engine.preload_next_track(&track, &token);
+            }
+
+            PlayerCommand::SetCrossfade { ms, on_user_skips } => {
+                engine.set_crossfade(ms, on_user_skips)
             }
 
             PlayerCommand::Pause => {
@@ -140,6 +145,7 @@ pub(crate) fn player_loop(
                         engine.play_from_position(
                             &track,
                             new_position_ms,
+                            TrackChange::Seek,
                             &token,
                             &sink_arc,
                             &is_playing_flag,
@@ -180,6 +186,7 @@ pub(crate) fn player_loop(
                     engine.play_from_position(
                         &track,
                         new_position_ms,
+                        TrackChange::Seek,
                         &token,
                         &sink_arc,
                         &is_playing_flag,
@@ -214,7 +221,7 @@ mod tests {
 
     fn urn(cmd: &PlayerCommand) -> &str {
         match cmd {
-            PlayerCommand::Play(t) => &t.track_urn,
+            PlayerCommand::Play(t, _) => &t.track_urn,
             _ => panic!("expected Play"),
         }
     }
@@ -222,9 +229,9 @@ mod tests {
     #[test]
     fn a_burst_of_plays_collapses_to_the_last_one() {
         let (tx, rx) = mpsc::channel();
-        tx.send(PlayerCommand::Play(track("a"))).unwrap();
-        tx.send(PlayerCommand::Play(track("b"))).unwrap();
-        tx.send(PlayerCommand::Play(track("c"))).unwrap();
+        tx.send(PlayerCommand::Play(track("a"), TrackChange::UserSkip)).unwrap();
+        tx.send(PlayerCommand::Play(track("b"), TrackChange::UserSkip)).unwrap();
+        tx.send(PlayerCommand::Play(track("c"), TrackChange::UserSkip)).unwrap();
 
         let mut pending = None;
         let msg = next_command(&rx, &mut pending).unwrap();
@@ -236,10 +243,10 @@ mod tests {
     #[test]
     fn a_non_play_command_after_a_burst_is_returned_next_in_order() {
         let (tx, rx) = mpsc::channel();
-        tx.send(PlayerCommand::Play(track("a"))).unwrap();
-        tx.send(PlayerCommand::Play(track("b"))).unwrap();
+        tx.send(PlayerCommand::Play(track("a"), TrackChange::UserSkip)).unwrap();
+        tx.send(PlayerCommand::Play(track("b"), TrackChange::UserSkip)).unwrap();
         tx.send(PlayerCommand::Pause).unwrap();
-        tx.send(PlayerCommand::Play(track("c"))).unwrap();
+        tx.send(PlayerCommand::Play(track("c"), TrackChange::UserSkip)).unwrap();
 
         let mut pending = None;
         let first = next_command(&rx, &mut pending).unwrap();
@@ -257,7 +264,7 @@ mod tests {
     #[test]
     fn single_play_with_nothing_queued_passes_through_unchanged() {
         let (tx, rx) = mpsc::channel();
-        tx.send(PlayerCommand::Play(track("only"))).unwrap();
+        tx.send(PlayerCommand::Play(track("only"), TrackChange::UserSkip)).unwrap();
         let mut pending = None;
         assert_eq!(urn(&next_command(&rx, &mut pending).unwrap()), "only");
     }

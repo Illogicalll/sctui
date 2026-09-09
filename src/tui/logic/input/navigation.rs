@@ -1,6 +1,6 @@
 use super::InputOutcome;
 use super::helpers::reset_search_rows;
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 use crate::tui::logic::state::{AppData, AppState, visible_tabs};
 use crate::tui::logic::utils::{active_tracks, build_queue, build_search_matches};
 
@@ -163,13 +163,20 @@ pub(crate) fn handle_next_track(
             if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
                 state.playback_history.push(current);
             }
-            crate::tui::logic::utils::play_queued_track(queued, state, data, player, true);
+            crate::tui::logic::utils::play_queued_track(
+                queued,
+                state,
+                data,
+                player,
+                true,
+                TrackChange::UserSkip,
+            );
         } else if let Some(next_idx) = state.auto_queue.pop_front()
             && let Some(track) = active_tracks.get(next_idx) {
                 if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
                     state.playback_history.push(current);
                 }
-                player.play(track.clone());
+                player.play(track.clone(), TrackChange::UserSkip);
                 state.override_playing = None;
                 state.current_playing_index = Some(next_idx);
             }
@@ -189,7 +196,14 @@ pub(crate) fn handle_prev_track(
                 current.user_added = false;
                 state.manual_queue.push_front(current);
             }
-            crate::tui::logic::utils::play_queued_track(prev, state, data, player, true);
+            crate::tui::logic::utils::play_queued_track(
+                prev,
+                state,
+                data,
+                player,
+                true,
+                TrackChange::UserSkip,
+            );
         }
     InputOutcome::Continue
 }

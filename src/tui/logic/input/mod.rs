@@ -61,7 +61,7 @@ pub fn handle_key_event(
         return quit::handle_quit_confirm(key, state);
     }
     if state.help_visible {
-        return help_editor::handle_help_input(key, state, data);
+        return help_editor::handle_help_input(key, state, data, player);
     }
     if state.theme_picker_visible {
         return theme_picker::handle_theme_picker_input(key, state);

@@ -1,9 +1,9 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
-use crate::config::Settings;
+use crate::config::{SettingRow, Settings};
 use crate::keymap::{Action, Chord};
-use crate::player::eq;
+use crate::player::{Player, eq};
 use crate::tui::logic::filtering::apply_unplayable_filter;
 use crate::tui::logic::state::{AppData, AppState, HelpPage, visible_tabs};
 
@@ -13,6 +13,7 @@ pub(crate) fn handle_help_input(
     key: KeyEvent,
     state: &mut AppState,
     data: &mut AppData,
+    player: &Player,
 ) -> InputOutcome {
     let last = Action::ALL.len() - 1;
     let selected = Action::ALL[state.help_selected.min(last)];
@@ -37,7 +38,7 @@ pub(crate) fn handle_help_input(
         return InputOutcome::Continue;
     }
     match state.help_page {
-        HelpPage::Settings => return handle_settings_input(key, state, data),
+        HelpPage::Settings => return handle_settings_input(key, state, data, player),
         HelpPage::Equalizer => return handle_eq_input(key, state),
         HelpPage::Keys => {}
     }
@@ -72,23 +73,33 @@ pub(crate) fn handle_help_input(
     InputOutcome::Continue
 }
 
-/// The settings page: Enter or Space flips the highlighted toggle.
-fn handle_settings_input(key: KeyEvent, state: &mut AppState, data: &mut AppData) -> InputOutcome {
+/// The settings page: Enter or Space flips the highlighted toggle, left/right
+/// nudges the highlighted duration.
+fn handle_settings_input(
+    key: KeyEvent,
+    state: &mut AppState,
+    data: &mut AppData,
+    player: &Player,
+) -> InputOutcome {
     let last = Settings::ROWS.len() - 1;
+    let row = Settings::ROWS[state.help_settings_selected.min(last)];
     state.help_message = None;
     match (key.code, state.keymap.action(&key)) {
         (KeyCode::Esc, _) | (_, Some(Action::Help)) => state.help_visible = false,
         (KeyCode::Enter | KeyCode::Char(' '), _) => {
-            let (label, field) = Settings::ROWS[state.help_settings_selected.min(last)];
-            let value = {
-                let flag = field(&mut state.settings);
-                *flag = !*flag;
-                *flag
-            };
-            apply_settings(state, data);
-            let on = if value { "on" } else { "off" };
-            state.help_message = Some(saved(state, format!("{label}: {on}")));
+            if let SettingRow::Toggle(label, field) | SettingRow::CrossfadeToggle(label, field) = row {
+                let value = {
+                    let flag = field(&mut state.settings);
+                    *flag = !*flag;
+                    *flag
+                };
+                apply_settings(state, data, player);
+                let on = if value { "on" } else { "off" };
+                state.help_message = Some(saved(state, format!("{label}: {on}")));
+            }
         }
+        (KeyCode::Left, _) | (_, Some(Action::SubTabLeft)) => adjust(row, state, data, player, -1),
+        (KeyCode::Right, _) | (_, Some(Action::SubTabRight)) => adjust(row, state, data, player, 1),
         (_, Some(Action::Up)) | (KeyCode::Up, _) => {
             state.help_settings_selected = state.help_settings_selected.saturating_sub(1)
         }
@@ -100,6 +111,22 @@ fn handle_settings_input(key: KeyEvent, state: &mut AppState, data: &mut AppData
         _ => {}
     }
     InputOutcome::Continue
+}
+
+/// Move a duration row by `steps` half-seconds, within its allowed range. The current
+/// value is snapped onto the grid first, so a duration hand-edited to something off it
+/// lands on a round figure rather than carrying the offset for ever.
+fn adjust(row: SettingRow, state: &mut AppState, data: &mut AppData, player: &Player, steps: i8) {
+    let SettingRow::Secs(label, field) = row else { return };
+    let snapped = state.settings.crossfade_secs_snapped();
+    let secs = {
+        let value = field(&mut state.settings);
+        *value = (snapped + f32::from(steps) * Settings::CROSSFADE_SECS_STEP)
+            .clamp(Settings::CROSSFADE_SECS_MIN, Settings::CROSSFADE_SECS_MAX);
+        *value
+    };
+    apply_settings(state, data, player);
+    state.help_message = Some(saved(state, format!("{label}: {secs:.1}s")));
 }
 
 /// The equaliser page: ←→ (or h/l) picks a band, ↑↓ (or k/j) moves its fader,
@@ -156,13 +183,13 @@ fn nudge(gains: &mut [i8; eq::BANDS.len()], band: usize, delta: i8) -> Option<i8
     })
 }
 
-/// Make a just-flipped setting take effect on what is already loaded.
-fn apply_settings(state: &mut AppState, data: &mut AppData) {
-    apply_unplayable_filter(state, data);
+/// Make a just-changed setting take effect on what is already loaded.
+fn apply_settings(state: &mut AppState, data: &mut AppData, player: &Player) {    apply_unplayable_filter(state, data);
     if state.selected_tab >= visible_tabs(state).len() {
         state.selected_tab = 0;
         state.selected_row = 0;
     }
+    player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
 }
 
 /// Persist and decorate the message with the outcome.

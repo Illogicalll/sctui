@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use rand::seq::SliceRandom;
 
 use crate::api::{Album, Artist, Playlist, Track};
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 
 use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
 
@@ -285,12 +285,13 @@ pub fn play_queued_track(
     data: &mut AppData,
     player: &Player,
     preserve_context: bool,
+    change: TrackChange,
 ) {
     if !queued.track.is_playable() {
         return;
     }
 
-    player.play(queued.track.clone());
+    player.play(queued.track.clone(), change);
     state.override_playing = Some(queued.clone());
     if preserve_context {
         return;
@@ -435,9 +436,30 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
     ))
 }
 
+/// When to start the next track. Normally that is the moment this one runs out;
+/// with a crossfade the next one has to start `crossfade_ms` early so the two
+/// overlap. Never earlier than half way through, so a short track (or a long
+/// crossfade) cannot start its successor almost as soon as it begins.
+pub(crate) fn next_track_trigger_ms(duration_ms: u64, crossfade_ms: u64) -> u64 {
+    const END_OF_TRACK_SLACK_MS: u64 = 50;
+    let lead = crossfade_ms.max(END_OF_TRACK_SLACK_MS).min(duration_ms / 2);
+    duration_ms.saturating_sub(lead)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_next_track_starts_early_enough_to_crossfade_but_never_half_way_in() {
+        // No crossfade: unchanged, the old 50 ms of end-of-track slack.
+        assert_eq!(next_track_trigger_ms(200_000, 0), 199_950);
+        // 8 s crossfade over a 3 minute track.
+        assert_eq!(next_track_trigger_ms(180_000, 8_000), 172_000);
+        // A 10 s clip must not hand over 12 s before it ends.
+        assert_eq!(next_track_trigger_ms(10_000, 12_000), 5_000);
+        assert_eq!(next_track_trigger_ms(0, 12_000), 0);
+    }
 
     fn track(urn: &str, access: &str) -> Track {
         Track {

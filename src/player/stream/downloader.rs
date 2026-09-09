@@ -9,6 +9,7 @@ use std::time::Duration;
 use crate::auth::Token;
 use crate::player::Position;
 use crate::player::stream::cache::SegmentCache;
+use crate::player::stream::engine::is_live;
 use crate::player::stream::hls::{HlsManifest, resolve_manifest};
 
 pub(crate) const PREFETCH_SEGMENTS: usize = 3;
@@ -22,6 +23,9 @@ const MAX_REFRESHES: usize = 2;
 pub(crate) struct SegmentPumpParams {
     pub client: reqwest::blocking::Client,
     pub generation: Arc<AtomicU64>,
+    /// The one older generation still allowed to run: the track fading out
+    /// behind this one. See `engine::is_live`.
+    pub fading: Arc<AtomicU64>,
     pub generation_value: u64,
     pub manifest: Arc<HlsManifest>,
     pub segment_cache: Arc<Mutex<SegmentCache>>,
@@ -93,6 +97,7 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
         let SegmentPumpParams {
             client,
             generation,
+            fading,
             generation_value,
             mut manifest,
             segment_cache,
@@ -104,7 +109,7 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             token,
         } = params;
 
-        let is_cancelled = || generation.load(Ordering::SeqCst) != generation_value;
+        let is_cancelled = || !is_live(&generation, &fading, generation_value);
 
         let mut next_index = start_segment_index.saturating_add(1);
         while next_index < manifest.segments.len() {
