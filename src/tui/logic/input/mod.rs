@@ -1,9 +1,11 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use std::time::Instant;
+
 use crate::keymap::Action;
 use crate::player::Player;
 
-use crate::tui::logic::state::{AppData, AppState};
+use crate::tui::logic::state::{AppData, AppState, Lane};
 
 pub(crate) mod helpers;
 mod quit;
@@ -157,18 +159,34 @@ pub(crate) fn run_action(
         Action::PrevTab => navigation::handle_tab_switch_back(state),
         Action::SubTabLeft => navigation::sub_tab_left(state, data),
         Action::SubTabRight => navigation::sub_tab_right(state, data),
-        Action::Up => movement::handle_step_key(-1, state, data),
-        Action::Down => movement::handle_step_key(1, state, data),
+        Action::Up => movement::handle_step_key(Lane::Primary, -1, KeyModifiers::NONE, state, data),
+        Action::Down => movement::handle_step_key(Lane::Primary, 1, KeyModifiers::NONE, state, data),
         Action::PageUp => movement::handle_up_key(key(KeyCode::Up, KeyModifiers::ALT), state, data),
         Action::PageDown => movement::handle_down_key(key(KeyCode::Down, KeyModifiers::ALT), state, data),
-        // Second pane where there is one; otherwise behave like PageUp/PageDown.
-        Action::SecondaryUp => {
-            let mods = if has_second_pane(state) { KeyModifiers::SHIFT } else { KeyModifiers::ALT };
-            movement::handle_up_key(key(KeyCode::Up, mods), state, data)
+        // Second pane where there is one, and then it ramps like Up/Down; with no second
+        // pane it is a ten-row page jump, which is already a big step and is left alone.
+        Action::SecondaryUp if has_second_pane(state) => {
+            movement::handle_step_key(Lane::Secondary, -1, KeyModifiers::SHIFT, state, data)
         }
+        Action::SecondaryDown if has_second_pane(state) => {
+            movement::handle_step_key(Lane::Secondary, 1, KeyModifiers::SHIFT, state, data)
+        }
+        Action::SecondaryUp => movement::handle_up_key(key(KeyCode::Up, KeyModifiers::ALT), state, data),
         Action::SecondaryDown => {
-            let mods = if has_second_pane(state) { KeyModifiers::SHIFT } else { KeyModifiers::ALT };
-            movement::handle_down_key(key(KeyCode::Down, mods), state, data)
+            movement::handle_down_key(key(KeyCode::Down, KeyModifiers::ALT), state, data)
+        }
+        // The third pane's cursor lives in `run_command`, so the ramp repeats the whole
+        // action rather than a movement handler.
+        Action::TertiaryUp | Action::TertiaryDown => {
+            let dir = if action == Action::TertiaryUp { -1 } else { 1 };
+            let mut outcome = InputOutcome::Continue;
+            for _ in 0..state.move_accel.step_rows(Lane::Tertiary, dir, Instant::now()) {
+                outcome = commands::run_command(action, state, data, player);
+                if !matches!(outcome, InputOutcome::Continue) {
+                    break;
+                }
+            }
+            outcome
         }
         Action::PlayPause => {
             toggle_play_pause(player);

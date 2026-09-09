@@ -3,7 +3,7 @@ use ratatui::widgets::TableState;
 use std::time::Instant;
 
 use super::InputOutcome;
-use crate::tui::logic::state::{AppData, AppState, table_rows_count, FollowingTracksFocus};
+use crate::tui::logic::state::{AppData, AppState, Lane, table_rows_count, FollowingTracksFocus};
 
 /// Single-row move (`delta` = ±1). Moves only if the target row exists (down) or `row > 0` (up);
 /// never clamps a stale row and re-selects only when it actually moved. Returns whether it moved.
@@ -39,14 +39,21 @@ fn main_state(subtab: usize, data: &mut AppData) -> &mut TableState {
     }
 }
 
-/// Plain Up/Down (`dir` = ±1). Holding the key repeats the single-row step as many times
-/// as the hold ramp asks for, so long lists scroll faster the longer it is held. Repeating
-/// `handle_up_key`/`handle_down_key` rather than scaling the delta keeps every pane's
-/// bounds and focus behaviour identical to a tap.
-pub(crate) fn handle_step_key(dir: isize, state: &mut AppState, data: &mut AppData) -> InputOutcome {
+/// A single-row move (`dir` = ±1) on `lane`, where `mods` picks the pane the movement
+/// handlers act on (none = main list, Shift = second pane). Holding the key repeats the
+/// step as many times as the hold ramp asks for, so long lists scroll faster the longer
+/// it is held. Repeating `handle_up_key`/`handle_down_key` rather than scaling the delta
+/// keeps every pane's bounds and focus behaviour identical to a tap.
+pub(crate) fn handle_step_key(
+    lane: Lane,
+    dir: isize,
+    mods: KeyModifiers,
+    state: &mut AppState,
+    data: &mut AppData,
+) -> InputOutcome {
     let code = if dir < 0 { KeyCode::Up } else { KeyCode::Down };
-    let key = KeyEvent::new(code, KeyModifiers::NONE);
-    for _ in 0..state.move_accel.step_rows(dir, Instant::now()) {
+    let key = KeyEvent::new(code, mods);
+    for _ in 0..state.move_accel.step_rows(lane, dir, Instant::now()) {
         if dir < 0 {
             handle_up_key(key, state, data);
         } else {

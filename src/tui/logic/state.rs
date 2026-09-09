@@ -313,33 +313,47 @@ impl FetchTask {
 /// a longer pause is a tap. Terminal key-repeat rates are ~15-30/s, so this is generous.
 const HOLD_GAP: Duration = Duration::from_millis(150);
 /// Grace period before a hold starts accelerating, so short holds stay one row per repeat.
-const RAMP_DELAY: Duration = Duration::from_millis(300);
+const RAMP_DELAY: Duration = Duration::from_millis(800);
 /// How long the ramp from one row to [`MAX_STEP`] takes once it starts.
 const RAMP_SPAN: Duration = Duration::from_millis(1200);
 /// Fastest step, matching the Alt+Up/Down page jump.
 const MAX_STEP: usize = 10;
 
+/// Which cursor a held movement key is driving. Each is ramped separately, so
+/// moving to another pane mid-hold starts again at one row.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lane {
+    Primary,
+    Secondary,
+    Tertiary,
+}
+
 /// The current run of same-direction movement keypresses, so a held key scrolls
 /// faster the longer it is held.
 #[derive(Default)]
 pub struct MoveAccel {
-    /// Direction, when the run started, and when its last press arrived.
-    run: Option<(isize, Instant, Instant)>,
+    /// Lane, direction, when the run started, and when its last press arrived.
+    run: Option<(Lane, isize, Instant, Instant)>,
 }
 
 impl MoveAccel {
-    /// Records a movement press in `dir` at `now` and returns how many rows it should move.
-    /// A pause longer than [`HOLD_GAP`] or a change of direction starts a new run at one row.
+    /// Records a movement press on `lane` in `dir` at `now` and returns how many rows it
+    /// should move. A pause longer than [`HOLD_GAP`], a change of direction, or a change of
+    /// lane starts a new run at one row.
     // ponytail: crossterm events carry no arrival timestamp, so `now` is when the press is
     // handled, not when it was typed. A frame that stalls for longer than HOLD_GAP therefore
     // resets the ramp (it falls back to single rows, never overshoots). Upgrade path: stamp
     // each event with `Instant::now()` in the poll loop and pass that in.
-    pub fn step_rows(&mut self, dir: isize, now: Instant) -> usize {
+    pub fn step_rows(&mut self, lane: Lane, dir: isize, now: Instant) -> usize {
         let started = match self.run {
-            Some((d, started, last)) if d == dir && now.duration_since(last) <= HOLD_GAP => started,
+            Some((l, d, started, last))
+                if l == lane && d == dir && now.duration_since(last) <= HOLD_GAP =>
+            {
+                started
+            }
             _ => now,
         };
-        self.run = Some((dir, started, now));
+        self.run = Some((lane, dir, started, now));
         let ramped = now.duration_since(started).saturating_sub(RAMP_DELAY);
         let progress = (ramped.as_secs_f32() / RAMP_SPAN.as_secs_f32()).min(1.0);
         1 + ((MAX_STEP - 1) as f32 * progress) as usize
@@ -605,24 +619,50 @@ mod tests {
         let mut accel = MoveAccel::default();
         let t0 = Instant::now();
         let press = |accel: &mut MoveAccel, dir, ms: u64| {
-            accel.step_rows(dir, t0 + Duration::from_millis(ms))
+            accel.step_rows(Lane::Primary, dir, t0 + Duration::from_millis(ms))
         };
+        // Full speed is reached RAMP_DELAY + RAMP_SPAN after the run starts.
+        let to_max = (RAMP_DELAY + RAMP_SPAN).as_millis() as u64;
 
         // A tap, and the start of a hold, move a single row.
         assert_eq!(press(&mut accel, 1, 0), 1);
         assert_eq!(press(&mut accel, 1, 100), 1);
 
         // Keep the repeats coming at 50ms: the step ramps up and tops out at MAX_STEP.
-        let rows: Vec<usize> = (150..=1600).step_by(50).map(|ms| press(&mut accel, 1, ms)).collect();
+        let rows: Vec<usize> = (150..=to_max).step_by(50).map(|ms| press(&mut accel, 1, ms)).collect();
         assert!(rows.windows(2).all(|w| w[0] <= w[1]), "not monotonic: {rows:?}");
         assert!(rows.iter().any(|&r| r > 1 && r < MAX_STEP), "no ramp: {rows:?}");
         assert_eq!(rows.last(), Some(&MAX_STEP));
+        // The grace period really is one: a hold shorter than RAMP_DELAY never speeds up.
+        let mut grace = MoveAccel::default();
+        let grace_rows: Vec<usize> = (0..=RAMP_DELAY.as_millis() as u64)
+            .step_by(50)
+            .map(|ms| grace.step_rows(Lane::Primary, 1, t0 + Duration::from_millis(ms)))
+            .collect();
+        assert!(grace_rows.iter().all(|&r| r == 1), "accelerated too early: {grace_rows:?}");
 
         // Letting go (a gap longer than HOLD_GAP) drops back to single rows...
-        assert_eq!(press(&mut accel, 1, 1600 + HOLD_GAP.as_millis() as u64 + 1), 1);
+        let released = to_max + HOLD_GAP.as_millis() as u64 + 1;
+        assert_eq!(press(&mut accel, 1, released), 1);
         // ...and so does reversing direction mid-hold.
-        let rows: Vec<usize> = (1800..=3400).step_by(50).map(|ms| press(&mut accel, 1, ms)).collect();
+        let resumed = released + 50;
+        let rows: Vec<usize> = (resumed..=resumed + to_max)
+            .step_by(50)
+            .map(|ms| press(&mut accel, 1, ms))
+            .collect();
         assert_eq!(rows.last(), Some(&MAX_STEP));
-        assert_eq!(press(&mut accel, -1, 3450), 1);
+        let reversed = resumed + to_max + 50;
+        assert_eq!(press(&mut accel, -1, reversed), 1);
+
+        // A different cursor starts its own run, and coming back starts the first one over.
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut lane_ms = reversed;
+        for _ in 0..((to_max / 50) + 2) {
+            accel.step_rows(Lane::Secondary, 1, at(lane_ms));
+            lane_ms += 50;
+        }
+        assert_eq!(accel.step_rows(Lane::Secondary, 1, at(lane_ms)), MAX_STEP);
+        assert_eq!(accel.step_rows(Lane::Tertiary, 1, at(lane_ms + 50)), 1);
+        assert_eq!(accel.step_rows(Lane::Secondary, 1, at(lane_ms + 100)), 1);
     }
 }
