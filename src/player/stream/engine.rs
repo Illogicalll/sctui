@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use reqwest::Url;
 
 use crate::api::Track;
-use crate::auth::{Token, try_refresh_token};
+use crate::auth::Token;
 use crate::player::Position;
 use crate::player::stream::cache::{CachedHls, SegmentCache};
-use crate::player::stream::hls::{HlsManifest, StreamsResponse};
+use crate::player::stream::hls::{HlsManifest, resolve_manifest};
 use crate::player::stream::downloader::spawn_segment_pump;
 use crate::player::stream::reader::{PcmSource, SegmentReader};
 use crate::player::stream::sample::TapSource;
@@ -62,28 +62,6 @@ impl PlaybackEngine {
         self.generation.load(Ordering::SeqCst)
     }
 
-    fn get_hls_url(&self, track_urn: &str, access_token: &str) -> anyhow::Result<Url> {
-        let streams_url = format!("https://api.soundcloud.com/tracks/{}/streams", track_urn);
-        let streams_response: StreamsResponse = self
-            .client
-            .get(&streams_url)
-            .bearer_auth(access_token)
-            .send()
-            .context("failed to fetch streams endpoint")?
-            .error_for_status()
-            .context("streams endpoint returned error status")?
-            .json()
-            .context("failed to parse streams response json")?;
-
-        let hls_url = streams_response
-            .hls_aac_160_url
-            .or(streams_response.hls_aac_96_url)
-            .or(streams_response.hls_mp3_128_url)
-            .ok_or_else(|| anyhow::anyhow!("No HLS stream URL available (tried AAC 160, AAC 96, MP3 128)"))?;
-
-        Url::parse(&hls_url).context("invalid HLS URL")
-    }
-
     fn download_bytes(&self, url: &Url) -> anyhow::Result<Vec<u8>> {
         let bytes = self
             .client
@@ -119,11 +97,7 @@ impl PlaybackEngine {
         let cache_valid = self.cache.as_ref().is_some_and(|c| c.is_valid_for(track, now));
 
         if !cache_valid {
-            let _ = try_refresh_token(token);
-            let access_token = { token.lock().unwrap().access_token.clone() };
-
-            let playlist_url = self.get_hls_url(&track.track_urn, &access_token)?;
-            let manifest = HlsManifest::fetch(&self.client, &playlist_url, &access_token)?;
+            let manifest = resolve_manifest(&self.client, &track.track_urn, token)?;
 
             let init_bytes = if let Some(init_url) = &manifest.init_url {
                 Arc::new(self.download_bytes(init_url)?)
@@ -160,11 +134,7 @@ impl PlaybackEngine {
             return Ok(());
         }
 
-        let _ = try_refresh_token(token);
-        let access_token = { token.lock().unwrap().access_token.clone() };
-
-        let playlist_url = self.get_hls_url(&track.track_urn, &access_token)?;
-        let manifest = HlsManifest::fetch(&self.client, &playlist_url, &access_token)?;
+        let manifest = resolve_manifest(&self.client, &track.track_urn, token)?;
 
         let init_bytes = if let Some(init_url) = &manifest.init_url {
             Arc::new(self.download_bytes(init_url)?)
@@ -260,6 +230,9 @@ impl PlaybackEngine {
                         arc
                     }
                     Err(_) => {
+                        // Most likely the cached manifest's signed URLs have expired;
+                        // drop it so the next attempt resolves a fresh one.
+                        self.cache = None;
                         if !is_seek {
                             is_playing_flag.store(false, Ordering::SeqCst);
                             position.lock().unwrap().last_start = None;
@@ -355,6 +328,8 @@ impl PlaybackEngine {
             bytes_tx,
             is_playing_flag: Arc::clone(is_playing_flag),
             position: Arc::clone(position),
+            track_urn: track.track_urn.clone(),
+            token: Arc::clone(token),
         });
     }
 }
