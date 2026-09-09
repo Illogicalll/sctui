@@ -2,7 +2,7 @@ use crate::keymap::Action;
 
 use super::InputOutcome;
 use crate::api::Track;
-use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, FollowingTracksFocus, PlaybackSource};
+use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, FollowingTracksFocus, HelpPage, PlaybackSource};
 use crate::player::Player;
 use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::build_search_matches;
@@ -78,8 +78,9 @@ pub(crate) fn run_command(
         Action::Help => {
             state.help_visible = !state.help_visible;
             state.help_selected = 0;
-            state.help_settings = false;
+            state.help_page = HelpPage::default();
             state.help_settings_selected = 0;
+            state.help_eq_selected = 0;
             state.help_capture = None;
             state.help_message = None;
         }

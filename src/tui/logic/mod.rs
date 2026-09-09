@@ -241,6 +241,8 @@ fn start(
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
     player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
+    state.eq = config.eq;
+    crate::player::eq::set(state.eq.gains);
 
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;

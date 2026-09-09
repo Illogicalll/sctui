@@ -35,6 +35,7 @@ pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> 
                 &state.theme_name,
                 &state.theme_overrides,
                 &state.settings,
+                &state.eq,
             )
                 .err()
                 .map(|e| format!("theme not saved: {e}"));
