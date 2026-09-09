@@ -1,9 +1,9 @@
-//! `~/.config/sctui/config.toml`: `[theme]` and `[keys]`. Read once at startup,
-//! rewritten by the in-app key editor and theme picker.
+//! `~/.config/sctui/config.toml`: `[theme]`, `[settings]` and `[keys]`. Read once at
+//! startup, rewritten by the in-app key editor, theme picker and settings page.
 
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::keymap::Keymap;
 use crate::theme::{self, Overrides, Theme};
@@ -16,13 +16,35 @@ pub struct Loaded {
     pub keymap: Keymap,
     pub theme_name: String,
     pub theme_overrides: Overrides,
+    pub settings: Settings,
     pub warnings: Vec<String>,
+}
+
+/// On/off options, edited from the settings page of the `?` overlay.
+#[derive(Deserialize, Serialize, Default, Clone, Copy)]
+#[serde(default)]
+pub struct Settings {
+    pub hide_unplayable: bool,
+    pub hide_feed_tab: bool,
+}
+
+/// One row of the settings page: its label and the field it toggles.
+pub type SettingRow = (&'static str, fn(&mut Settings) -> &mut bool);
+
+impl Settings {
+    /// The settings page, in display order.
+    pub const ROWS: [SettingRow; 2] = [
+        ("Hide unplayable tracks", |s| &mut s.hide_unplayable),
+        ("Hide feed tab", |s| &mut s.hide_feed_tab),
+    ];
 }
 
 #[derive(Deserialize, Default)]
 struct File {
     #[serde(default)]
     theme: ThemeSection,
+    #[serde(default)]
+    settings: Settings,
 }
 
 #[derive(Deserialize, Default)]
@@ -55,12 +77,23 @@ pub fn load() -> Loaded {
     warnings.extend(theme_warnings);
     theme::set(resolved);
 
-    Loaded { keymap, theme_name: base.name.to_string(), theme_overrides: file.theme.colors, warnings }
+    Loaded {
+        keymap,
+        theme_name: base.name.to_string(),
+        theme_overrides: file.theme.colors,
+        settings: file.settings,
+        warnings,
+    }
 }
 
-/// Write the file: theme choice, any colour overrides, and only the key
-/// bindings that differ from the defaults.
-pub fn save(keymap: &Keymap, theme_name: &str, overrides: &Overrides) -> std::io::Result<()> {
+/// Write the file: theme choice, any colour overrides, the settings toggles, and
+/// only the key bindings that differ from the defaults.
+pub fn save(
+    keymap: &Keymap,
+    theme_name: &str,
+    overrides: &Overrides,
+    settings: &Settings,
+) -> std::io::Result<()> {
     let path = path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -75,6 +108,8 @@ pub fn save(keymap: &Keymap, theme_name: &str, overrides: &Overrides) -> std::io
             out.push_str(&format!("{role} = \"{value}\"\n"));
         }
     }
+    out.push_str("\n[settings]\n");
+    out.push_str(&settings_section(settings));
     out.push('\n');
     out.push_str(&keymap.keys_section(true));
     std::fs::write(path, out)
@@ -90,8 +125,16 @@ pub fn template() -> String {
     out.push_str(".\n# [theme.colors] overrides single roles with \"#rrggbb\" or a colour name: ");
     out.push_str(&theme::ROLES.join(", "));
     out.push_str(".\n[theme]\nname = \"default\"\n# [theme.colors]\n# accent = \"#7aa2f7\"\n\n");
+    out.push_str("# On/off options, also editable in the app (? then Tab).\n[settings]\n");
+    out.push_str(&settings_section(&Settings::default()));
+    out.push('\n');
     out.push_str(&Keymap::default().keys_section(false));
     out
+}
+
+/// The body of `[settings]`, one `key = bool` per line.
+fn settings_section(settings: &Settings) -> String {
+    toml::to_string(settings).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -106,6 +149,20 @@ mod tests {
         let file: File = toml::from_str(&text).unwrap();
         assert_eq!(file.theme.name.as_deref(), Some("default"));
         assert!(file.theme.colors.0.is_empty());
+        assert!(!file.settings.hide_unplayable);
+        assert!(!file.settings.hide_feed_tab);
+    }
+
+    #[test]
+    fn settings_round_trip() {
+        let mut settings = Settings::default();
+        for (_, field) in Settings::ROWS {
+            *field(&mut settings) = true;
+        }
+        let text = format!("[settings]\n{}", settings_section(&settings));
+        let file: File = toml::from_str(&text).unwrap();
+        assert!(file.settings.hide_unplayable);
+        assert!(file.settings.hide_feed_tab);
     }
 
     #[test]

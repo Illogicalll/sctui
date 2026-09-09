@@ -1,17 +1,19 @@
 use super::InputOutcome;
 use super::helpers::reset_search_rows;
 use crate::player::Player;
-use crate::tui::logic::state::{AppData, AppState};
+use crate::tui::logic::state::{AppData, AppState, visible_tabs};
 use crate::tui::logic::utils::{active_tracks, build_queue, build_search_matches};
 
 pub(crate) fn handle_tab_switch(state: &mut AppState) -> InputOutcome {
-    state.selected_tab = (state.selected_tab + 1) % 3;
+    let tabs = visible_tabs(state).len();
+    state.selected_tab = (state.selected_tab + 1) % tabs;
     after_tab_switch(state);
     InputOutcome::Continue
 }
 
 pub(crate) fn handle_tab_switch_back(state: &mut AppState) -> InputOutcome {
-    state.selected_tab = (state.selected_tab + 2) % 3;
+    let tabs = visible_tabs(state).len();
+    state.selected_tab = (state.selected_tab + tabs - 1) % tabs;
     after_tab_switch(state);
     InputOutcome::Continue
 }
@@ -190,4 +192,38 @@ pub(crate) fn handle_prev_track(
             crate::tui::logic::utils::play_queued_track(prev, state, data, player, true);
         }
     InputOutcome::Continue
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tabs_in_order(hide_feed_tab: bool) -> Vec<usize> {
+        let mut state = AppState::default();
+        state.settings.hide_feed_tab = hide_feed_tab;
+        let mut seen = vec![state.selected_tab];
+        for _ in 0..3 {
+            handle_tab_switch(&mut state);
+            seen.push(state.selected_tab);
+        }
+        seen
+    }
+
+    #[test]
+    fn tab_cycle_skips_the_feed_when_it_is_hidden() {
+        assert_eq!(tabs_in_order(false), [0, 1, 2, 0]);
+        assert_eq!(tabs_in_order(true), [0, 1, 0, 1]);
+    }
+
+    #[test]
+    fn tab_cycle_back_wraps_to_the_last_visible_tab() {
+        let mut state = AppState::default();
+        handle_tab_switch_back(&mut state);
+        assert_eq!(state.selected_tab, 2);
+
+        let mut state = AppState::default();
+        state.settings.hide_feed_tab = true;
+        handle_tab_switch_back(&mut state);
+        assert_eq!(state.selected_tab, 1);
+    }
 }

@@ -416,6 +416,7 @@ pub struct AppState {
     pub engagement_queue: VecDeque<Engagement>,
     pub following_tracks_focus: FollowingTracksFocus,
     pub keymap: Keymap,
+    pub settings: crate::config::Settings,
     pub theme_name: String,
     pub theme_overrides: Overrides,
     pub theme_picker_visible: bool,
@@ -427,6 +428,9 @@ pub struct AppState {
     pub lyrics_track_urn: Option<String>,
     /// Key editor (the `?` popup): highlighted action, pending capture, last message.
     pub help_selected: usize,
+    /// The `?` popup's settings page (Tab switches to it) and its highlighted row.
+    pub help_settings: bool,
+    pub help_settings_selected: usize,
     pub help_capture: Option<crate::keymap::Action>,
     pub help_message: Option<String>,
     /// Search tab: printable keys go to the query until Enter/Esc.
@@ -515,6 +519,12 @@ pub struct AppData {
     pub feed_tracks: Vec<Track>,
     pub feed_tracks_state: TableState,
     pub feed_tracks_key: Option<String>,
+    /// Rows taken out by the "hide unplayable tracks" setting, each with the index it
+    /// held in its full list, so switching the setting back off puts them back where
+    /// they were. One slot per pane, in the order `filtering::apply_unplayable_filter`
+    /// lists them.
+    pub hidden_tracks: Vec<Vec<(usize, Track)>>,
+    pub hidden_feed: Vec<(usize, Activity)>,
 }
 
 impl AppData {
@@ -592,6 +602,8 @@ impl AppData {
             feed_tracks: Vec::new(),
             feed_tracks_state: TableState::default().with_selected(0),
             feed_tracks_key: None,
+            hidden_tracks: Vec::new(),
+            hidden_feed: Vec::new(),
         })
     }
 }
@@ -609,6 +621,15 @@ pub fn table_rows_count(selected_subtab: usize, data: &AppData) -> usize {
 pub const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];
 pub const SUBTAB_TITLES: [&str; 4] = ["Likes", "Playlists", "Albums", "Following"];
 pub const SEARCHFILTERS: [&str; 4] = ["Tracks", "Albums", "Playlists", "People"];
+
+/// The tabs the user can reach. Feed is the last one, so hiding it is a shorter slice.
+pub fn visible_tabs(state: &AppState) -> &'static [&'static str] {
+    if state.settings.hide_feed_tab {
+        &TAB_TITLES[..2]
+    } else {
+        &TAB_TITLES
+    }
+}
 
 #[cfg(test)]
 mod tests {

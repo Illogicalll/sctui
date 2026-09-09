@@ -19,7 +19,7 @@ use ratatui_image::thread::ThreadProtocol;
 
 use crate::player::Player;
 use crate::tui::logic::filtering::FilteredViews;
-use crate::tui::logic::state::{AppData, AppState, TAB_TITLES};
+use crate::tui::logic::state::{AppData, AppState, visible_tabs};
 use crate::tui::render::visualizer::render_visualizer;
 
 pub fn render(
@@ -60,7 +60,7 @@ pub fn render(
         return;
     }
 
-    render_tabs(frame, chunks[0], &TAB_TITLES, state.selected_tab);
+    render_tabs(frame, chunks[0], visible_tabs(state), state.selected_tab);
 
     if state.selected_tab == 0 {
         tabs::render_library(frame, chunks[1], width, state, data, views);

@@ -78,6 +78,8 @@ pub(crate) fn run_command(
         Action::Help => {
             state.help_visible = !state.help_visible;
             state.help_selected = 0;
+            state.help_settings = false;
+            state.help_settings_selected = 0;
             state.help_capture = None;
             state.help_message = None;
         }
