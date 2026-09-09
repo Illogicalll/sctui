@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use super::InputOutcome;
 use crate::config::Settings;
 use crate::keymap::{Action, Chord};
-use crate::tui::logic::filtering::prune_unplayable;
+use crate::tui::logic::filtering::apply_unplayable_filter;
 use crate::tui::logic::state::{AppData, AppState, visible_tabs};
 
 /// The `?` popup: a modal key editor, with a settings page behind Tab. Owns every
@@ -101,9 +101,7 @@ fn handle_settings_input(key: KeyEvent, state: &mut AppState, data: &mut AppData
 
 /// Make a just-flipped setting take effect on what is already loaded.
 fn apply_settings(state: &mut AppState, data: &mut AppData) {
-    if state.settings.hide_unplayable {
-        prune_unplayable(state, data);
-    }
+    apply_unplayable_filter(state, data);
     if state.selected_tab >= visible_tabs(state).len() {
         state.selected_tab = 0;
         state.selected_row = 0;

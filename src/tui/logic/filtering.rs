@@ -111,19 +111,24 @@ pub fn clamp_selection(
     }
 }
 
-/// Drop unplayable rows from every loaded list, for the "hide unplayable tracks"
-/// setting. Runs when fetched rows land and when the setting is switched on.
+/// Apply the "hide unplayable tracks" setting to every loaded list: take the unplayable
+/// rows out while it is on, and put them back where they were when it is switched off.
+/// Runs when fetched rows land and when the setting is flipped.
 ///
-/// Pages are appended, so pruning a fresh page only shortens the tail: indices
-/// earlier in the list, and any playback queue built from them, are left alone.
+/// Hidden rows are stashed with the index they held in the full list, so restoring is a
+/// sequence of in-order inserts and the original order always comes back. Nothing is
+/// discarded, so the setting is reversible without refetching anything.
 ///
-/// ponytail: destructive. Switching the setting back off only refills a list on its
-/// next fetch, so lists that are already fully paged in need a restart. The
-/// alternatives — shadowing every list, or mapping rendered rows back to data
-/// indices in each of the twelve panes — both cost far more than the setting is
-/// worth.
-pub fn prune_unplayable(state: &mut AppState, data: &mut AppData) {
-    let panes: [(&mut Vec<Track>, &mut TableState, &mut usize); 9] = [
+/// The playback queue indexes `data.playback_tracks`, a snapshot taken when playback
+/// starts, so moving rows around in these lists never disturbs what is playing.
+pub fn apply_unplayable_filter(state: &mut AppState, data: &mut AppData) {
+    let hide = state.settings.hide_unplayable;
+
+    // Likes and the track search share `selected_row` with other panes, so they move with
+    // a scratch cursor and the real one is clamped against whichever list is on screen.
+    let (mut likes_row, mut search_row) = (0usize, 0usize);
+    // The order here indexes `data.hidden_tracks`; keep the two in step.
+    let panes: [(&mut Vec<Track>, &mut TableState, &mut usize); 11] = [
         (&mut data.playlist_tracks, &mut data.playlist_tracks_state, &mut state.selected_playlist_track_row),
         (&mut data.album_tracks, &mut data.album_tracks_state, &mut state.selected_album_track_row),
         (&mut data.following_tracks, &mut data.following_tracks_state, &mut state.selected_following_track_row),
@@ -133,17 +138,29 @@ pub fn prune_unplayable(state: &mut AppState, data: &mut AppData) {
         (&mut data.search_people_tracks, &mut data.search_people_tracks_state, &mut state.search_selected_person_track_row),
         (&mut data.search_people_likes_tracks, &mut data.search_people_likes_state, &mut state.search_selected_person_like_row),
         (&mut data.feed_tracks, &mut data.feed_tracks_state, &mut state.selected_info_row),
+        (&mut data.likes, &mut data.likes_state, &mut likes_row),
+        (&mut data.search_tracks, &mut data.search_tracks_state, &mut search_row),
     ];
-    for (tracks, table, row) in panes {
-        prune_list(tracks, table, row);
+
+    let stashes = &mut data.hidden_tracks;
+    if stashes.len() < panes.len() {
+        stashes.resize_with(panes.len(), Vec::new);
+    }
+    for ((tracks, table, row), stash) in panes.into_iter().zip(stashes.iter_mut()) {
+        if hide {
+            hide_list(tracks, stash, table, row);
+        } else {
+            restore_rows(tracks, stash);
+        }
     }
 
-    // Likes, search results and the feed share `selected_row`, so they are pruned with
-    // a scratch cursor and the real one is clamped against whichever list is on screen.
-    let mut scratch = 0;
-    prune_list(&mut data.likes, &mut data.likes_state, &mut scratch);
-    prune_list(&mut data.search_tracks, &mut data.search_tracks_state, &mut scratch);
-    data.feed.retain(|a| a.track.as_ref().is_none_or(Track::is_playable));
+    if hide {
+        hide_rows(&mut data.feed, &mut data.hidden_feed, |a| {
+            a.track.as_ref().is_none_or(Track::is_playable)
+        });
+    } else {
+        restore_rows(&mut data.feed, &mut data.hidden_feed);
+    }
 
     let shown = match (state.selected_tab, state.selected_subtab, state.selected_searchfilter) {
         (0, 0, _) => Some((data.likes.len(), &mut data.likes_state)),
@@ -156,18 +173,52 @@ pub fn prune_unplayable(state: &mut AppState, data: &mut AppData) {
     }
 }
 
-/// Drop the unplayable tracks from one pane, keeping its cursor in range.
-fn prune_list(tracks: &mut Vec<Track>, table: &mut TableState, row: &mut usize) {
+/// Take the unplayable tracks out of one pane, keeping its cursor in range.
+fn hide_list(
+    tracks: &mut Vec<Track>,
+    stash: &mut Vec<(usize, Track)>,
+    table: &mut TableState,
+    row: &mut usize,
+) {
     if tracks.iter().all(Track::is_playable) {
         return;
     }
-    tracks.retain(Track::is_playable);
+    hide_rows(tracks, stash, Track::is_playable);
     clamp_row(row, table, tracks.len());
+}
+
+/// Move the rows failing `keep` into `stash`, each with the index it holds in the full
+/// list. Pages are only ever appended, so everything already stashed sits before every
+/// row still on screen, which keeps the stash sorted by index.
+fn hide_rows<T: Clone>(rows: &mut Vec<T>, stash: &mut Vec<(usize, T)>, keep: impl Fn(&T) -> bool) {
+    let base = stash.len();
+    let mut index = 0;
+    rows.retain(|row| {
+        let keeping = keep(row);
+        if !keeping {
+            stash.push((base + index, row.clone()));
+        }
+        index += 1;
+        keeping
+    });
+}
+
+/// Put stashed rows back at the indices they came from. Taken in ascending index order
+/// every insert lands correctly, because each earlier row is already back in place.
+fn restore_rows<T>(rows: &mut Vec<T>, stash: &mut Vec<(usize, T)>) {
+    for (index, row) in stash.drain(..) {
+        let at = index.min(rows.len());
+        rows.insert(at, row);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn urns(tracks: &[Track]) -> Vec<&str> {
+        tracks.iter().map(|t| t.track_urn.as_str()).collect()
+    }
 
     fn track(urn: &str, access: &str) -> Track {
         Track {
@@ -183,31 +234,89 @@ mod tests {
     }
 
     #[test]
-    fn prune_list_drops_unplayable_and_clamps_the_cursor() {
+    fn hiding_drops_unplayable_rows_and_clamps_the_cursor() {
         let mut tracks = vec![
             track("a", "playable"),
             track("b", "blocked"),
             track("c", ""),
             track("d", "preview"),
         ];
+        let mut stash = Vec::new();
         let mut table = TableState::default().with_selected(3);
         let mut row = 3;
-        prune_list(&mut tracks, &mut table, &mut row);
-        assert_eq!(
-            tracks.iter().map(|t| t.track_urn.as_str()).collect::<Vec<_>>(),
-            ["a", "c"]
-        );
+        hide_list(&mut tracks, &mut stash, &mut table, &mut row);
+        assert_eq!(urns(&tracks), ["a", "c"]);
         assert_eq!(row, 1);
         assert_eq!(table.selected(), Some(1));
     }
 
     #[test]
-    fn prune_list_leaves_a_playable_pane_and_its_cursor_alone() {
+    fn hiding_leaves_a_playable_pane_and_its_cursor_alone() {
         let mut tracks = vec![track("a", "playable"), track("b", "")];
+        let mut stash = Vec::new();
         let mut table = TableState::default().with_selected(1);
         let mut row = 1;
-        prune_list(&mut tracks, &mut table, &mut row);
+        hide_list(&mut tracks, &mut stash, &mut table, &mut row);
         assert_eq!(tracks.len(), 2);
         assert_eq!(row, 1);
+        assert!(stash.is_empty());
+    }
+
+    #[test]
+    fn restoring_puts_every_hidden_row_back_where_it_was() {
+        let original = vec![
+            track("a", "blocked"),
+            track("b", "playable"),
+            track("c", "preview"),
+            track("d", ""),
+            track("e", "blocked"),
+        ];
+        let mut tracks = original.clone();
+        let mut stash = Vec::new();
+        let (mut table, mut row) = (TableState::default().with_selected(0), 0);
+
+        hide_list(&mut tracks, &mut stash, &mut table, &mut row);
+        assert_eq!(urns(&tracks), ["b", "d"]);
+
+        restore_rows(&mut tracks, &mut stash);
+        assert_eq!(urns(&tracks), urns(&original));
+        assert!(stash.is_empty(), "the stash is emptied by restoring");
+    }
+
+    #[test]
+    fn a_page_appended_while_hidden_still_restores_in_order() {
+        // Hide, let another page land on the shortened list, hide again, then restore:
+        // the result must be the two pages back to back in their original order.
+        let first = vec![track("a", "blocked"), track("b", "playable")];
+        let second = [track("c", "playable"), track("d", "preview")];
+        let mut tracks = first.clone();
+        let mut stash = Vec::new();
+        let (mut table, mut row) = (TableState::default().with_selected(0), 0);
+
+        hide_list(&mut tracks, &mut stash, &mut table, &mut row);
+        tracks.extend(second.iter().cloned());
+        hide_list(&mut tracks, &mut stash, &mut table, &mut row);
+        assert_eq!(urns(&tracks), ["b", "c"]);
+
+        restore_rows(&mut tracks, &mut stash);
+        assert_eq!(urns(&tracks), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn hiding_and_restoring_repeatedly_is_stable() {
+        let original = vec![
+            track("a", "preview"),
+            track("b", "playable"),
+            track("c", "blocked"),
+        ];
+        let mut tracks = original.clone();
+        let mut stash = Vec::new();
+        let (mut table, mut row) = (TableState::default().with_selected(0), 0);
+        for _ in 0..3 {
+            hide_list(&mut tracks, &mut stash, &mut table, &mut row);
+            assert_eq!(urns(&tracks), ["b"]);
+            restore_rows(&mut tracks, &mut stash);
+            assert_eq!(urns(&tracks), urns(&original));
+        }
     }
 }

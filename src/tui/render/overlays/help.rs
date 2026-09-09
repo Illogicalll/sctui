@@ -37,7 +37,7 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
             &["Setting", "State"],
             rows,
             state.help_settings_selected,
-            "Enter/Space: toggle   ↑↓: move   Tab: keys   Esc: close   ·  hidden tracks come back after a restart",
+            "Enter/Space: toggle   ↑↓: move   Tab: keys   Esc: close",
         );
         return;
     }

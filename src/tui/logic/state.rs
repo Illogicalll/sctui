@@ -465,6 +465,12 @@ pub struct AppData {
     pub feed_tracks: Vec<Track>,
     pub feed_tracks_state: TableState,
     pub feed_tracks_key: Option<String>,
+    /// Rows taken out by the "hide unplayable tracks" setting, each with the index it
+    /// held in its full list, so switching the setting back off puts them back where
+    /// they were. One slot per pane, in the order `filtering::apply_unplayable_filter`
+    /// lists them.
+    pub hidden_tracks: Vec<Vec<(usize, Track)>>,
+    pub hidden_feed: Vec<(usize, Activity)>,
 }
 
 impl AppData {
@@ -542,6 +548,8 @@ impl AppData {
             feed_tracks: Vec::new(),
             feed_tracks_state: TableState::default().with_selected(0),
             feed_tracks_key: None,
+            hidden_tracks: Vec::new(),
+            hidden_feed: Vec::new(),
         })
     }
 }

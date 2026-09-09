@@ -38,7 +38,7 @@ use reqwest::Method;
 use image::DynamicImage;
 
 use super::render::render;
-use self::filtering::{build_filtered_views, clamp_selection, is_filter_active, prune_unplayable};
+use self::filtering::{apply_unplayable_filter, build_filtered_views, clamp_selection, is_filter_active};
 use self::input::helpers::reset_search_rows;
 use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
@@ -244,9 +244,7 @@ fn start(
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;
     drop(api_guard);
-    if state.settings.hide_unplayable {
-        prune_unplayable(&mut state, &mut data);
-    }
+    apply_unplayable_filter(&mut state, &mut data);
 
     let async_rt = tokio::runtime::Runtime::new().unwrap();
     // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
@@ -440,8 +438,8 @@ fn start(
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
             }
         }
-        if fetched && state.settings.hide_unplayable {
-            prune_unplayable(&mut state, &mut data);
+        if fetched {
+            apply_unplayable_filter(&mut state, &mut data);
         }
 
         while let Some(action) = state.engagement_queue.pop_front() {
