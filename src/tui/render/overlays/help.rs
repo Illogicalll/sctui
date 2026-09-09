@@ -8,15 +8,44 @@ use crate::theme;
 
 use crate::config::Settings;
 use crate::keymap::Action;
-use crate::tui::logic::state::AppState;
+use crate::player::eq;
+use crate::tui::logic::state::{AppState, HelpPage};
 use crate::tui::render::utils::styled_header;
 
 use super::utils::centered_rect;
 
-/// Key reference and editor, generated from the live keymap. Tab swaps it for the
-/// settings page.
+/// Key reference and editor, generated from the live keymap. Tab cycles it through
+/// the settings and equaliser pages.
 pub fn render_help(frame: &mut Frame, state: &AppState) {
-    if state.help_settings {
+    if state.help_page == HelpPage::Equalizer {
+        let rows: Vec<Row> = eq::BANDS
+            .iter()
+            .zip(state.eq.gains)
+            .map(|(hz, db)| {
+                let row = Row::new(vec![
+                    format!("{:<7}{}", eq::band_label(*hz), slider(db)),
+                    eq::gain_label(db),
+                ]);
+                if db == 0 {
+                    row.style(Style::default().fg(theme::current().dim))
+                } else {
+                    row
+                }
+            })
+            .collect();
+        render_page(
+            frame,
+            state,
+            " Equaliser ",
+            &["Band", "Gain"],
+            rows,
+            state.help_eq_selected,
+            "←→: adjust   ↑↓: move   r: flat   Tab: keys   Esc: close",
+        );
+        return;
+    }
+
+    if state.help_page == HelpPage::Settings {
         let mut settings = state.settings;
         let rows: Vec<Row> = Settings::ROWS
             .iter()
@@ -37,7 +66,7 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
             &["Setting", "State"],
             rows,
             state.help_settings_selected,
-            "Enter/Space: toggle   ↑↓: move   Tab: keys   Esc: close",
+            "Enter/Space: toggle   ↑↓: move   Tab: equaliser   Esc: close",
         );
         return;
     }
@@ -62,6 +91,18 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
         state.help_selected,
         "Enter: add key   Backspace: unbind   r: default   ↑↓: move   Tab: settings   Esc: close   ·  saved to ~/.config/sctui/config.toml",
     );
+}
+
+/// One cell per dB across the full range, with the centre tick marking flat.
+fn slider(db: i8) -> String {
+    let centre = eq::MAX_GAIN_DB as usize;
+    (0..=centre * 2)
+        .map(|i| match i {
+            _ if i == (db + eq::MAX_GAIN_DB) as usize => '█',
+            _ if i == centre => '┼',
+            _ => '─',
+        })
+        .collect()
 }
 
 /// One page of the popup: a two-column table over the shared status and hint lines.

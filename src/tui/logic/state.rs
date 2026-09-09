@@ -360,6 +360,25 @@ impl MoveAccel {
     }
 }
 
+/// Pages of the `?` overlay, in the order Tab walks them.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HelpPage {
+    #[default]
+    Keys,
+    Settings,
+    Equalizer,
+}
+
+impl HelpPage {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Keys => Self::Settings,
+            Self::Settings => Self::Equalizer,
+            Self::Equalizer => Self::Keys,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct AppState {
     pub selected_tab: usize,
@@ -428,9 +447,13 @@ pub struct AppState {
     pub lyrics_track_urn: Option<String>,
     /// Key editor (the `?` popup): highlighted action, pending capture, last message.
     pub help_selected: usize,
-    /// The `?` popup's settings page (Tab switches to it) and its highlighted row.
-    pub help_settings: bool,
+    /// Which page of the `?` popup is showing (Tab cycles), and the highlighted
+    /// row on each of the pages behind the key list.
+    pub help_page: HelpPage,
     pub help_settings_selected: usize,
+    pub help_eq_selected: usize,
+    /// Equaliser gains in dB; `player::eq` holds the copy the audio thread reads.
+    pub eq: crate::config::Equalizer,
     pub help_capture: Option<crate::keymap::Action>,
     pub help_message: Option<String>,
     /// Search tab: printable keys go to the query until Enter/Esc.

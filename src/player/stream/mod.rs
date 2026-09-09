@@ -1,4 +1,5 @@
 mod hls;
+pub(crate) mod eq;
 mod cache;
 mod sample;
 mod downloader;
