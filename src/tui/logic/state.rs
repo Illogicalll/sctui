@@ -370,6 +370,17 @@ pub enum HelpPage {
 }
 
 impl HelpPage {
+    /// The popup's tab bar, in order.
+    pub const TITLES: [&'static str; 3] = ["Keys", "Settings", "Equaliser"];
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Keys => 0,
+            Self::Settings => 1,
+            Self::Equalizer => 2,
+        }
+    }
+
     pub fn next(self) -> Self {
         match self {
             Self::Keys => Self::Settings,

@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState, Tabs, Wrap},
 };
 use crate::theme;
 
@@ -15,15 +15,14 @@ use crate::tui::render::utils::styled_header;
 
 use super::utils::{centered_rect, centered_rect_fixed};
 
-/// Key reference and editor, generated from the live keymap. Tab cycles it through
-/// the settings and equaliser pages.
+/// Key reference and editor, generated from the live keymap. A tab bar across the
+/// top names the pages; Tab cycles through them.
 pub fn render_help(frame: &mut Frame, state: &AppState) {
     if state.help_page == HelpPage::Equalizer {
         let body = render_shell(
             frame,
             state,
-            " Equaliser ",
-            "↑↓: adjust   ←→: band   r: flat   Tab: keys   Esc: close",
+            "↑↓: adjust   ←→: band   r: flat   Tab: page   Esc: close",
         );
         render_bands(frame, body, state.eq.gains, state.help_eq_selected);
         return;
@@ -45,11 +44,10 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
         render_page(
             frame,
             state,
-            " Settings ",
             &["Setting", "State"],
             rows,
             state.help_settings_selected,
-            "Enter/Space: toggle   ←→: adjust   ↑↓: move   Tab: equaliser   Esc: close",
+            "Enter/Space: toggle   ←→: adjust   ↑↓: move   Tab: page   Esc: close",
         );
         return;
     }
@@ -68,11 +66,10 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
     render_page(
         frame,
         state,
-        " Keys ",
         &["Action", "Keys"],
         rows,
         state.help_selected,
-        "Enter: add key   Backspace: unbind   r: default   ↑↓: move   Tab: settings   Esc: close   ·  saved to ~/.config/sctui/config.toml",
+        "Enter: add key   Backspace: unbind   r: default   ↑↓: move   Tab: page   Esc: close   ·  saved to ~/.config/sctui/config.toml",
     );
 }
 
@@ -180,13 +177,12 @@ fn gain_label(db: i8, units: bool) -> String {
 fn render_page(
     frame: &mut Frame,
     state: &AppState,
-    title: &str,
     header: &[&str],
     rows: Vec<Row>,
     selected: usize,
     hint: &str,
 ) {
-    let table_area = render_shell(frame, state, title, hint);
+    let table_area = render_shell(frame, state, hint);
     let table = Table::new(rows, vec![Constraint::Percentage(62), Constraint::Percentage(38)])
         .header(styled_header(header))
         .column_spacing(1)
@@ -200,25 +196,50 @@ fn render_page(
     frame.render_stateful_widget(table, table_area, &mut table_state);
 }
 
-/// The popup frame every page shares: border, status line and hint line. Returns
-/// the area left over for the page's own body.
-fn render_shell(frame: &mut Frame, state: &AppState, title: &str, hint: &str) -> Rect {
+/// Lines the hint needs at this width. It is the longest thing on the popup and
+/// a centred single line just loses both ends off the sides, so it wraps instead.
+fn hint_height(hint: &str, width: u16) -> u16 {
+    let width = width.max(1) as usize;
+    (hint.chars().count().div_ceil(width) as u16).clamp(1, MAX_HINT_LINES)
+}
+
+/// Past this the hint would eat the page it belongs to, so it clips after all.
+const MAX_HINT_LINES: u16 = 3;
+
+/// The popup frame every page shares: border, the page tabs, status line and hint.
+/// Returns the area left over for the page's own body.
+fn render_shell(frame: &mut Frame, state: &AppState, hint: &str) -> Rect {
     let popup_area = centered_rect(76, 80, frame.area());
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(title)
+        .title(" Help ")
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded);
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
-    let [body_area, status_area, hint_area] = Layout::vertical([
+    let [tabs_area, body_area, status_area, hint_area] = Layout::vertical([
+        Constraint::Length(2),
         Constraint::Fill(1),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(hint_height(hint, inner.width)),
     ])
     .areas(inner);
+
+    // The same switcher the main window uses for Library/Search/Feed, minus its
+    // block: the popup's own border is already around it.
+    let tabs: Vec<_> = HelpPage::TITLES.iter().map(|t| Span::raw(*t)).collect();
+    frame.render_widget(
+        Tabs::new(tabs)
+            .block(Block::default().borders(Borders::BOTTOM))
+            .select(state.help_page.index())
+            .style(Style::default().fg(theme::current().fg))
+            .highlight_style(
+                Style::default().fg(theme::current().accent).add_modifier(Modifier::BOLD),
+            ),
+        tabs_area,
+    );
 
     let (status, status_style) = match (&state.help_capture, &state.help_message) {
         (Some(_), Some(msg)) => (msg.clone(), Style::default().fg(theme::current().warning).add_modifier(Modifier::BOLD)),
@@ -229,7 +250,8 @@ fn render_shell(frame: &mut Frame, state: &AppState, title: &str, hint: &str) ->
     frame.render_widget(
         Paragraph::new(hint)
             .style(Style::default().fg(theme::current().dim))
-            .alignment(Alignment::Center),
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
         hint_area,
     );
     body_area
@@ -273,6 +295,63 @@ mod tests {
         row[..row.find(label).unwrap()].chars().count() + 2
     }
 
+    /// One page of the popup, as text plus the columns drawn in the accent colour.
+    fn page(width: u16, height: u16, page: HelpPage) -> (String, Vec<u16>) {
+        let state = AppState { help_page: page, ..Default::default() };
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| render_help(f, &state)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..height)
+            .map(|y| (0..width).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let accent = theme::current().accent;
+        let accented = (0..width)
+            .filter(|&x| (0..height).any(|y| buf[(x, y)].fg == accent))
+            .collect();
+        (text, accented)
+    }
+
+    #[test]
+    fn the_tab_bar_names_every_page_and_marks_the_current_one() {
+        let (s, accented) = page(100, 30, HelpPage::Settings);
+        let bar = s.lines().find(|l| l.contains("Equaliser")).expect("a tab bar");
+        for title in HelpPage::TITLES {
+            assert!(bar.contains(title), "{title} missing from the tab bar: {bar:?}");
+        }
+
+        // "Settings" is the open page, so it is the accented one, not "Keys".
+        let col_of = |needle: &str| bar[..bar.find(needle).unwrap()].chars().count() as u16;
+        let (settings, keys) = (col_of("Settings"), col_of("Keys"));
+        assert!(accented.contains(&settings), "the open page is not highlighted");
+        assert!(!accented.contains(&keys), "a closed page is highlighted");
+    }
+
+    /// The keys hint is longer than the popup is wide; centred on one line it used
+    /// to lose both ends off the sides.
+    #[test]
+    fn a_hint_too_long_for_one_line_wraps_rather_than_clipping() {
+        let (s, _) = page(100, 30, HelpPage::Keys);
+        assert!(s.contains("Enter: add key"), "the start of the hint is missing");
+        assert!(s.contains("config.toml"), "the end of the hint was clipped");
+
+        // Every row of the popup still has its two borders and nothing overflowed
+        // them. The tab bar is exempt: it draws the same glyph between page names.
+        let is_tab_bar = |l: &str| HelpPage::TITLES.iter().all(|t| l.contains(t));
+        for line in s.lines().filter(|l| l.contains('\u{2502}') && !is_tab_bar(l)) {
+            assert_eq!(line.matches('\u{2502}').count(), 2, "border broken: {line:?}");
+        }
+    }
+
+    #[test]
+    fn hint_height_grows_with_the_text_and_then_stops() {
+        assert_eq!(hint_height("short", 40), 1);
+        assert_eq!(hint_height(&"x".repeat(41), 40), 2);
+        assert_eq!(hint_height(&"x".repeat(10_000), 40), MAX_HINT_LINES);
+        // A zero-width popup must not divide by zero; it saturates like any other.
+        assert_eq!(hint_height("anything", 0), MAX_HINT_LINES);
+    }
+
     #[test]
     fn faders_are_vertical_and_centred() {
         let (s, highlighted) = screen(80, 24, [12, -12, 3, 0, -5, 1], 0);
@@ -283,10 +362,12 @@ mod tests {
         let inside = |l: &str| l.trim_matches(|c| c == ' ' || c == '│').to_string();
         let zero = lines
             .iter()
+            .skip(gains)
             .position(|l| {
                 let l = inside(l);
                 !l.is_empty() && l.chars().all(|c| c == '─')
             })
+            .map(|row| row + gains)
             .unwrap();
         let bands = lines.iter().position(|l| l.contains("230 Hz")).unwrap();
         assert!(gains < zero && zero < bands, "{s}");
