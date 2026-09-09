@@ -1,6 +1,6 @@
 [package]
 name = "sctui"
-version = "0.2.0"
+version = "0.3.0"
 description = "a soundcloud client for the terminal"
 authors = ["Will Murphy <illogicallledits@gmail.com>"]
 license = "MIT"
