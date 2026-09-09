@@ -69,6 +69,12 @@ impl Player {
         }
     }
 
+    /// Set the crossfade length, in milliseconds; 0 turns crossfading off.
+    /// Takes effect at the next track change.
+    pub fn set_crossfade_ms(&self, ms: u64) {
+        let _ = self.tx.send(PlayerCommand::SetCrossfade(ms));
+    }
+
     pub fn play(&self, track: Track) {
         let _ = self.tx.send(PlayerCommand::Play(track));
     }

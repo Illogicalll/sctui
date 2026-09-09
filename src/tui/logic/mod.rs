@@ -45,7 +45,7 @@ use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
-    active_tracks, append_feed_tracks, play_queued_track, queued_from_current,
+    active_tracks, append_feed_tracks, next_track_trigger_ms, play_queued_track, queued_from_current,
 };
 
 /// How long a track must have been playing before its lyrics are looked up.
@@ -240,6 +240,7 @@ fn start(
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
+    player.set_crossfade_ms(state.settings.crossfade_ms());
 
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;
@@ -1045,7 +1046,16 @@ fn start(
 
             let current_track = player.current_track();
             if is_playing && !current_track.track_urn.is_empty() {
-                let preload_threshold = (current_track.duration_ms as f64 * 0.8) as u64;
+                // Repeat replays the same track, which the player reads as a seek
+                // rather than a track change, so there is nothing to overlap.
+                // ponytail: give `play_from_position` the caller's intent instead
+                // of inferring it from the URN if repeat ever wants a crossfade.
+                let crossfade_ms = if state.repeat_enabled { 0 } else { state.settings.crossfade_ms() };
+                let handover_ms = next_track_trigger_ms(current_track.duration_ms, crossfade_ms);
+                // Whichever comes first: the usual four fifths in, or long enough
+                // before the handover that a crossfade has the next track ready.
+                let preload_threshold = ((current_track.duration_ms as f64 * 0.8) as u64)
+                    .min(handover_ms.saturating_sub(10_000));
                 let should_preload = state.progress >= preload_threshold 
                     && state.progress < current_track.duration_ms.saturating_sub(100)
                     && state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str());
@@ -1085,8 +1095,7 @@ fn start(
                     state.preload_triggered_for_track_urn = None;
                 }
 
-                let at_end = state.progress >= current_track.duration_ms.saturating_sub(50)
-                    && current_track.duration_ms > 0;
+                let at_end = state.progress >= handover_ms && current_track.duration_ms > 0;
 
                 if !at_end {
                     state.end_handled_track_urn = None;

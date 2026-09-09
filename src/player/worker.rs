@@ -69,6 +69,8 @@ pub(crate) fn player_loop(
                 let _ = engine.preload_next_track(&track, &token);
             }
 
+            PlayerCommand::SetCrossfade(ms) => engine.set_crossfade_ms(ms),
+
             PlayerCommand::Pause => {
                 if let Some(ref s) = *sink_arc.lock().unwrap() {
                     s.pause();

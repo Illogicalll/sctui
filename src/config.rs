@@ -20,23 +20,78 @@ pub struct Loaded {
     pub warnings: Vec<String>,
 }
 
-/// On/off options, edited from the settings page of the `?` overlay.
-#[derive(Deserialize, Serialize, Default, Clone, Copy)]
+/// Options edited from the settings page of the `?` overlay.
+#[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(default)]
 pub struct Settings {
     pub hide_unplayable: bool,
     pub hide_feed_tab: bool,
+    pub crossfade: bool,
+    pub crossfade_secs: u8,
 }
 
-/// One row of the settings page: its label and the field it toggles.
-pub type SettingRow = (&'static str, fn(&mut Settings) -> &mut bool);
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            hide_unplayable: false,
+            hide_feed_tab: false,
+            crossfade: false,
+            crossfade_secs: 5,
+        }
+    }
+}
+
+/// One row of the settings page: its label and the field it edits.
+#[derive(Clone, Copy)]
+pub enum SettingRow {
+    /// Flipped with Enter or Space.
+    Toggle(&'static str, fn(&mut Settings) -> &mut bool),
+    /// A whole number of seconds, adjusted with left/right.
+    Secs(&'static str, fn(&mut Settings) -> &mut u8),
+}
 
 impl Settings {
     /// The settings page, in display order.
-    pub const ROWS: [SettingRow; 2] = [
-        ("Hide unplayable tracks", |s| &mut s.hide_unplayable),
-        ("Hide feed tab", |s| &mut s.hide_feed_tab),
+    pub const ROWS: [SettingRow; 4] = [
+        SettingRow::Toggle("Hide unplayable tracks", |s| &mut s.hide_unplayable),
+        SettingRow::Toggle("Hide feed tab", |s| &mut s.hide_feed_tab),
+        SettingRow::Toggle("Crossfade between tracks", |s| &mut s.crossfade),
+        SettingRow::Secs("Crossfade duration", |s| &mut s.crossfade_secs),
     ];
+
+    pub const CROSSFADE_SECS_MIN: u8 = 1;
+    pub const CROSSFADE_SECS_MAX: u8 = 12;
+
+    /// How long one track should overlap the next, or 0 when crossfading is off
+    /// (the player then keeps only its own click-avoidance fade).
+    pub fn crossfade_ms(&self) -> u64 {
+        if self.crossfade {
+            let secs = self.crossfade_secs.clamp(Self::CROSSFADE_SECS_MIN, Self::CROSSFADE_SECS_MAX);
+            u64::from(secs) * 1000
+        } else {
+            0
+        }
+    }
+}
+
+impl SettingRow {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SettingRow::Toggle(label, _) | SettingRow::Secs(label, _) => label,
+        }
+    }
+
+    /// The value column, and whether the row is actually in effect: a duration
+    /// nothing is using yet is dimmed the way an off toggle is.
+    pub fn display(&self, mut settings: Settings) -> (String, bool) {
+        match self {
+            SettingRow::Toggle(_, field) => {
+                let on = *field(&mut settings);
+                ((if on { "on" } else { "off" }).to_string(), on)
+            }
+            SettingRow::Secs(_, field) => (format!("{}s", field(&mut settings)), settings.crossfade),
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -125,7 +180,7 @@ pub fn template() -> String {
     out.push_str(".\n# [theme.colors] overrides single roles with \"#rrggbb\" or a colour name: ");
     out.push_str(&theme::ROLES.join(", "));
     out.push_str(".\n[theme]\nname = \"default\"\n# [theme.colors]\n# accent = \"#7aa2f7\"\n\n");
-    out.push_str("# On/off options, also editable in the app (? then Tab).\n[settings]\n");
+    out.push_str("# Options also editable in the app (? then Tab). crossfade_secs is 1-12.\n[settings]\n");
     out.push_str(&settings_section(&Settings::default()));
     out.push('\n');
     out.push_str(&Keymap::default().keys_section(false));
@@ -151,18 +206,43 @@ mod tests {
         assert!(file.theme.colors.0.is_empty());
         assert!(!file.settings.hide_unplayable);
         assert!(!file.settings.hide_feed_tab);
+        assert!(!file.settings.crossfade);
+        assert_eq!(file.settings.crossfade_secs, Settings::default().crossfade_secs);
     }
 
     #[test]
     fn settings_round_trip() {
         let mut settings = Settings::default();
-        for (_, field) in Settings::ROWS {
-            *field(&mut settings) = true;
+        for row in &Settings::ROWS {
+            match row {
+                SettingRow::Toggle(_, field) => *field(&mut settings) = true,
+                SettingRow::Secs(_, field) => *field(&mut settings) = 9,
+            }
         }
         let text = format!("[settings]\n{}", settings_section(&settings));
         let file: File = toml::from_str(&text).unwrap();
         assert!(file.settings.hide_unplayable);
         assert!(file.settings.hide_feed_tab);
+        assert!(file.settings.crossfade);
+        assert_eq!(file.settings.crossfade_secs, 9);
+    }
+
+    /// A config file written before crossfading existed has neither key, so the
+    /// defaults have to fill in; a hand-edited nonsense duration must not reach
+    /// the player.
+    #[test]
+    fn crossfade_duration_defaults_and_clamps() {
+        let file: File = toml::from_str("[settings]\nhide_feed_tab = true\n").unwrap();
+        assert_eq!(file.settings.crossfade_secs, 5);
+        assert_eq!(file.settings.crossfade_ms(), 0, "off means no crossfade");
+
+        let mut settings = file.settings;
+        settings.crossfade = true;
+        assert_eq!(settings.crossfade_ms(), 5_000);
+        settings.crossfade_secs = 200;
+        assert_eq!(settings.crossfade_ms(), u64::from(Settings::CROSSFADE_SECS_MAX) * 1000);
+        settings.crossfade_secs = 0;
+        assert_eq!(settings.crossfade_ms(), u64::from(Settings::CROSSFADE_SECS_MIN) * 1000);
     }
 
     #[test]

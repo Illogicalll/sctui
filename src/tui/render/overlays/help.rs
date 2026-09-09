@@ -17,13 +17,12 @@ use super::utils::centered_rect;
 /// settings page.
 pub fn render_help(frame: &mut Frame, state: &AppState) {
     if state.help_settings {
-        let mut settings = state.settings;
         let rows: Vec<Row> = Settings::ROWS
             .iter()
-            .map(|(label, field)| {
-                let on = *field(&mut settings);
-                let row = Row::new(vec![label.to_string(), if on { "on" } else { "off" }.to_string()]);
-                if on {
+            .map(|setting| {
+                let (value, in_effect) = setting.display(state.settings);
+                let row = Row::new(vec![setting.label().to_string(), value]);
+                if in_effect {
                     row
                 } else {
                     row.style(Style::default().fg(theme::current().dim))
@@ -37,7 +36,7 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
             &["Setting", "State"],
             rows,
             state.help_settings_selected,
-            "Enter/Space: toggle   ↑↓: move   Tab: keys   Esc: close",
+            "Enter/Space: toggle   ←→: adjust   ↑↓: move   Tab: keys   Esc: close",
         );
         return;
     }
