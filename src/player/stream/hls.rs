@@ -2,6 +2,9 @@ use anyhow::Context;
 use m3u8_rs::Playlist;
 use serde::Deserialize;
 use reqwest::Url;
+use std::sync::{Arc, Mutex};
+
+use crate::auth::{Token, try_refresh_token};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct StreamsResponse {
@@ -14,6 +17,51 @@ pub(crate) struct StreamsResponse {
 #[derive(Debug, Clone)]
 pub(crate) struct HlsSegment {
     pub url: Url,
+}
+
+/// Asks the streams endpoint for this track's playlist URL, preferring the
+/// highest-quality format it offers.
+fn hls_playlist_url(
+    client: &reqwest::blocking::Client,
+    track_urn: &str,
+    access_token: &str,
+) -> anyhow::Result<Url> {
+    let streams_url = format!("https://api.soundcloud.com/tracks/{}/streams", track_urn);
+    let streams_response: StreamsResponse = client
+        .get(&streams_url)
+        .bearer_auth(access_token)
+        .send()
+        .context("failed to fetch streams endpoint")?
+        .error_for_status()
+        .context("streams endpoint returned error status")?
+        .json()
+        .context("failed to parse streams response json")?;
+
+    let hls_url = streams_response
+        .hls_aac_160_url
+        .or(streams_response.hls_aac_96_url)
+        .or(streams_response.hls_mp3_128_url)
+        .ok_or_else(|| {
+            anyhow::anyhow!("No HLS stream URL available (tried AAC 160, AAC 96, MP3 128)")
+        })?;
+
+    Url::parse(&hls_url).context("invalid HLS URL")
+}
+
+/// Resolves a track to a manifest full of ready-to-download segment URLs.
+///
+/// Those URLs are signed and expire, so this is not only how a track starts:
+/// it is also how a track already playing gets fresh ones once the originals
+/// go stale (see `downloader::fetch_segment`).
+pub(crate) fn resolve_manifest(
+    client: &reqwest::blocking::Client,
+    track_urn: &str,
+    token: &Arc<Mutex<Token>>,
+) -> anyhow::Result<HlsManifest> {
+    let _ = try_refresh_token(token);
+    let access_token = { token.lock().unwrap().access_token.clone() };
+    let playlist_url = hls_playlist_url(client, track_urn, &access_token)?;
+    HlsManifest::fetch(client, &playlist_url, &access_token)
 }
 
 #[derive(Debug, Clone)]
