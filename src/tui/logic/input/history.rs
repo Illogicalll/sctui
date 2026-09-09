@@ -2,7 +2,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
 use crate::keymap::Action;
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::{play_queued_track, queued_from_current};
 
@@ -33,7 +33,7 @@ pub(crate) fn handle_history_input(
                 if let Some(current) = queued_from_current(state, data) {
                     state.playback_history.push(current);
                 }
-                play_queued_track(entry, state, data, player, true);
+                play_queued_track(entry, state, data, player, true, TrackChange::UserSkip);
                 state.history_visible = false;
             }
         }

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use rand::seq::SliceRandom;
 
 use crate::api::{Album, Artist, Playlist, Track};
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 
 use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
 
@@ -285,12 +285,13 @@ pub fn play_queued_track(
     data: &mut AppData,
     player: &Player,
     preserve_context: bool,
+    change: TrackChange,
 ) {
     if !queued.track.is_playable() {
         return;
     }
 
-    player.play(queued.track.clone());
+    player.play(queued.track.clone(), change);
     state.override_playing = Some(queued.clone());
     if preserve_context {
         return;

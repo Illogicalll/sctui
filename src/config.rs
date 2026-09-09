@@ -28,6 +28,7 @@ pub struct Settings {
     pub hide_feed_tab: bool,
     pub crossfade: bool,
     pub crossfade_secs: u8,
+    pub crossfade_user_skips: bool,
 }
 
 impl Default for Settings {
@@ -37,6 +38,7 @@ impl Default for Settings {
             hide_feed_tab: false,
             crossfade: false,
             crossfade_secs: 5,
+            crossfade_user_skips: true,
         }
     }
 }
@@ -46,17 +48,23 @@ impl Default for Settings {
 pub enum SettingRow {
     /// Flipped with Enter or Space.
     Toggle(&'static str, fn(&mut Settings) -> &mut bool),
+    /// The same, but only meaningful while crossfading is on: shown dimmed
+    /// alongside the duration whenever it is not.
+    CrossfadeToggle(&'static str, fn(&mut Settings) -> &mut bool),
     /// A whole number of seconds, adjusted with left/right.
     Secs(&'static str, fn(&mut Settings) -> &mut u8),
 }
 
 impl Settings {
     /// The settings page, in display order.
-    pub const ROWS: [SettingRow; 4] = [
+    pub const ROWS: [SettingRow; 5] = [
         SettingRow::Toggle("Hide unplayable tracks", |s| &mut s.hide_unplayable),
         SettingRow::Toggle("Hide feed tab", |s| &mut s.hide_feed_tab),
         SettingRow::Toggle("Crossfade between tracks", |s| &mut s.crossfade),
         SettingRow::Secs("Crossfade duration", |s| &mut s.crossfade_secs),
+        SettingRow::CrossfadeToggle("Crossfade applies to user-skips", |s| {
+            &mut s.crossfade_user_skips
+        }),
     ];
 
     pub const CROSSFADE_SECS_MIN: u8 = 1;
@@ -77,7 +85,9 @@ impl Settings {
 impl SettingRow {
     pub fn label(&self) -> &'static str {
         match self {
-            SettingRow::Toggle(label, _) | SettingRow::Secs(label, _) => label,
+            SettingRow::Toggle(label, _)
+            | SettingRow::CrossfadeToggle(label, _)
+            | SettingRow::Secs(label, _) => label,
         }
     }
 
@@ -88,6 +98,13 @@ impl SettingRow {
             SettingRow::Toggle(_, field) => {
                 let on = *field(&mut settings);
                 ((if on { "on" } else { "off" }).to_string(), on)
+            }
+            SettingRow::CrossfadeToggle(_, field) => {
+                let on = *field(&mut settings);
+                (
+                    (if on { "on" } else { "off" }).to_string(),
+                    on && settings.crossfade,
+                )
             }
             SettingRow::Secs(_, field) => (format!("{}s", field(&mut settings)), settings.crossfade),
         }
@@ -208,6 +225,7 @@ mod tests {
         assert!(!file.settings.hide_feed_tab);
         assert!(!file.settings.crossfade);
         assert_eq!(file.settings.crossfade_secs, Settings::default().crossfade_secs);
+        assert!(file.settings.crossfade_user_skips);
     }
 
     #[test]
@@ -215,7 +233,9 @@ mod tests {
         let mut settings = Settings::default();
         for row in &Settings::ROWS {
             match row {
-                SettingRow::Toggle(_, field) => *field(&mut settings) = true,
+                SettingRow::Toggle(_, field) | SettingRow::CrossfadeToggle(_, field) => {
+                    *field(&mut settings) = true
+                }
                 SettingRow::Secs(_, field) => *field(&mut settings) = 9,
             }
         }
@@ -225,6 +245,7 @@ mod tests {
         assert!(file.settings.hide_feed_tab);
         assert!(file.settings.crossfade);
         assert_eq!(file.settings.crossfade_secs, 9);
+        assert!(file.settings.crossfade_user_skips);
     }
 
     /// A config file written before crossfading existed has neither key, so the
@@ -234,6 +255,7 @@ mod tests {
     fn crossfade_duration_defaults_and_clamps() {
         let file: File = toml::from_str("[settings]\nhide_feed_tab = true\n").unwrap();
         assert_eq!(file.settings.crossfade_secs, 5);
+        assert!(file.settings.crossfade_user_skips, "a skip crossfades once crossfading is on");
         assert_eq!(file.settings.crossfade_ms(), 0, "off means no crossfade");
 
         let mut settings = file.settings;
@@ -243,6 +265,22 @@ mod tests {
         assert_eq!(settings.crossfade_ms(), u64::from(Settings::CROSSFADE_SECS_MAX) * 1000);
         settings.crossfade_secs = 0;
         assert_eq!(settings.crossfade_ms(), u64::from(Settings::CROSSFADE_SECS_MIN) * 1000);
+    }
+
+    /// The user-skip row says nothing while there is no crossfade to apply, so
+    /// it is dimmed with the duration until the toggle above it is on.
+    #[test]
+    fn the_user_skip_row_is_dimmed_until_crossfading_is_on() {
+        let row = Settings::ROWS
+            .iter()
+            .find(|r| matches!(r, SettingRow::CrossfadeToggle(..)))
+            .expect("the user-skip row is on the settings page");
+        let mut settings = Settings::default();
+        assert_eq!(row.display(settings), ("on".to_string(), false));
+        settings.crossfade = true;
+        assert_eq!(row.display(settings), ("on".to_string(), true));
+        settings.crossfade_user_skips = false;
+        assert_eq!(row.display(settings), ("off".to_string(), false));
     }
 
     #[test]

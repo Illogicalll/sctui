@@ -10,7 +10,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::commands::PlayerCommand;
+use super::commands::{PlayerCommand, TrackChange};
 use super::worker::player_loop;
 
 #[derive(Default)]
@@ -69,14 +69,17 @@ impl Player {
         }
     }
 
-    /// Set the crossfade length, in milliseconds; 0 turns crossfading off.
-    /// Takes effect at the next track change.
-    pub fn set_crossfade_ms(&self, ms: u64) {
-        let _ = self.tx.send(PlayerCommand::SetCrossfade(ms));
+    /// Set the crossfade length, in milliseconds (0 turns crossfading off), and
+    /// whether it applies to user skips. Takes effect at the next track change.
+    pub fn set_crossfade(&self, ms: u64, on_user_skips: bool) {
+        let _ = self.tx.send(PlayerCommand::SetCrossfade { ms, on_user_skips });
     }
 
-    pub fn play(&self, track: Track) {
-        let _ = self.tx.send(PlayerCommand::Play(track));
+    /// `change` says whether this is the queue moving on by itself or the user
+    /// asking for a different track; the engine needs it to decide whether the
+    /// crossfade applies.
+    pub fn play(&self, track: Track, change: TrackChange) {
+        let _ = self.tx.send(PlayerCommand::Play(track, change));
     }
 
     pub fn pause(&self) {

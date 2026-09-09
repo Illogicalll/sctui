@@ -85,7 +85,7 @@ fn handle_settings_input(
     match (key.code, state.keymap.action(&key)) {
         (KeyCode::Esc, _) | (_, Some(Action::Help)) => state.help_visible = false,
         (KeyCode::Enter | KeyCode::Char(' '), _) => {
-            if let SettingRow::Toggle(label, field) = row {
+            if let SettingRow::Toggle(label, field) | SettingRow::CrossfadeToggle(label, field) = row {
                 let value = {
                     let flag = field(&mut state.settings);
                     *flag = !*flag;
@@ -133,7 +133,7 @@ fn apply_settings(state: &mut AppState, data: &mut AppData, player: &Player) {
         state.selected_tab = 0;
         state.selected_row = 0;
     }
-    player.set_crossfade_ms(state.settings.crossfade_ms());
+    player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
 }
 
 /// Persist and decorate the message with the outcome.

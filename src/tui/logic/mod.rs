@@ -12,7 +12,7 @@ use crate::api::{
     fetch_user_tracks,
 };
 use crate::auth::Token;
-use crate::player::Player;
+use crate::player::{Player, TrackChange};
 use rand::seq::SliceRandom;
 use ratatui::crossterm::{
     event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
@@ -240,7 +240,7 @@ fn start(
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
-    player.set_crossfade_ms(state.settings.crossfade_ms());
+    player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
 
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;
@@ -400,7 +400,7 @@ fn start(
                             if let Some(current) = queued_from_current(&state, &data) {
                                 state.playback_history.push(current);
                             }
-                            player.play(track);
+                            player.play(track, TrackChange::Natural);
                             state.override_playing = None;
                             state.current_playing_index = Some(next_idx);
                             state.radio_waiting = false;
@@ -415,7 +415,7 @@ fn start(
                             state.playback_history.push(current);
                         }
                         state.manual_queue.clear();
-                        player.play(seed);
+                        player.play(seed, TrackChange::UserSkip);
                         enter_radio(&mut state, &mut data, tracks);
                     }
                 }
@@ -1046,10 +1046,11 @@ fn start(
 
             let current_track = player.current_track();
             if is_playing && !current_track.track_urn.is_empty() {
-                // Repeat replays the same track, which the player reads as a seek
-                // rather than a track change, so there is nothing to overlap.
-                // ponytail: give `play_from_position` the caller's intent instead
-                // of inferring it from the URN if repeat ever wants a crossfade.
+                // Repeat replays the same track, which the player still reads as a
+                // seek (same urn) rather than a track change, so there is nothing to
+                // overlap even though the intent now reaches the engine.
+                // ponytail: repeat would need a second decode of the same track to
+                // fade into itself; do that only if anyone asks for it.
                 let crossfade_ms = if state.repeat_enabled { 0 } else { state.settings.crossfade_ms() };
                 let handover_ms = next_track_trigger_ms(current_track.duration_ms, crossfade_ms);
                 // Whichever comes first: the usual four fifths in, or long enough
@@ -1105,20 +1106,27 @@ fn start(
                     if let Some(current_idx) = state.current_playing_index {
                         if state.repeat_enabled {
                         if let Some(track) = active_tracks(&state, &data).get(current_idx) {
-                            player.play(track.clone());
+                            player.play(track.clone(), TrackChange::Natural);
                             state.override_playing = None;
                         }
                         } else if let Some(queued) = state.manual_queue.pop_front() {
                         if let Some(current) = queued_from_current(&state, &data) {
                             state.playback_history.push(current);
                         }
-                            play_queued_track(queued, &mut state, &mut data, &player, true);
+                            play_queued_track(
+                                queued,
+                                &mut state,
+                                &mut data,
+                                &player,
+                                true,
+                                TrackChange::Natural,
+                            );
                         } else if let Some(next_idx) = state.auto_queue.pop_front() {
                             if let Some(track) = active_tracks(&state, &data).get(next_idx) {
                                 if let Some(current) = queued_from_current(&state, &data) {
                                     state.playback_history.push(current);
                                 }
-                                player.play(track.clone());
+                                player.play(track.clone(), TrackChange::Natural);
                                 state.override_playing = None;
                                 state.current_playing_index = Some(next_idx);
                             }

@@ -11,6 +11,7 @@ use reqwest::Url;
 use crate::api::Track;
 use crate::auth::Token;
 use crate::player::Position;
+use crate::player::commands::TrackChange;
 use crate::player::stream::cache::{CachedHls, SegmentCache};
 use crate::player::stream::hls::{HlsManifest, resolve_manifest};
 use crate::player::stream::downloader::spawn_segment_pump;
@@ -44,6 +45,8 @@ pub(crate) struct PlaybackEngine {
     fading: Arc<AtomicU64>,
     /// User-chosen crossfade length in milliseconds, 0 when switched off.
     crossfade_ms: u64,
+    /// Whether that crossfade also applies when the user skips tracks.
+    crossfade_on_user_skips: bool,
     cache: Option<CachedHls>,
     preload_next: Option<CachedHls>,
 }
@@ -56,6 +59,18 @@ pub(crate) struct PlaybackEngine {
 pub(crate) fn is_live(generation: &AtomicU64, fading: &AtomicU64, generation_value: u64) -> bool {
     generation.load(Ordering::SeqCst) == generation_value
         || fading.load(Ordering::SeqCst) == generation_value
+}
+
+/// Whether this particular change should overlap the outgoing track with the
+/// user's crossfade. A seek never does — it keeps the 35 ms click-avoidance
+/// fade it has always had, whatever the settings say.
+pub(crate) fn crossfade_applies(crossfade_ms: u64, on_user_skips: bool, change: TrackChange) -> bool {
+    crossfade_ms > 0
+        && match change {
+            TrackChange::Natural => true,
+            TrackChange::UserSkip => on_user_skips,
+            TrackChange::Seek => false,
+        }
 }
 
 impl PlaybackEngine {
@@ -72,13 +87,15 @@ impl PlaybackEngine {
             generation: Arc::new(AtomicU64::new(0)),
             fading: Arc::new(AtomicU64::new(NO_GENERATION)),
             crossfade_ms: 0,
+            crossfade_on_user_skips: true,
             cache: None,
             preload_next: None,
         })
     }
 
-    pub(crate) fn set_crossfade_ms(&mut self, ms: u64) {
+    pub(crate) fn set_crossfade(&mut self, ms: u64, on_user_skips: bool) {
         self.crossfade_ms = ms;
+        self.crossfade_on_user_skips = on_user_skips;
     }
 
     fn bump_generation(&self) -> u64 {
@@ -201,6 +218,7 @@ impl PlaybackEngine {
         &mut self,
         track: &Track,
         position_ms: u64,
+        change: TrackChange,
         token: &Arc<Mutex<Token>>,
         sink_arc: &Arc<Mutex<Option<Sink>>>,
         is_playing_flag: &Arc<std::sync::atomic::AtomicBool>,
@@ -213,7 +231,10 @@ impl PlaybackEngine {
             .track
             .as_ref()
             .map(|t| t.track_urn.clone());
+        // Replaying the same track (a seek, or repeat-one) is a reposition of what
+        // is already playing whatever the caller thought it was asking for.
         let is_seek = old_track_urn.as_deref() == Some(&track.track_urn);
+        let change = if is_seek { TrackChange::Seek } else { change };
 
         let (has_old_sink, target_volume) = {
             let guard = sink_arc.lock().unwrap();
@@ -225,7 +246,8 @@ impl PlaybackEngine {
         // loads and fades up, so it keeps its sink and its threads for now. With
         // crossfading off, a track change is still a clean stop.
         let crossfade = Duration::from_millis(self.crossfade_ms);
-        let overlap = !is_seek && has_old_sink && !crossfade.is_zero();
+        let overlap =
+            has_old_sink && crossfade_applies(self.crossfade_ms, self.crossfade_on_user_skips, change);
         let outgoing_generation = self.current_generation();
         let fading = Arc::clone(&self.fading);
 
@@ -562,6 +584,22 @@ mod tests {
             let elapsed = steps * step.as_millis() as u64;
             assert!(elapsed <= ms.max(1) && elapsed * 2 >= ms, "{ms} ms fade ran for {elapsed} ms");
         }
+    }
+
+    #[test]
+    fn the_crossfade_setting_decides_which_changes_overlap() {
+        for change in [TrackChange::Natural, TrackChange::UserSkip, TrackChange::Seek] {
+            assert!(!crossfade_applies(0, true, change), "crossfading off: {change:?}");
+        }
+        // On for everything: a natural handover and a skip both overlap.
+        assert!(crossfade_applies(5_000, true, TrackChange::Natural));
+        assert!(crossfade_applies(5_000, true, TrackChange::UserSkip));
+        // Off for skips: only a track ending of its own accord overlaps.
+        assert!(crossfade_applies(5_000, false, TrackChange::Natural));
+        assert!(!crossfade_applies(5_000, false, TrackChange::UserSkip));
+        // A seek is untouched by the setting either way.
+        assert!(!crossfade_applies(5_000, true, TrackChange::Seek));
+        assert!(!crossfade_applies(5_000, false, TrackChange::Seek));
     }
 
     #[test]
