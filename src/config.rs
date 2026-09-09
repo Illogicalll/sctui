@@ -1,5 +1,6 @@
-//! `~/.config/sctui/config.toml`: `[theme]`, `[settings]` and `[keys]`. Read once at
-//! startup, rewritten by the in-app key editor, theme picker and settings page.
+//! `~/.config/sctui/config.toml`: `[theme]`, `[settings]`, `[eq]` and `[keys]`. Read
+//! once at startup, rewritten by the in-app key editor, theme picker, settings page
+//! and equaliser page.
 
 use std::path::PathBuf;
 
@@ -17,7 +18,30 @@ pub struct Loaded {
     pub theme_name: String,
     pub theme_overrides: Overrides,
     pub settings: Settings,
+    pub eq: Equalizer,
     pub warnings: Vec<String>,
+}
+
+/// Per-band equaliser gains in dB, edited from the EQ page of the `?` overlay.
+/// The length has to match `player::eq::BANDS`; `player::eq::set` won't compile
+/// if it drifts.
+#[derive(Deserialize, Serialize, Default, Clone, Copy)]
+#[serde(default)]
+pub struct Equalizer {
+    pub gains: [i8; 6],
+}
+
+impl Equalizer {
+    /// Pull hand-edited gains back into the range the audio path accepts. Without
+    /// this a `gains = [-100, ...]` in the file would be clamped for playback but
+    /// still drawn (and saved) as -100.
+    fn clamped(mut self) -> Self {
+        let max = crate::player::eq::MAX_GAIN_DB;
+        for gain in &mut self.gains {
+            *gain = (*gain).clamp(-max, max);
+        }
+        self
+    }
 }
 
 /// On/off options, edited from the settings page of the `?` overlay.
@@ -45,6 +69,8 @@ struct File {
     theme: ThemeSection,
     #[serde(default)]
     settings: Settings,
+    #[serde(default)]
+    eq: Equalizer,
 }
 
 #[derive(Deserialize, Default)]
@@ -82,17 +108,19 @@ pub fn load() -> Loaded {
         theme_name: base.name.to_string(),
         theme_overrides: file.theme.colors,
         settings: file.settings,
+        eq: file.eq.clamped(),
         warnings,
     }
 }
 
-/// Write the file: theme choice, any colour overrides, the settings toggles, and
-/// only the key bindings that differ from the defaults.
+/// Write the file: theme choice, any colour overrides, the settings toggles, the
+/// equaliser gains, and only the key bindings that differ from the defaults.
 pub fn save(
     keymap: &Keymap,
     theme_name: &str,
     overrides: &Overrides,
     settings: &Settings,
+    eq: &Equalizer,
 ) -> std::io::Result<()> {
     let path = path();
     if let Some(dir) = path.parent() {
@@ -110,6 +138,8 @@ pub fn save(
     }
     out.push_str("\n[settings]\n");
     out.push_str(&settings_section(settings));
+    out.push_str("\n[eq]\n");
+    out.push_str(&eq_section(eq));
     out.push('\n');
     out.push_str(&keymap.keys_section(true));
     std::fs::write(path, out)
@@ -127,6 +157,9 @@ pub fn template() -> String {
     out.push_str(".\n[theme]\nname = \"default\"\n# [theme.colors]\n# accent = \"#7aa2f7\"\n\n");
     out.push_str("# On/off options, also editable in the app (? then Tab).\n[settings]\n");
     out.push_str(&settings_section(&Settings::default()));
+    out.push_str("\n# Equaliser gains in dB, one per band (60Hz 230Hz 910Hz 3kHz 8kHz 16kHz),\n");
+    out.push_str("# -12 to +12. Also editable in the app (? then Tab twice).\n[eq]\n");
+    out.push_str(&eq_section(&Equalizer::default()));
     out.push('\n');
     out.push_str(&Keymap::default().keys_section(false));
     out
@@ -135,6 +168,11 @@ pub fn template() -> String {
 /// The body of `[settings]`, one `key = bool` per line.
 fn settings_section(settings: &Settings) -> String {
     toml::to_string(settings).unwrap_or_default()
+}
+
+/// The body of `[eq]`, one `gains = [...]` line.
+fn eq_section(eq: &Equalizer) -> String {
+    toml::to_string(eq).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -151,6 +189,17 @@ mod tests {
         assert!(file.theme.colors.0.is_empty());
         assert!(!file.settings.hide_unplayable);
         assert!(!file.settings.hide_feed_tab);
+        assert_eq!(file.eq.gains, [0; 6]);
+    }
+
+    #[test]
+    fn eq_round_trip() {
+        let eq = Equalizer { gains: [-12, -3, 0, 4, 9, 12] };
+        let file: File = toml::from_str(&format!("[eq]\n{}", eq_section(&eq))).unwrap();
+        assert_eq!(file.eq.gains, eq.gains);
+
+        let wild: File = toml::from_str("[eq]\ngains = [-100, 100, 0, 0, 0, 0]\n").unwrap();
+        assert_eq!(wild.eq.clamped().gains, [-12, 12, 0, 0, 0, 0]);
     }
 
     #[test]

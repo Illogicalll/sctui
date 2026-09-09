@@ -240,6 +240,8 @@ fn start(
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
+    state.eq = config.eq;
+    crate::player::eq::set(state.eq.gains);
 
     let mut api_guard = api.lock().unwrap();
     let mut data = AppData::new(&mut api_guard, state.selected_row)?;

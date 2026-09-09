@@ -14,6 +14,7 @@ use crate::player::Position;
 use crate::player::stream::cache::{CachedHls, SegmentCache};
 use crate::player::stream::hls::{HlsManifest, resolve_manifest};
 use crate::player::stream::downloader::spawn_segment_pump;
+use crate::player::stream::eq::EqSource;
 use crate::player::stream::reader::{PcmSource, SegmentReader};
 use crate::player::stream::sample::TapSource;
 
@@ -292,8 +293,9 @@ impl PlaybackEngine {
             Arc::clone(&self.generation),
             gen_for_pump,
         );
+        // EQ inside the tap, so the visualiser draws what is actually heard.
         new_sink.append(TapSource::new(
-            PcmSource::new(pcm_rx, channels, sample_rate),
+            EqSource::new(PcmSource::new(pcm_rx, channels, sample_rate)),
             Arc::clone(wave_buffer),
         ));
 

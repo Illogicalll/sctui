@@ -3,11 +3,12 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use super::InputOutcome;
 use crate::config::Settings;
 use crate::keymap::{Action, Chord};
+use crate::player::eq;
 use crate::tui::logic::filtering::apply_unplayable_filter;
-use crate::tui::logic::state::{AppData, AppState, visible_tabs};
+use crate::tui::logic::state::{AppData, AppState, HelpPage, visible_tabs};
 
-/// The `?` popup: a modal key editor, with a settings page behind Tab. Owns every
-/// key while open.
+/// The `?` popup: a modal key editor, with a settings page and an equaliser page
+/// behind Tab. Owns every key while open.
 pub(crate) fn handle_help_input(
     key: KeyEvent,
     state: &mut AppState,
@@ -31,12 +32,14 @@ pub(crate) fn handle_help_input(
     }
 
     if key.code == KeyCode::Tab {
-        state.help_settings = !state.help_settings;
+        state.help_page = state.help_page.next();
         state.help_message = None;
         return InputOutcome::Continue;
     }
-    if state.help_settings {
-        return handle_settings_input(key, state, data);
+    match state.help_page {
+        HelpPage::Settings => return handle_settings_input(key, state, data),
+        HelpPage::Equalizer => return handle_eq_input(key, state),
+        HelpPage::Keys => {}
     }
 
     state.help_message = None;
@@ -99,6 +102,60 @@ fn handle_settings_input(key: KeyEvent, state: &mut AppState, data: &mut AppData
     InputOutcome::Continue
 }
 
+/// The equaliser page: ←→ (or h/l) picks a band, ↑↓ (or k/j) moves its fader,
+/// r flattens it. The axes follow the sliders, which are vertical. Each change
+/// goes straight to the audio thread, so it is audible on the track already
+/// playing, and is saved like every other page of the popup.
+fn handle_eq_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
+    let last = eq::BANDS.len() - 1;
+    let band = state.help_eq_selected.min(last);
+    state.help_message = None;
+    let delta = match (key.code, state.keymap.action(&key)) {
+        (KeyCode::Esc, _) | (_, Some(Action::Help)) => {
+            state.help_visible = false;
+            return InputOutcome::Continue;
+        }
+        (KeyCode::Up, _) | (_, Some(Action::Up)) => 1,
+        (KeyCode::Down, _) | (_, Some(Action::Down)) => -1,
+        (KeyCode::Char('r'), _) => -state.eq.gains[band],
+        (_, Some(Action::SubTabLeft)) | (KeyCode::Left, _) => {
+            state.help_eq_selected = band.saturating_sub(1);
+            return InputOutcome::Continue;
+        }
+        (_, Some(Action::SubTabRight)) | (KeyCode::Right, _) => {
+            state.help_eq_selected = (band + 1).min(last);
+            return InputOutcome::Continue;
+        }
+        (KeyCode::Home, _) => {
+            state.help_eq_selected = 0;
+            return InputOutcome::Continue;
+        }
+        (KeyCode::End, _) => {
+            state.help_eq_selected = last;
+            return InputOutcome::Continue;
+        }
+        _ => return InputOutcome::Continue,
+    };
+    let Some(value) = nudge(&mut state.eq.gains, band, delta) else {
+        return InputOutcome::Continue;
+    };
+    eq::set(state.eq.gains);
+    let label = eq::band_label(eq::BANDS[band]);
+    state.help_message = Some(saved(state, format!("{label}: {}", eq::gain_label(value))));
+    InputOutcome::Continue
+}
+
+/// Move one band, clamped to the equaliser's range. `None` when it was already
+/// at the rail, so holding the key does not keep rewriting the config file.
+fn nudge(gains: &mut [i8; eq::BANDS.len()], band: usize, delta: i8) -> Option<i8> {
+    let current = gains[band];
+    let next = current.saturating_add(delta).clamp(-eq::MAX_GAIN_DB, eq::MAX_GAIN_DB);
+    (next != current).then(|| {
+        gains[band] = next;
+        next
+    })
+}
+
 /// Make a just-flipped setting take effect on what is already loaded.
 fn apply_settings(state: &mut AppState, data: &mut AppData) {
     apply_unplayable_filter(state, data);
@@ -115,8 +172,71 @@ fn saved(state: &AppState, msg: String) -> String {
         &state.theme_name,
         &state.theme_overrides,
         &state.settings,
+        &state.eq,
     ) {
         Ok(()) => format!("{msg}  · saved"),
         Err(e) => format!("{msg}  · NOT saved: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_cycles_the_three_pages() {
+        let page = HelpPage::default();
+        assert_eq!(page, HelpPage::Keys);
+        assert_eq!(page.next(), HelpPage::Settings);
+        assert_eq!(page.next().next(), HelpPage::Equalizer);
+        assert_eq!(page.next().next().next(), HelpPage::Keys);
+    }
+
+    /// Both axes. Every band is pinned to a rail so no keypress here reaches
+    /// `config::save` or `eq::set`, while the gain keys still prove they are not
+    /// wired to the selection.
+    #[test]
+    fn the_axes_follow_the_vertical_faders() {
+        let press = |code, state: &mut AppState| {
+            handle_eq_input(KeyEvent::from(code), state);
+        };
+        let mut state = AppState {
+            help_page: HelpPage::Equalizer,
+            help_eq_selected: 2,
+            ..Default::default()
+        };
+
+        state.eq.gains = [eq::MAX_GAIN_DB; eq::BANDS.len()];
+        press(KeyCode::Right, &mut state);
+        assert_eq!(state.help_eq_selected, 3, "→ moves to the next band");
+        press(KeyCode::Left, &mut state);
+        assert_eq!(state.help_eq_selected, 2, "← moves to the previous band");
+        press(KeyCode::Up, &mut state);
+        assert_eq!(state.help_eq_selected, 2, "↑ adjusts the gain, it does not move");
+        assert_eq!(state.eq.gains[2], eq::MAX_GAIN_DB, "and stops at the top rail");
+
+        state.eq.gains = [-eq::MAX_GAIN_DB; eq::BANDS.len()];
+        press(KeyCode::Down, &mut state);
+        assert_eq!(state.help_eq_selected, 2, "↓ adjusts the gain, it does not move");
+        assert_eq!(state.eq.gains[2], -eq::MAX_GAIN_DB, "and stops at the bottom rail");
+    }
+
+    #[test]
+    fn a_band_stops_at_the_rails() {
+        let mut gains = [0i8; eq::BANDS.len()];
+        assert_eq!(nudge(&mut gains, 2, 1), Some(1));
+        assert_eq!(gains, [0, 0, 1, 0, 0, 0], "only the selected band moves");
+
+        gains[2] = eq::MAX_GAIN_DB;
+        assert_eq!(nudge(&mut gains, 2, 1), None, "already at the top rail");
+        assert_eq!(gains[2], eq::MAX_GAIN_DB);
+
+        gains[2] = -eq::MAX_GAIN_DB;
+        assert_eq!(nudge(&mut gains, 2, -1), None, "already at the bottom rail");
+
+        // What `r` sends: whatever it takes to get back to flat.
+        gains[2] = -7;
+        assert_eq!(nudge(&mut gains, 2, 7), Some(0));
+        assert_eq!(nudge(&mut gains, 2, 0), None, "flattening a flat band is a no-op");
     }
 }
