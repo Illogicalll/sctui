@@ -102,9 +102,10 @@ fn handle_settings_input(key: KeyEvent, state: &mut AppState, data: &mut AppData
     InputOutcome::Continue
 }
 
-/// The equaliser page: ↑↓ picks a band, ←→ (or h/l) moves it, r flattens it.
-/// Each change goes straight to the audio thread, so it is audible on the track
-/// already playing, and is saved like every other page of the popup.
+/// The equaliser page: ←→ (or h/l) picks a band, ↑↓ (or k/j) moves its fader,
+/// r flattens it. The axes follow the sliders, which are vertical. Each change
+/// goes straight to the audio thread, so it is audible on the track already
+/// playing, and is saved like every other page of the popup.
 fn handle_eq_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
     let last = eq::BANDS.len() - 1;
     let band = state.help_eq_selected.min(last);
@@ -114,14 +115,14 @@ fn handle_eq_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
             state.help_visible = false;
             return InputOutcome::Continue;
         }
-        (KeyCode::Left, _) | (_, Some(Action::SubTabLeft)) => -1,
-        (KeyCode::Right, _) | (_, Some(Action::SubTabRight)) => 1,
+        (KeyCode::Up, _) | (_, Some(Action::Up)) => 1,
+        (KeyCode::Down, _) | (_, Some(Action::Down)) => -1,
         (KeyCode::Char('r'), _) => -state.eq.gains[band],
-        (_, Some(Action::Up)) | (KeyCode::Up, _) => {
+        (_, Some(Action::SubTabLeft)) | (KeyCode::Left, _) => {
             state.help_eq_selected = band.saturating_sub(1);
             return InputOutcome::Continue;
         }
-        (_, Some(Action::Down)) | (KeyCode::Down, _) => {
+        (_, Some(Action::SubTabRight)) | (KeyCode::Right, _) => {
             state.help_eq_selected = (band + 1).min(last);
             return InputOutcome::Continue;
         }
@@ -189,6 +190,35 @@ mod tests {
         assert_eq!(page.next(), HelpPage::Settings);
         assert_eq!(page.next().next(), HelpPage::Equalizer);
         assert_eq!(page.next().next().next(), HelpPage::Keys);
+    }
+
+    /// Both axes. Every band is pinned to a rail so no keypress here reaches
+    /// `config::save` or `eq::set`, while the gain keys still prove they are not
+    /// wired to the selection.
+    #[test]
+    fn the_axes_follow_the_vertical_faders() {
+        let press = |code, state: &mut AppState| {
+            handle_eq_input(KeyEvent::from(code), state);
+        };
+        let mut state = AppState {
+            help_page: HelpPage::Equalizer,
+            help_eq_selected: 2,
+            ..Default::default()
+        };
+
+        state.eq.gains = [eq::MAX_GAIN_DB; eq::BANDS.len()];
+        press(KeyCode::Right, &mut state);
+        assert_eq!(state.help_eq_selected, 3, "→ moves to the next band");
+        press(KeyCode::Left, &mut state);
+        assert_eq!(state.help_eq_selected, 2, "← moves to the previous band");
+        press(KeyCode::Up, &mut state);
+        assert_eq!(state.help_eq_selected, 2, "↑ adjusts the gain, it does not move");
+        assert_eq!(state.eq.gains[2], eq::MAX_GAIN_DB, "and stops at the top rail");
+
+        state.eq.gains = [-eq::MAX_GAIN_DB; eq::BANDS.len()];
+        press(KeyCode::Down, &mut state);
+        assert_eq!(state.help_eq_selected, 2, "↓ adjusts the gain, it does not move");
+        assert_eq!(state.eq.gains[2], -eq::MAX_GAIN_DB, "and stops at the bottom rail");
     }
 
     #[test]
