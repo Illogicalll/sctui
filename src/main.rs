@@ -67,9 +67,12 @@ fn main() -> anyhow::Result<()> {
     let token_clone = Arc::clone(&token);
     let api_clone = Arc::clone(&api);
     std::thread::spawn(move || {
-        for _ in reauth_rx {
+        for _ in reauth_rx.iter() {
             // re-authenticate (this will block waiting for user interaction)
-            match auth::authenticate() {
+            let result = auth::authenticate();
+            // The refresher re-asked every minute while that blocked; one login answers them all.
+            reauth_rx.try_iter().for_each(drop);
+            match result {
                 Ok(new_token) => {
                     *token_clone.lock().unwrap() = new_token;
                     // update API with new token
