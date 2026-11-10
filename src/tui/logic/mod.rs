@@ -468,7 +468,7 @@ fn start(
                             && let Some(track) = data.playback_tracks.get(next_idx).cloned()
                         {
                             if let Some(current) = queued_from_current(&state, &data) {
-                                state.playback_history.push(current);
+                                state.push_history(current);
                             }
                             player.play(track, TrackChange::Natural);
                             state.override_playing = None;
@@ -482,7 +482,7 @@ fn start(
                         // Superseded by a later request.
                     } else if let Some(seed) = tracks.first().cloned() {
                         if let Some(current) = queued_from_current(&state, &data) {
-                            state.playback_history.push(current);
+                            state.push_history(current);
                         }
                         state.manual_queue.clear();
                         player.play(seed, TrackChange::UserSkip);
@@ -1139,7 +1139,7 @@ fn start(
                         }
                         } else if let Some(queued) = state.manual_queue.pop_front() {
                         if let Some(current) = queued_from_current(&state, &data) {
-                            state.playback_history.push(current);
+                            state.push_history(current);
                         }
                             play_queued_track(
                                 queued,
@@ -1152,7 +1152,7 @@ fn start(
                         } else if let Some(next_idx) = state.auto_queue.pop_front() {
                             if let Some(track) = active_tracks(&state, &data).get(next_idx) {
                                 if let Some(current) = queued_from_current(&state, &data) {
-                                    state.playback_history.push(current);
+                                    state.push_history(current);
                                 }
                                 player.play(track.clone(), TrackChange::Natural);
                                 state.override_playing = None;

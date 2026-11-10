@@ -61,7 +61,7 @@ pub(crate) fn handle_station(
     }
     state.toast(format!("Station started from {}", queued.track.title));
     if let Some(current) = queued_from_current(state, data) {
-        state.playback_history.push(current);
+        state.push_history(current);
     }
     state.manual_queue.clear();
     player.play(queued.track.clone(), TrackChange::UserSkip);
@@ -104,7 +104,7 @@ fn start_playback(
         state.manual_queue.clear();
     } else if let Some(queued) = queued_from_current(state, data)
         && !(queued.source == source && queued.index == idx) {
-            state.playback_history.push(queued);
+            state.push_history(queued);
         }
 
     player.play(track.clone(), TrackChange::UserSkip);

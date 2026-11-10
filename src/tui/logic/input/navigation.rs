@@ -48,7 +48,7 @@ pub(crate) fn handle_next_track(
         }
         if let Some(queued) = state.manual_queue.pop_front() {
             if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
-                state.playback_history.push(current);
+                state.push_history(current);
             }
             crate::tui::logic::utils::play_queued_track(
                 queued,
@@ -61,7 +61,7 @@ pub(crate) fn handle_next_track(
         } else if let Some(next_idx) = state.auto_queue.pop_front()
             && let Some(track) = active_tracks.get(next_idx) {
                 if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
-                    state.playback_history.push(current);
+                    state.push_history(current);
                 }
                 player.play(track.clone(), TrackChange::UserSkip);
                 state.override_playing = None;

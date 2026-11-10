@@ -607,6 +607,22 @@ pub struct AppState {
     pub preload_triggered_for_track_urn: Option<String>,
 }
 
+/// How many tracks the listening history keeps; the oldest are dropped first.
+pub const HISTORY_CAP: usize = 500;
+
+impl AppState {
+    /// Record a track that has stopped being the one playing. History replays a track on
+    /// its own, never the list it came from, so the entry's copy of that list is dropped
+    /// rather than kept once per track heard.
+    pub fn push_history(&mut self, mut entry: QueuedTrack) {
+        entry.tracks_snapshot = None;
+        if self.playback_history.len() >= HISTORY_CAP {
+            self.playback_history.remove(0);
+        }
+        self.playback_history.push(entry);
+    }
+}
+
 /// What is known about which playlists and albums have any playable track, and the
 /// ones the "hide unplayable tracks" setting has taken out of the Library lists.
 #[derive(Default)]
@@ -806,6 +822,33 @@ mod tests {
         Engagement::UnlikeTrack { track_urn: "soundcloud:tracks:1".into(), track_id: 1 }.failed("offline", &mut state, &mut data);
         assert!(data.liked_track_urns.contains("soundcloud:tracks:1"));
         assert_eq!(state.toasts.last().unwrap().msg, "Unlike failed: offline");
+    }
+
+    /// T19: history is capped and its entries do not each carry the whole playing list.
+    #[test]
+    fn history_drops_the_oldest_entries_and_does_not_keep_track_lists() {
+        let mut state = AppState::default();
+        let list: Vec<Track> = (0..3)
+            .map(|i| Track {
+                title: String::new(),
+                artists: String::new(),
+                duration: String::new(),
+                duration_ms: 0,
+                playback_count: String::new(),
+                artwork_url: String::new(),
+                access: String::new(),
+                track_urn: i.to_string(),
+            })
+            .collect();
+        for i in 0..HISTORY_CAP + 2 {
+            let mut track = list[0].clone();
+            track.track_urn = i.to_string();
+            state.push_history(QueuedTrack::new(PlaybackSource::Radio, 0, &track, Some(&list), None, None, None, false));
+        }
+        assert_eq!(state.playback_history.len(), HISTORY_CAP);
+        assert_eq!(state.playback_history[0].track.track_urn, "2", "the oldest two went");
+        assert_eq!(state.playback_history.last().unwrap().track.track_urn, (HISTORY_CAP + 1).to_string());
+        assert!(state.playback_history.iter().all(|e| e.tracks_snapshot.is_none()));
     }
 
     /// Identity, not position: each parent item has its own cursor in the child pane.

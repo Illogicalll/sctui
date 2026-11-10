@@ -26,7 +26,7 @@ pub(crate) fn handle_history_input(
                 // Same as "previous track": what is playing now goes into history, the
                 // chosen track plays as an override and the queue carries on after it.
                 if let Some(current) = queued_from_current(state, data) {
-                    state.playback_history.push(current);
+                    state.push_history(current);
                 }
                 play_queued_track(entry, state, data, player, true, TrackChange::UserSkip);
                 player.resume();
