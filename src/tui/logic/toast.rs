@@ -54,8 +54,40 @@ impl AppState {
     }
 }
 
+/// A fetch error as a toast should read. A request that never reached the server is
+/// the same news whichever list it was for, so those collapse to one line (and one
+/// toast, since an identical newest toast is renewed rather than stacked). Anything
+/// else loses its URL, which is long and says nothing the user can act on.
+pub fn brief_fetch_error(why: &str) -> String {
+    if why.contains("error sending request") || why.contains("operation timed out") {
+        return "No connection to SoundCloud · retrying".to_string();
+    }
+    let mut out = String::new();
+    let mut rest = why;
+    while let Some(at) = rest.find(" for url (") {
+        out.push_str(&rest[..at]);
+        rest = rest[at..].find(')').map_or("", |end| &rest[at + end + 1..]);
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fetch_errors_are_short_and_offline_is_one_message() {
+        use super::brief_fetch_error as brief;
+        let offline = "Fetch failed: error sending request for url (https://api.soundcloud.com/me/playlists?linked_partitioning=true&limit=40)";
+        let other = "Could not load tracks: error sending request for url (https://api.soundcloud.com/playlists/1/tracks)";
+        assert_eq!(brief(offline), "No connection to SoundCloud · retrying");
+        assert_eq!(brief(offline), brief(other), "one toast, whichever list failed");
+        assert_eq!(
+            brief("Fetch failed: HTTP status client error (401 Unauthorized) for url (https://api.soundcloud.com/me/likes/tracks?limit=50)"),
+            "Fetch failed: HTTP status client error (401 Unauthorized)"
+        );
+        assert_eq!(brief("Fetch failed: internal error"), "Fetch failed: internal error");
+    }
+
     use super::*;
 
     #[test]

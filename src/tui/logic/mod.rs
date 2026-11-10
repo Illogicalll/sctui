@@ -524,7 +524,8 @@ fn start(
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
                 Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
-                Msg::PlaylistEditFailed(why) | Msg::FetchFailed(why) => state.toast_err(why),
+                Msg::PlaylistEditFailed(why) => state.toast_err(why),
+                Msg::FetchFailed(why) => state.toast_err(toast::brief_fetch_error(&why)),
                 Msg::PageSettled(list, outcome) => {
                     let first_page = outcome.is_ok() && std::mem::take(&mut data.loading[list as usize]);
                     // One notice per run of failures; the retries after it are silent.
@@ -532,7 +533,7 @@ fn start(
                     if pagers.settled(list, outcome.ok(), Instant::now())
                         && let Some(why) = why
                     {
-                        state.toast_err(why);
+                        state.toast_err(toast::brief_fetch_error(&why));
                     }
                     // Playlists have always had two pages in before their tab is opened.
                     if first_page && list == List::Playlists {
