@@ -52,6 +52,31 @@ impl Failure {
     }
 }
 
+/// The token to launch with: the stored one, refreshed if it has expired. A browser
+/// login only when there is none or its refresh was turned down.
+pub fn startup_token() -> Result<Token> {
+    let refresh = |token: &Token| refresh_token(token).map_err(|e| Failure::of(&e));
+    match stored_or_refreshed(super::load_token(), refresh) {
+        Some(token) => Ok(token),
+        None => super::authenticate(),
+    }
+}
+
+/// `None` when only a login will do. A refresh that failed for no fault of the token
+/// (offline, the relay down) keeps the expired token: the app starts, its requests
+/// fail and are retried, and the background refresher recovers once it can.
+fn stored_or_refreshed(stored: Option<Token>, refresh: impl FnOnce(&Token) -> Result<Token, Failure>) -> Option<Token> {
+    let token = stored?;
+    if !token.is_expired() {
+        return Some(token);
+    }
+    match refresh(&token) {
+        Ok(refreshed) => Some(refreshed),
+        Err(Failure::Rejected) => None,
+        Err(Failure::Transient) => Some(token),
+    }
+}
+
 pub fn refresh_token(old_token: &Token) -> Result<Token> {
     let refresh_token = &old_token.refresh_token;
     with_backoff(refresh_token, || relay_post("/refresh", &[("refresh_token", refresh_token)]))
@@ -152,6 +177,22 @@ mod tests {
         // A fresh login's token is not held back by the dead one's failures.
         let fresh = with_backoff("fresh", || bail!("tried"));
         assert!(fresh.is_err_and(|e| e.to_string() == "tried"));
+    }
+
+    /// S1: at launch, only a missing token or a rejected refresh opens the browser.
+    #[test]
+    fn startup_logs_in_only_without_a_token_or_after_a_rejection() {
+        let token = |access: &str, obtained_at| Token { access_token: access.into(), refresh_token: "r".into(), obtained_at };
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let access = |t: Option<Token>| t.map(|t| t.access_token);
+
+        assert_eq!(access(stored_or_refreshed(None, |_| panic!("nothing to refresh"))), None);
+        // Still valid: used as it is, no request made.
+        assert_eq!(access(stored_or_refreshed(Some(token("valid", now)), |_| panic!("not expired"))).as_deref(), Some("valid"));
+        assert_eq!(access(stored_or_refreshed(Some(token("old", 0)), |_| Ok(token("new", now)))).as_deref(), Some("new"));
+        assert_eq!(access(stored_or_refreshed(Some(token("old", 0)), |_| Err(Failure::Rejected))), None);
+        // Offline or a 5xx: start with the expired token rather than open a browser.
+        assert_eq!(access(stored_or_refreshed(Some(token("old", 0)), |_| Err(Failure::Transient))).as_deref(), Some("old"));
     }
 
     /// #14: only an answer that turns the token down asks for a new login and backs

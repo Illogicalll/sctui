@@ -49,11 +49,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // stored token if still valid; refresh it if expired; browser login only as last resort
-    let token = match auth::load_token() {
-        Some(token) if !token.is_expired() => token,
-        Some(token) => auth::refresh_token(&token).or_else(|_| auth::authenticate())?,
-        None => auth::authenticate()?,
-    };
+    let token = auth::startup_token()?;
 
     let token = Arc::new(Mutex::new(token));
     let (reauth_tx, reauth_rx) = mpsc::channel();

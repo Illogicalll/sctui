@@ -3,8 +3,9 @@ mod refresh;
 mod token;
 
 pub use oauth::authenticate;
-pub use refresh::{refresh_token, start_auto_refresh, try_refresh_token};
-pub use token::{Token, config_dir, load_token, take_save_warning};
+pub use refresh::{start_auto_refresh, startup_token, try_refresh_token};
+pub use token::{Token, config_dir, take_save_warning};
+use token::load_token;
 
 /// Cloudflare Worker that holds the SoundCloud client secret (source in `worker/`). It adds the
 /// secret to the two token requests and forwards them to SoundCloud; nothing else goes through it.
