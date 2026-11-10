@@ -160,30 +160,39 @@ pub fn apply_unplayable_filter(state: &mut AppState, data: &mut AppData) {
     // Likes and the track search share `selected_row` with other panes, so they move with
     // a scratch cursor and the real one is clamped against whichever list is on screen.
     let (mut likes_row, mut search_row) = (0usize, 0usize);
+    // Which list a pane holds: every replacement goes through its fetch task, which
+    // takes a new request id each time, and a pane emptied without one loses its key.
+    let of = |fetch: &super::state::FetchTask, key: &Option<String>| (fetch.request_id, key.is_some());
     // The order here indexes `data.hidden_tracks`; keep the two in step.
-    let panes: [(&mut Vec<Track>, &mut TableState, &mut usize); 11] = [
-        (&mut data.playlist_tracks, &mut data.playlist_tracks_state, &mut state.selected_playlist_track_row),
-        (&mut data.album_tracks, &mut data.album_tracks_state, &mut state.selected_album_track_row),
-        (&mut data.following_tracks, &mut data.following_tracks_state, &mut state.selected_following_track_row),
-        (&mut data.following_likes_tracks, &mut data.following_likes_state, &mut state.selected_following_like_row),
-        (&mut data.search_playlist_tracks, &mut data.search_playlist_tracks_state, &mut state.search_selected_playlist_track_row),
-        (&mut data.search_album_tracks, &mut data.search_album_tracks_state, &mut state.search_selected_album_track_row),
-        (&mut data.search_people_tracks, &mut data.search_people_tracks_state, &mut state.search_selected_person_track_row),
-        (&mut data.search_people_likes_tracks, &mut data.search_people_likes_state, &mut state.search_selected_person_like_row),
-        (&mut data.feed_tracks, &mut data.feed_tracks_state, &mut state.selected_info_row),
-        (&mut data.likes, &mut data.likes_state, &mut likes_row),
-        (&mut data.search_tracks, &mut data.search_tracks_state, &mut search_row),
+    let panes = [
+        (of(&state.playlist_tracks_fetch, &data.playlist_tracks_uri), &mut data.playlist_tracks, &mut data.playlist_tracks_state, &mut state.selected_playlist_track_row),
+        (of(&state.album_tracks_fetch, &data.album_tracks_uri), &mut data.album_tracks, &mut data.album_tracks_state, &mut state.selected_album_track_row),
+        (of(&state.following_tracks_fetch, &data.following_tracks_user_urn), &mut data.following_tracks, &mut data.following_tracks_state, &mut state.selected_following_track_row),
+        (of(&state.following_likes_fetch, &data.following_likes_user_urn), &mut data.following_likes_tracks, &mut data.following_likes_state, &mut state.selected_following_like_row),
+        (of(&state.search_playlist_tracks_fetch, &data.search_playlist_tracks_uri), &mut data.search_playlist_tracks, &mut data.search_playlist_tracks_state, &mut state.search_selected_playlist_track_row),
+        (of(&state.search_album_tracks_fetch, &data.search_album_tracks_uri), &mut data.search_album_tracks, &mut data.search_album_tracks_state, &mut state.search_selected_album_track_row),
+        (of(&state.search_people_tracks_fetch, &data.search_people_tracks_user_urn), &mut data.search_people_tracks, &mut data.search_people_tracks_state, &mut state.search_selected_person_track_row),
+        (of(&state.search_people_likes_fetch, &data.search_people_likes_user_urn), &mut data.search_people_likes_tracks, &mut data.search_people_likes_state, &mut state.search_selected_person_like_row),
+        (of(&state.feed_tracks_fetch, &data.feed_tracks_key), &mut data.feed_tracks, &mut data.feed_tracks_state, &mut state.selected_info_row),
+        // Likes only ever grow; search results are replaced by each new search.
+        ((0, true), &mut data.likes, &mut data.likes_state, &mut likes_row),
+        ((state.search_results_fetch.request_id, true), &mut data.search_tracks, &mut data.search_tracks_state, &mut search_row),
     ];
 
     let stashes = &mut data.hidden_tracks;
     if stashes.len() < panes.len() {
-        stashes.resize_with(panes.len(), Vec::new);
+        stashes.resize_with(panes.len(), Default::default);
     }
-    for ((tracks, table, row), stash) in panes.into_iter().zip(stashes.iter_mut()) {
+    for ((list, tracks, table, row), stash) in panes.into_iter().zip(stashes.iter_mut()) {
+        // Rows hidden from a list this pane no longer shows belong nowhere now.
+        if stash.list != list {
+            stash.rows.clear();
+            stash.list = list;
+        }
         if hide {
-            hide_list(tracks, stash, table, row);
+            hide_list(tracks, &mut stash.rows, table, row);
         } else {
-            restore_rows(tracks, stash);
+            restore_rows(tracks, &mut stash.rows);
         }
     }
 
@@ -433,6 +442,71 @@ mod tests {
             restore_rows(&mut tracks, &mut stash);
             assert_eq!(urns(&tracks), urns(&original));
         }
+    }
+
+    /// T12: rows hidden from one playlist are not restored into the next one.
+    #[test]
+    fn a_replaced_list_does_not_get_the_old_lists_hidden_rows() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        state.settings.hide_unplayable = true;
+        // One pass of the loop over Library > Playlists with playlist `uri` selected,
+        // then its tracks landing (if any).
+        let show = |state: &mut AppState, data: &mut AppData, uri: Option<&str>, rows: Option<Vec<Track>>| {
+            state.playlist_tracks_fetch.refetch(
+                nav::PaneId::PlaylistTracks,
+                &mut state.child_cursors,
+                &mut data.playlist_tracks,
+                &mut data.playlist_tracks_state,
+                &mut data.playlist_tracks_uri,
+                &mut state.selected_playlist_track_row,
+                uri.map(str::to_string),
+                |_, _| rt.spawn(async {}),
+            );
+            if let Some(rows) = rows {
+                let id = state.playlist_tracks_fetch.request_id;
+                state.playlist_tracks_fetch.accept(id, rows, &mut data.playlist_tracks, &mut data.playlist_tracks_state);
+                apply_unplayable_filter(state, data);
+            }
+        };
+        let a = || vec![track("a1", "blocked"), track("a2", "playable"), track("a3", "blocked")];
+        let b = || vec![track("b1", "playable"), track("b2", "blocked")];
+
+        show(&mut state, &mut data, Some("A"), Some(a()));
+        assert_eq!(urns(&data.playlist_tracks), ["a2"]);
+        show(&mut state, &mut data, Some("B"), Some(b()));
+        assert_eq!(urns(&data.playlist_tracks), ["b1"]);
+
+        state.settings.hide_unplayable = false;
+        apply_unplayable_filter(&mut state, &mut data);
+        assert_eq!(urns(&data.playlist_tracks), ["b1", "b2"], "only B's rows come back");
+
+        // Still the same list: its own hidden rows return in place.
+        state.settings.hide_unplayable = true;
+        apply_unplayable_filter(&mut state, &mut data);
+        show(&mut state, &mut data, Some("B"), None);
+        state.settings.hide_unplayable = false;
+        apply_unplayable_filter(&mut state, &mut data);
+        assert_eq!(urns(&data.playlist_tracks), ["b1", "b2"]);
+
+        // Back to A before B's stash was ever looked at again, and A reloads: one copy of A.
+        state.settings.hide_unplayable = true;
+        apply_unplayable_filter(&mut state, &mut data);
+        show(&mut state, &mut data, Some("A"), None);
+        show(&mut state, &mut data, Some("B"), None);
+        show(&mut state, &mut data, Some("A"), Some(a()));
+        state.settings.hide_unplayable = false;
+        apply_unplayable_filter(&mut state, &mut data);
+        assert_eq!(urns(&data.playlist_tracks), ["a1", "a2", "a3"]);
+
+        // Nothing selected: the emptied pane stays empty when the setting goes off.
+        state.settings.hide_unplayable = true;
+        apply_unplayable_filter(&mut state, &mut data);
+        show(&mut state, &mut data, None, None);
+        state.settings.hide_unplayable = false;
+        apply_unplayable_filter(&mut state, &mut data);
+        assert!(data.playlist_tracks.is_empty());
     }
 
     fn playlist(name: &str, count: &str) -> crate::api::Playlist {

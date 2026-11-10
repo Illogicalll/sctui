@@ -654,6 +654,15 @@ pub struct Containers {
     pub hidden_albums: Vec<Album>,
 }
 
+/// The rows "hide unplayable tracks" took out of one pane.
+#[derive(Default)]
+pub struct HiddenTracks {
+    /// Which list they came out of (see `filtering::apply_unplayable_filter`). Once the
+    /// pane shows a different list they are dropped, not restored.
+    pub list: (u64, bool),
+    pub rows: Vec<(usize, Track)>,
+}
+
 #[derive(Default)]
 pub struct AppData {
     pub likes: Vec<Track>,
@@ -713,7 +722,7 @@ pub struct AppData {
     /// held in its full list, so switching the setting back off puts them back where
     /// they were. One slot per pane, in the order `filtering::apply_unplayable_filter`
     /// lists them.
-    pub hidden_tracks: Vec<Vec<(usize, Track)>>,
+    pub hidden_tracks: Vec<HiddenTracks>,
     pub hidden_feed: Vec<(usize, Activity)>,
     /// Playlists and albums with nothing playable in them (see `filtering::apply_container_filter`).
     pub containers: Containers,
