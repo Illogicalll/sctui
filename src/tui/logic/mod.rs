@@ -2,6 +2,7 @@ pub(crate) mod filtering;
 mod input;
 pub(crate) mod nav;
 pub(crate) mod palette;
+mod pager;
 pub(crate) mod state;
 pub(crate) mod toast;
 pub(crate) mod utils;
@@ -11,7 +12,7 @@ use crate::api::{
     Lyrics, fetch_lyrics,
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
     fetch_related_tracks, fetch_related_users,
-    API, Activity, MAX_PAGES, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
+    API, Activity, List, MAX_PAGES, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
     fetch_user_tracks,
 };
@@ -44,6 +45,7 @@ use image::DynamicImage;
 use super::render::{NowPlaying, render};
 use self::filtering::{FilteredViews, apply_unplayable_filter, build_filtered_views, rebuild_matches_if_active};
 use self::nav::PaneId;
+use self::pager::Pagers;
 use self::input::{InputOutcome, expire_pending, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
@@ -116,6 +118,8 @@ enum Msg {
     PlaylistEditFailed(String),
     /// A fetch that failed; the text is ready to show.
     FetchFailed(String),
+    /// A page fetch for a list finished: whether more pages remain, or why it failed.
+    PageSettled(List, Result<bool, String>),
     /// A playlist or album (by `tracks_uri`) and whether anything in it can be played.
     /// `None` when the check itself failed; nothing is concluded from that.
     ContainerProbed(String, Option<bool>),
@@ -166,17 +170,31 @@ fn settle(state: &mut AppState, data: &mut AppData) -> FilteredViews {
     views
 }
 
-fn spawn_fetch<F>(api: Arc<Mutex<API>>, tx: Sender<Msg>, fetch_fn: F)
+/// Fetch the next page of `list` on its own thread, unless `pagers` says not yet:
+/// one is already out, the last one failed too recently, or the list has ended.
+fn spawn_fetch<F>(pagers: &mut Pagers, list: List, api: &Arc<Mutex<API>>, tx: &Sender<Msg>, fetch_fn: F)
 where
     F: FnOnce(&mut API) -> anyhow::Result<Msg> + Send + 'static,
 {
+    if !pagers.start(list, Instant::now()) {
+        return;
+    }
+    let (api, tx) = (Arc::clone(api), tx.clone());
     std::thread::spawn(move || {
-        let result = {
+        let (result, more) = {
             let mut api_guard = api.lock().unwrap();
-            fetch_fn(&mut api_guard)
+            let result = fetch_fn(&mut api_guard);
+            (result, api_guard.has_more(list))
         };
 
-        let _ = tx.send(result.unwrap_or_else(|e| Msg::FetchFailed(format!("Fetch failed: {e:#}"))));
+        let settled = match result {
+            Ok(rows) => {
+                let _ = tx.send(rows);
+                Ok(more)
+            }
+            Err(e) => Err(format!("Fetch failed: {e:#}")),
+        };
+        let _ = tx.send(Msg::PageSettled(list, settled));
     });
 }
 
@@ -328,13 +346,14 @@ fn start(
         });
     }
 
-    spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+    let mut pagers = Pagers::default();
+    spawn_fetch(&mut pagers, List::Playlists, api, &tx, |api| {
         api.get_playlists().map(Msg::Playlists)
     });
     // Later feed pages are only fetched while the feed tab is on screen, so a hidden
     // feed tab costs nothing beyond this first page - skip that too.
     if !state.settings.hide_feed_tab {
-        spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+        spawn_fetch(&mut pagers, List::Feed, api, &tx, |api| {
             api.get_activities().map(Msg::Feed)
         });
     }
@@ -505,6 +524,15 @@ fn start(
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
                 Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
                 Msg::PlaylistEditFailed(why) | Msg::FetchFailed(why) => state.toast_err(why),
+                Msg::PageSettled(list, outcome) => {
+                    // One notice per run of failures; the retries after it are silent.
+                    let why = outcome.as_ref().err().cloned();
+                    if pagers.settled(list, outcome.ok(), Instant::now())
+                        && let Some(why) = why
+                    {
+                        state.toast_err(why);
+                    }
+                }
                 Msg::ContainerProbed(uri, playable) => {
                     data.containers.probing = data.containers.probing.saturating_sub(1);
                     if playable == Some(false) {
@@ -1154,20 +1182,20 @@ fn start(
 
             // Feed is unbounded: only page when the cursor nears the end of what is loaded.
             if state.selected_tab == 2 && nav::cursor(&state, PaneId::Feed) + 10 >= data.feed.len() {
-                spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+                spawn_fetch(&mut pagers, List::Feed, api, &tx, |api| {
                     api.get_activities().map(Msg::Feed)
                 });
             }
 
             match state.selected_subtab {
-                0 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+                0 => spawn_fetch(&mut pagers, List::Likes, api, &tx, |api| {
                     api.get_liked_tracks().map(Msg::Likes)
                 }),
-                1 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+                1 => spawn_fetch(&mut pagers, List::Playlists, api, &tx, |api| {
                     api.get_playlists().map(Msg::Playlists)
                 }),
-                2 => spawn_fetch(Arc::clone(api), tx.clone(), |api| api.get_albums().map(Msg::Albums)),
-                3 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {
+                2 => spawn_fetch(&mut pagers, List::Albums, api, &tx, |api| api.get_albums().map(Msg::Albums)),
+                3 => spawn_fetch(&mut pagers, List::Following, api, &tx, |api| {
                     api.get_following().map(Msg::Following)
                 }),
                 _ => {}

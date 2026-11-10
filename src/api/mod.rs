@@ -22,7 +22,19 @@ pub mod lyrics;
 pub use lyrics::{Lyrics, fetch_lyrics};
 pub(crate) use utils::{MAX_PAGES, format_duration};
 
-/// Cursor over one `linked_partitioning` list.
+/// The lists `API` pages through, a page per call.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum List {
+    Likes,
+    Playlists,
+    Albums,
+    Following,
+    Feed,
+}
+
+/// Cursor over one `linked_partitioning` list. It moves only when a page has been
+/// read, so a request that fails leaves it where it was and the same page is asked
+/// for again next time. Callers must not fetch one list twice at once.
 enum Page {
     Start,
     Next(String),
@@ -37,16 +49,6 @@ impl Page {
             Page::Next(href) => Some(href.clone()),
             Page::Done => None,
         }
-    }
-
-    /// Like `url`, but `Start` becomes `Done` before the request is made, so a
-    /// failed first fetch is not retried.
-    fn take_url(&mut self, base: &str) -> Option<String> {
-        let url = self.url(base);
-        if matches!(self, Page::Start) {
-            *self = Page::Done;
-        }
-        url
     }
 
     fn from_response(resp: &serde_json::Value) -> Page {
@@ -78,6 +80,18 @@ impl API {
             feed_page: Page::Start,
             user_names: HashMap::new(),
         }
+    }
+
+    /// Whether `list` has a page left to fetch.
+    pub fn has_more(&self, list: List) -> bool {
+        let pages: &[&Page] = match list {
+            List::Likes => &[&self.liked_tracks_page],
+            List::Playlists => &[&self.my_playlists_page, &self.others_playlists_page],
+            List::Albums => &[&self.albums_page],
+            List::Following => &[&self.following_page],
+            List::Feed => &[&self.feed_page],
+        };
+        pages.iter().any(|page| !matches!(page, Page::Done))
     }
 
     pub fn token_clone(&self) -> Arc<Mutex<Token>> {

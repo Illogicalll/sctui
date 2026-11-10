@@ -10,7 +10,7 @@ impl API {
     pub fn get_following(&mut self) -> anyhow::Result<Vec<Artist>> {
         let access_token = access_token(&self.token);
 
-        let Some(url) = self.following_page.take_url(
+        let Some(url) = self.following_page.url(
             "https://api.soundcloud.com/me/followings?limit=40&linked_partitioning=true",
         ) else {
             return Ok(Vec::new());

@@ -10,7 +10,7 @@ impl API {
     pub fn get_activities(&mut self) -> anyhow::Result<Vec<Activity>> {
         let access_token = access_token(&self.token);
 
-        let Some(url) = self.feed_page.take_url(
+        let Some(url) = self.feed_page.url(
             "https://api.soundcloud.com/me/activities?limit=200&linked_partitioning=true",
         ) else {
             return Ok(Vec::new());
