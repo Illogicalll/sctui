@@ -7,8 +7,8 @@ use super::InputOutcome;
 use crate::api::{Album, Artist, Playlist, Track};
 use crate::tui::logic::filtering::build_filtered_views;
 use crate::tui::logic::nav::{self, PaneId};
-use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, HelpPage, PlaybackSource};
-use crate::tui::logic::utils::{active_tracks, build_queue};
+use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, HelpPage};
+use crate::tui::logic::utils::rebuild_auto_queue;
 use crate::tui::logic::utils::queued_from_current;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
@@ -21,10 +21,7 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
     match action {
         Action::ToggleShuffle => {
             state.shuffle_enabled = !state.shuffle_enabled;
-            if let Some(current_idx) = state.current_playing_index {
-                state.auto_queue =
-                    build_queue(current_idx, active_tracks(state, data), state.shuffle_enabled);
-            }
+            rebuild_auto_queue(state, data);
             state.toast(format!("Shuffle {}", if state.shuffle_enabled { "on" } else { "off" }));
         }
         Action::ToggleRepeat => {
@@ -119,18 +116,9 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
         Action::ToggleQueue => {
             state.queue_visible = !state.queue_visible;
             state.queue_scroll = 0;
-            if state.queue_visible
-                && let Some(current_idx) = state.current_playing_index {
-                    // In radio mode an empty queue means related tracks are loading;
-                    // rebuilding from the chain would replay what was already heard.
-                    if state.auto_queue.is_empty() && state.playback_source != PlaybackSource::Radio {
-                        state.auto_queue = build_queue(
-                            current_idx,
-                            active_tracks(state, data),
-                            state.shuffle_enabled,
-                        );
-                    }
-                }
+            if state.queue_visible && state.auto_queue.is_empty() {
+                rebuild_auto_queue(state, data);
+            }
         }
         _ => {}
     }
@@ -276,5 +264,38 @@ fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppD
         state
             .engagement_queue
             .push_back(Engagement::LikeTrack { track, track_id });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::logic::state::PlaybackSource;
+
+    /// T17: toggling shuffle in a station must not queue the tracks already heard.
+    #[test]
+    fn toggling_shuffle_in_a_station_does_not_requeue_heard_tracks() {
+        let track = |i: usize| Track {
+            title: String::new(),
+            artists: String::new(),
+            duration: String::new(),
+            duration_ms: 0,
+            playback_count: String::new(),
+            artwork_url: String::new(),
+            access: String::new(),
+            track_urn: i.to_string(),
+        };
+        let mut data = AppData { playback_tracks: (0..6).map(track).collect(), ..Default::default() };
+        let mut state = AppState {
+            playback_source: PlaybackSource::Radio,
+            current_playing_index: Some(4),
+            auto_queue: [5].into(),
+            ..Default::default()
+        };
+        run_command(Action::ToggleShuffle, &mut state, &mut data);
+        assert!(state.shuffle_enabled);
+        assert_eq!(state.auto_queue, [5], "only the track not yet heard");
+        run_command(Action::ToggleShuffle, &mut state, &mut data);
+        assert_eq!(state.auto_queue, [5]);
     }
 }

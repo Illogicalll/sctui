@@ -264,6 +264,26 @@ pub fn build_queue(
     }
 }
 
+/// Rebuild the automatic queue around the playing track for the current shuffle setting.
+/// A station's list is the chain already heard plus what is still queued, so there the
+/// queue is only ever reordered: rebuilding it from the list would replay the chain (and,
+/// by refilling the queue, stop more related tracks being fetched).
+pub(crate) fn rebuild_auto_queue(state: &mut AppState, data: &AppData) {
+    let Some(current_idx) = state.current_playing_index else {
+        return;
+    };
+    if state.playback_source == PlaybackSource::Radio {
+        let queued = state.auto_queue.make_contiguous();
+        if state.shuffle_enabled {
+            queued.shuffle(&mut rand::thread_rng());
+        } else {
+            queued.sort_unstable();
+        }
+    } else {
+        state.auto_queue = build_queue(current_idx, active_tracks(state, data), state.shuffle_enabled);
+    }
+}
+
 /// Extend the playing list with `incoming`, queueing each new playable track after what is
 /// already queued, or somewhere at random among it when `shuffle` is set. Tracks already
 /// present (by urn) or unplayable are dropped.
@@ -649,6 +669,34 @@ mod tests {
         state.auto_queue.clear();
         assert!(end_of_track(&mut state, &data).is_none() && peek_next(&state, &data).is_none());
         assert_eq!(state.playback_history.len(), 2);
+    }
+
+    /// T17: in a station nothing already heard is ever queued again.
+    #[test]
+    fn a_station_queue_is_reordered_but_never_rebuilt_from_the_heard_chain() {
+        // "a".."c" heard, "d" playing, "e" and "f" still to come.
+        let (mut state, data) = likes_playing(&["a", "b", "c", "d", "e", "f"], 3);
+        state.playback_source = PlaybackSource::Radio;
+        state.shuffle_enabled = true;
+        rebuild_auto_queue(&mut state, &data);
+        let mut queued = queued_urns(&state, &data);
+        queued.sort();
+        assert_eq!(queued, ["e", "f"]);
+        state.shuffle_enabled = false;
+        state.auto_queue = VecDeque::from([5, 4]);
+        rebuild_auto_queue(&mut state, &data);
+        assert_eq!(queued_urns(&state, &data), ["e", "f"], "shuffle off puts what is left back in order");
+
+        // Queue empty while related tracks load: Next has nothing to play and queues nothing.
+        state.shuffle_enabled = true;
+        state.auto_queue.clear();
+        rebuild_auto_queue(&mut state, &data);
+        assert!(state.auto_queue.is_empty() && advance(&mut state, &data).is_none());
+
+        // Any other source still reshuffles its whole list.
+        state.playback_source = PlaybackSource::Playlist;
+        rebuild_auto_queue(&mut state, &data);
+        assert_eq!(state.auto_queue.len(), 5);
     }
 
     /// T10: a track station started while an artist station is still loading wins.

@@ -2,7 +2,7 @@ use super::InputOutcome;
 use crate::player::{Player, TrackChange};
 use crate::tui::logic::nav;
 use crate::tui::logic::state::{AppData, AppState, visible_tabs};
-use crate::tui::logic::utils::{active_tracks, advance, build_queue};
+use crate::tui::logic::utils::{advance, rebuild_auto_queue};
 
 pub(crate) fn handle_tab_switch(state: &mut AppState) -> InputOutcome {
     let tabs = visible_tabs(state).len();
@@ -40,11 +40,9 @@ pub(crate) fn handle_next_track(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
-    if let Some(current_idx) = state.current_playing_index {
-        let active_tracks = active_tracks(state, data);
+    if state.current_playing_index.is_some() {
         if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
-            state.auto_queue =
-                build_queue(current_idx, active_tracks, state.shuffle_enabled);
+            rebuild_auto_queue(state, data);
         }
         if let Some(track) = advance(state, data) {
             player.play(track, TrackChange::UserSkip);
