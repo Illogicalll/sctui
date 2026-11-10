@@ -541,6 +541,10 @@ fn start(
                 }
             }
         }
+        // A fresh token that could not be written to disk (it is still the one in use).
+        if let Some(warning) = crate::auth::take_save_warning() {
+            state.toast_err(warning);
+        }
         // New rows, or the setting changed (from the settings page or the palette).
         if fetched || hiding_unplayable != state.settings.hide_unplayable {
             hiding_unplayable = state.settings.hide_unplayable;

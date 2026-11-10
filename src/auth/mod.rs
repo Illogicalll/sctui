@@ -4,7 +4,7 @@ mod token;
 
 pub use oauth::authenticate;
 pub use refresh::{refresh_token, start_auto_refresh, try_refresh_token};
-pub use token::{Token, config_dir, load_token};
+pub use token::{Token, config_dir, load_token, take_save_warning};
 
 /// Cloudflare Worker that holds the SoundCloud client secret (source in `worker/`). It adds the
 /// secret to the two token requests and forwards them to SoundCloud; nothing else goes through it.
@@ -14,16 +14,17 @@ const AUTH_RELAY: &str = match option_env!("SCTUI_AUTH_RELAY") {
     None => "https://sctui.w-murphy.com",
 };
 
-/// POST form `params` to the relay and persist the returned token. Sends an explicit User-Agent
+/// POST form `params` to the relay and persist the returned token (which is returned
+/// whether or not it could be written, see `Token::save`). Sends an explicit User-Agent
 /// because the zone's Cloudflare WAF rejects some generic client signatures (error 1010).
 fn relay_post(path: &str, params: &[(&str, &str)]) -> anyhow::Result<Token> {
-    reqwest::blocking::Client::builder()
+    let token = reqwest::blocking::Client::builder()
         .user_agent(concat!("sctui/", env!("CARGO_PKG_VERSION")))
         .build()?
         .post(format!("{AUTH_RELAY}{path}"))
         .form(params)
         .send()?
         .error_for_status()?
-        .json::<Token>()?
-        .save()
+        .json::<Token>()?;
+    Ok(token.save())
 }

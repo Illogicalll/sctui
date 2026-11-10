@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const REFRESH_TIME: u64 = 2700;
@@ -24,16 +25,35 @@ impl Token {
         now > self.obtained_at + REFRESH_TIME
     }
 
-    /// Stamp `obtained_at` with now and persist to disk.
-    pub(super) fn save(self) -> anyhow::Result<Self> {
-        self.save_to(&token_path())
+    /// Stamp `obtained_at` with now and persist to disk. The token comes back even if
+    /// it could not be written: the refresh token it replaced is spent, so this is the
+    /// only one that works. The failure is left for `take_save_warning`, and the next
+    /// refresh saves again as every refresh does.
+    pub(super) fn save(self) -> Self {
+        let (token, failure) = self.save_to(&token_path());
+        if let Some(e) = failure {
+            *SAVE_WARNING.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(format!("Could not save the login token (still signed in for now): {e}"));
+        }
+        token
     }
 
-    fn save_to(mut self, path: &Path) -> anyhow::Result<Self> {
-        self.obtained_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        write_private(path, serde_json::to_string_pretty(&self)?.as_bytes())?;
-        Ok(self)
+    fn save_to(mut self, path: &Path) -> (Self, Option<std::io::Error>) {
+        self.obtained_at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let written = serde_json::to_string_pretty(&self)
+            .map_err(std::io::Error::other)
+            .and_then(|json| write_private(path, json.as_bytes()));
+        (self, written.err())
     }
+}
+
+/// Why the newest token is not on disk, until someone shows it to the user.
+static SAVE_WARNING: Mutex<Option<String>> = Mutex::new(None);
+
+/// The last token-save failure not yet reported, if any. Tokens are saved from
+/// background threads while the TUI owns the terminal, so the UI collects it here.
+pub fn take_save_warning() -> Option<String> {
+    SAVE_WARNING.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
 /// Write `contents` to `path` so that only this user can read it and a crash never
@@ -103,7 +123,8 @@ mod tests {
         let path = dir.join("nested").join("token.json");
         let token = || Token { access_token: "access".into(), refresh_token: "refresh".into(), obtained_at: 0 };
 
-        let saved = token().save_to(&path).unwrap();
+        let (saved, failure) = token().save_to(&path);
+        assert!(failure.is_none());
         let read: Token = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!((read.access_token.as_str(), read.refresh_token.as_str()), ("access", "refresh"));
         assert_eq!(read.obtained_at, saved.obtained_at);
@@ -117,11 +138,28 @@ mod tests {
             assert_eq!(mode(path.parent().unwrap()), 0o700, "a config dir we create is private too");
             // A file an older version wrote world-readable is tightened by the next save.
             fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-            token().save_to(&path).unwrap();
+            assert!(token().save_to(&path).1.is_none());
             assert_eq!(mode(&path), 0o600);
         }
         let left: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(left, ["token.json"], "no temp file is left behind");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// S4: a token that cannot be written is still handed back, stamped, to be used.
+    #[test]
+    fn a_token_that_cannot_be_saved_is_kept() {
+        let dir = std::env::temp_dir().join(format!("sctui-token-test-{}-{:x}", std::process::id(), rand::random::<u64>()));
+        fs::create_dir(&dir).unwrap();
+        // The config "directory" is a file, so nothing can be created in it.
+        let blocker = dir.join("not-a-dir");
+        fs::write(&blocker, b"").unwrap();
+        let token = Token { access_token: "new-access".into(), refresh_token: "new-refresh".into(), obtained_at: 0 };
+
+        let (kept, failure) = token.save_to(&blocker.join("token.json"));
+        assert!(failure.is_some());
+        assert_eq!((kept.access_token.as_str(), kept.refresh_token.as_str()), ("new-access", "new-refresh"));
+        assert!(kept.obtained_at > 0 && !kept.is_expired());
         let _ = fs::remove_dir_all(&dir);
     }
 }
