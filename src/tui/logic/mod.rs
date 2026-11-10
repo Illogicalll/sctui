@@ -358,7 +358,9 @@ fn start(
         });
     }
 
-    let mut picker = Picker::from_query_stdio()?;
+    // A terminal that does not answer the query gets half-block cover art at a guessed
+    // cell size (the size ratatui-image itself assumes when it has to) instead of no app.
+    let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((10, 20)));
 
     let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
     let (tx_main, rx_main) = mpsc::channel::<AppEvent>();
