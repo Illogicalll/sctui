@@ -2,7 +2,7 @@ use reqwest::blocking::Client;
 
 use crate::auth::Token;
 
-use super::super::utils::{access_token, parse_str, parse_track, response_items};
+use super::super::utils::{access_token, fetch_tracks, parse_str};
 use crate::api::{API, Artist, Page, Track};
 use std::sync::{Arc, Mutex};
 
@@ -51,22 +51,12 @@ fn build_user_tracks_url(user_urn: &str, suffix: &str) -> String {
 }
 
 /// `suffix` is `"tracks"` for a user's uploads or `"likes/tracks"` for their likes.
+/// Follows the list for up to `max_pages` pages of 200.
 pub(crate) async fn fetch_user_tracks(
     token: Arc<Mutex<Token>>,
     user_urn: String,
     suffix: &str,
+    max_pages: usize,
 ) -> anyhow::Result<Vec<Track>> {
-    let access_token = access_token(&token);
-    let url = build_user_tracks_url(&user_urn, suffix);
-
-    let resp: serde_json::Value = reqwest::Client::new()
-        .get(&url)
-        .bearer_auth(access_token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    Ok(response_items(&resp).into_iter().map(|v| parse_track(&v)).collect())
+    fetch_tracks(&token, build_user_tracks_url(&user_urn, suffix), max_pages).await
 }

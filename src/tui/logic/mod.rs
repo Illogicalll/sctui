@@ -11,7 +11,7 @@ use crate::api::{
     Lyrics, fetch_lyrics,
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
     fetch_related_tracks, fetch_related_users,
-    API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
+    API, Activity, MAX_PAGES, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
     fetch_user_tracks,
 };
@@ -212,7 +212,8 @@ const ARTIST_STATION_TRACKS_PER_RELATED_ARTIST: usize = 3;
 /// SoundCloud's own (private-API) "Artist station". Failures for individual sources are
 /// swallowed; a partial mix (down to just the seed artist) still beats none.
 async fn fetch_artist_station_tracks(token: Arc<Mutex<Token>>, seed_urn: String) -> anyhow::Result<Vec<Track>> {
-    let seed_tracks = fetch_user_tracks(Arc::clone(&token), seed_urn.clone(), "tracks")
+    // One page of each artist is plenty to pick a handful of tracks from.
+    let seed_tracks = fetch_user_tracks(Arc::clone(&token), seed_urn.clone(), "tracks", 1)
         .await
         .unwrap_or_default();
 
@@ -234,7 +235,7 @@ async fn fetch_artist_station_tracks(token: Arc<Mutex<Token>>, seed_urn: String)
     for artist_urn in related_users.into_iter().take(ARTIST_STATION_RELATED_ARTISTS).map(|a| a.urn) {
         let token = Arc::clone(&token);
         fetches.spawn(async move {
-            let mut tracks = fetch_user_tracks(token, artist_urn, "tracks").await.unwrap_or_default();
+            let mut tracks = fetch_user_tracks(token, artist_urn, "tracks", 1).await.unwrap_or_default();
             tracks.retain(Track::is_playable);
             tracks.truncate(ARTIST_STATION_TRACKS_PER_RELATED_ARTIST);
             tracks
@@ -671,7 +672,7 @@ fn start(
                 selected.clone(),
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "tracks"),
+                    fetch_user_tracks(auth(), urn, "tracks", MAX_PAGES),
                     Msg::FollowingTracks,
                 ),
             );
@@ -685,7 +686,7 @@ fn start(
                 selected,
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "likes/tracks"),
+                    fetch_user_tracks(auth(), urn, "likes/tracks", MAX_PAGES),
                     Msg::FollowingLikes,
                 ),
             );
@@ -877,7 +878,7 @@ fn start(
                 selected.clone(),
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "tracks"),
+                    fetch_user_tracks(auth(), urn, "tracks", MAX_PAGES),
                     Msg::SearchPeopleTracks,
                 ),
             );
@@ -891,7 +892,7 @@ fn start(
                 selected,
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "likes/tracks"),
+                    fetch_user_tracks(auth(), urn, "likes/tracks", MAX_PAGES),
                     Msg::SearchPeopleLikes,
                 ),
             );

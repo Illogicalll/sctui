@@ -104,6 +104,49 @@ pub(crate) fn parse_next_href(resp: &serde_json::Value) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Most pages `collect_pages` follows: 10,000 rows at 200 a page.
+pub(crate) const MAX_PAGES: usize = 50;
+
+/// Every item of a `linked_partitioning` list, following `next_href` from `url`.
+/// `fetch` gets one page. Stops after `max_pages`, so a `next_href` that never
+/// ends (or loops) cannot spin forever; what was read up to there is returned.
+pub(crate) async fn collect_pages<F, Fut>(
+    mut url: String,
+    max_pages: usize,
+    mut fetch: F,
+) -> anyhow::Result<Vec<serde_json::Value>>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = anyhow::Result<serde_json::Value>>,
+{
+    let mut items = Vec::new();
+    for _ in 0..max_pages {
+        let resp = fetch(url).await?;
+        items.extend(response_items(&resp));
+        match parse_next_href(&resp) {
+            Some(next) => url = next,
+            None => break,
+        }
+    }
+    Ok(items)
+}
+
+/// The tracks of a paged list at `url`, up to `max_pages` pages of it.
+pub(crate) async fn fetch_tracks(
+    token: &Arc<Mutex<Token>>,
+    url: String,
+    max_pages: usize,
+) -> anyhow::Result<Vec<Track>> {
+    let access_token = access_token(token);
+    let client = reqwest::Client::new();
+    let items = collect_pages(url, max_pages, |url| {
+        let request = client.get(url).bearer_auth(&access_token);
+        async move { Ok(request.send().await?.error_for_status()?.json().await?) }
+    })
+    .await?;
+    Ok(items.iter().map(parse_track).collect())
+}
+
 pub(crate) fn parse_track(obj: &serde_json::Value) -> Track {
     let title = parse_str(obj, "title");
 
@@ -144,5 +187,53 @@ pub(crate) fn response_items(resp: &serde_json::Value) -> Vec<serde_json::Value>
         array.clone()
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod paging_tests {
+    use super::{MAX_PAGES, collect_pages};
+    use serde_json::json;
+
+    fn run<T>(fut: impl Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(fut)
+    }
+
+    /// #12: a list longer than one page is read to the end, in order.
+    #[test]
+    fn every_page_is_followed() {
+        let mut asked = Vec::new();
+        let items = run(collect_pages("p1".to_string(), MAX_PAGES, |url| {
+            asked.push(url.clone());
+            let page = match url.as_str() {
+                "p1" => json!({ "collection": [1, 2], "next_href": "p2" }),
+                "p2" => json!({ "collection": [3], "next_href": "p3" }),
+                // The last page has a null `next_href`.
+                _ => json!({ "collection": [4, 5], "next_href": null }),
+            };
+            async move { Ok(page) }
+        }))
+        .unwrap();
+        assert_eq!(items, [1, 2, 3, 4, 5].map(|n| json!(n)));
+        assert_eq!(asked, ["p1", "p2", "p3"]);
+    }
+
+    #[test]
+    fn a_next_href_that_never_ends_is_cut_off() {
+        let mut requests = 0;
+        let items = run(collect_pages("loop".to_string(), MAX_PAGES, |_| {
+            requests += 1;
+            async { Ok(json!({ "collection": [0], "next_href": "loop" })) }
+        }))
+        .unwrap();
+        assert_eq!((requests, items.len()), (MAX_PAGES, MAX_PAGES));
+    }
+
+    #[test]
+    fn a_failed_page_fails_the_list() {
+        let result = run(collect_pages("p1".to_string(), MAX_PAGES, |url| async move {
+            if url == "p1" { Ok(json!({ "collection": [1], "next_href": "p2" })) } else { anyhow::bail!("503") }
+        }));
+        assert!(result.is_err());
     }
 }

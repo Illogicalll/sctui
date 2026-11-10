@@ -3,7 +3,8 @@ use reqwest::blocking::Client;
 use crate::auth::Token;
 
 use super::super::utils::{
-    access_token, format_duration, parse_datetime, parse_str, parse_track, parse_u64, response_items,
+    MAX_PAGES, access_token, fetch_tracks, format_duration, parse_datetime, parse_str, parse_u64,
+    response_items,
 };
 use crate::api::{API, Page, Playlist, Track};
 use std::sync::{Arc, Mutex};
@@ -94,12 +95,11 @@ pub async fn has_playable_tracks(token: Arc<Mutex<Token>>, tracks_uri: String) -
     Ok(!response_items(&resp).is_empty())
 }
 
+/// Every track of a playlist or album, across all its pages.
 pub async fn fetch_playlist_tracks(
     token: Arc<Mutex<Token>>,
     tracks_uri: String,
 ) -> anyhow::Result<Vec<Track>> {
-    let access_token = access_token(&token);
-
     let mut url = if tracks_uri.starts_with("http") {
         tracks_uri
     } else {
@@ -119,14 +119,5 @@ pub async fn fetch_playlist_tracks(
         url.push_str("?linked_partitioning=true&limit=200&access=playable,preview,blocked");
     }
 
-    let resp: serde_json::Value = reqwest::Client::new()
-        .get(&url)
-        .bearer_auth(access_token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    Ok(response_items(&resp).into_iter().map(|v| parse_track(&v)).collect())
+    fetch_tracks(&token, url, MAX_PAGES).await
 }

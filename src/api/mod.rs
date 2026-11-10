@@ -20,7 +20,7 @@ pub use calls::search::{
 pub use models::{Activity, Album, Artist, Playlist, Track};
 pub mod lyrics;
 pub use lyrics::{Lyrics, fetch_lyrics};
-pub(crate) use utils::format_duration;
+pub(crate) use utils::{MAX_PAGES, format_duration};
 
 /// Cursor over one `linked_partitioning` list.
 enum Page {
