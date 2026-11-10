@@ -42,3 +42,7 @@ windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Gd
 [profile.release]
 strip = true
 lto = "thin"
+
+# Tests render every layout at every terminal size; unoptimised ratatui makes that slow.
+[profile.dev.package.ratatui]
+opt-level = 2
