@@ -281,7 +281,14 @@ fn line1(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying) {
     let t = theme::current();
     let mut tail = format!(" {}/{}", format_duration(state.progress), np.track.duration);
     if area.width >= 60 {
-        tail.push_str(&format!("  vol {}%", volume_percent(np)));
+        // Shuffle and repeat only when on, as in the narrow 4-row bar.
+        let on = |on: bool, glyph: &'static str| if on { glyph } else { "" };
+        tail.push_str(&format!(
+            "  {}{}vol {}%",
+            on(state.shuffle_enabled, "⇄ "),
+            on(state.repeat_enabled, "↻ "),
+            volume_percent(np)
+        ));
     }
     let tail_w = text_width(&tail) as u16;
     let rule_w = if area.width >= 70 { area.width / 5 } else { 0 };
@@ -334,7 +341,7 @@ mod tests {
 
     #[test]
     fn every_size_shows_state_title_artist_times_and_volume() {
-        let (state, data, _, mut np) = fixture();
+        let (mut state, data, _, mut np) = fixture();
         for size in [PlayerSize::Classic7, PlayerSize::Bar4, PlayerSize::Line1] {
             let screen = text(&draw_buffer(120, size.height(), |f| {
                 draw_player(f, f.area(), size, &state, &data, &np, None)
@@ -343,6 +350,13 @@ mod tests {
                 assert!(screen.contains(want), "{size:?} is missing {want:?}:\n{screen}");
             }
         }
+        // Shuffle and repeat: named in the two bars, a glyph each while on in the one-line bar.
+        (state.shuffle_enabled, state.repeat_enabled) = (true, true);
+        for (size, width, want) in [(PlayerSize::Bar4, 120, "⇄ on   ↻ on"), (PlayerSize::Bar4, 80, "⇄ ↻ vol"), (PlayerSize::Line1, 80, "⇄ ↻ vol")] {
+            let screen = text(&draw_buffer(width, size.height(), |f| draw_player(f, f.area(), size, &state, &data, &np, None)));
+            assert!(screen.contains(want), "{size:?} at {width} is missing {want:?}:\n{screen}");
+        }
+        (state.shuffle_enabled, state.repeat_enabled) = (false, false);
         // The compact sizes name the state; the 4-row bar also has room for what is next.
         let bar = |np: &NowPlaying| text(&draw_buffer(120, 4, |f| draw_player(f, f.area(), PlayerSize::Bar4, &state, &data, np, None)));
         assert!(bar(&np).contains('▶') && bar(&np).contains("next › "), "{}", bar(&np));

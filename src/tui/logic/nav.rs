@@ -618,9 +618,11 @@ mod tests {
     #[test]
     fn move_by_only_moves_focused_pane() {
         let mut state = at(0, 1);
-        let mut data = AppData::default();
-        data.playlists = vec![playlist(1), playlist(2), playlist(3)];
-        data.playlist_tracks = tracks_named(&["a", "b", "c", "d", "e"]);
+        let mut data = AppData {
+            playlists: vec![playlist(1), playlist(2), playlist(3)],
+            playlist_tracks: tracks_named(&["a", "b", "c", "d", "e"]),
+            ..Default::default()
+        };
         let views = build_filtered_views(&state, &data);
 
         move_by(&mut state, &mut data, &views, 1);
@@ -649,9 +651,11 @@ mod tests {
     #[test]
     fn tab_switch_restores_cursor_and_table_offset() {
         let mut state = AppState::default();
-        let mut data = AppData::default();
-        data.likes = (0..400).map(|i| track(i, "t")).collect();
-        data.playlists = vec![playlist(1), playlist(2)];
+        let mut data = AppData {
+            likes: (0..400).map(|i| track(i, "t")).collect(),
+            playlists: vec![playlist(1), playlist(2)],
+            ..Default::default()
+        };
         let views = build_filtered_views(&state, &data);
         move_by(&mut state, &mut data, &views, 300);
 
@@ -679,8 +683,7 @@ mod tests {
     #[test]
     fn filter_closes_on_tab_switch() {
         let mut state = AppState::default();
-        let mut data = AppData::default();
-        data.likes = tracks_named(&["alpha", "beta", "alto"]);
+        let mut data = AppData { likes: tracks_named(&["alpha", "beta", "alto"]), ..Default::default() };
         filter(&mut state, &data, "al");
         state.search_typing = true;
         let views = build_filtered_views(&state, &data);
@@ -698,8 +701,7 @@ mod tests {
     #[test]
     fn filter_matches_follow_list_changes() {
         let mut state = at(0, 1);
-        let mut data = AppData::default();
-        data.playlist_tracks = tracks_named(&["alpha", "beta", "alto"]);
+        let mut data = AppData { playlist_tracks: tracks_named(&["alpha", "beta", "alto"]), ..Default::default() };
         filter(&mut state, &data, "al");
         assert_eq!(state.search_matches, [0, 2]);
 
@@ -740,8 +742,7 @@ mod tests {
     #[test]
     fn artist_station_uses_filtered_row() {
         let mut state = at(0, 3);
-        let mut data = AppData::default();
-        data.following = vec![artist(1, "Zed"), artist(2, "Amy"), artist(3, "Bob")];
+        let data = AppData { following: vec![artist(1, "Zed"), artist(2, "Amy"), artist(3, "Bob")], ..Default::default() };
         filter(&mut state, &data, "bob");
         assert_eq!(focused_artist(&state, &data).map(|a| a.name).as_deref(), Some("Bob"));
         // Only the artist row itself starts an artist station.
@@ -752,9 +753,11 @@ mod tests {
     #[test]
     fn like_on_track_pane_targets_track_not_parent() {
         let mut state = at(0, 1);
-        let mut data = AppData::default();
-        data.playlists = vec![playlist(1)];
-        data.playlist_tracks = vec![track(7, "song")];
+        let mut data = AppData {
+            playlists: vec![playlist(1)],
+            playlist_tracks: vec![track(7, "song")],
+            ..Default::default()
+        };
 
         focus_right(&mut state);
         run_command(Action::ToggleLike, &mut state, &mut data);
@@ -868,9 +871,11 @@ mod tests {
 
     #[test]
     fn nav_move_changes_location() {
-        let mut data = AppData::default();
-        data.playlists = vec![playlist(1), playlist(2)];
-        data.likes = tracks_named(&["a", "b", "c"]);
+        let mut data = AppData {
+            playlists: vec![playlist(1), playlist(2)],
+            likes: tracks_named(&["a", "b", "c"]),
+            ..Default::default()
+        };
         let mut state = in_layout(Layout::Sidebar, 1, 2);
         state.search_needs_fetch = false;
         set_location(&mut state, 0, Some(0));
@@ -914,7 +919,6 @@ mod tests {
         assert_eq!(step(&mut state, Action::Top), (0, (0, 0)));
         assert_eq!(step(&mut state, Action::Down), (1, (0, 1)));
         assert_eq!(step(&mut state, Action::Down), (2, (0, 2)));
-        drop(step);
 
         // Sub-tab, tab and playback keys are not the column's: they work as anywhere.
         for action in [Action::SubTabRight, Action::NextTab, Action::TabSearch, Action::PlayPause, Action::ToggleQueue, Action::Help] {
@@ -936,9 +940,11 @@ mod tests {
 
     #[test]
     fn selecting_playlist_entry_sets_playlists_location_and_hides_list_pane() {
-        let mut data = AppData::default();
-        data.playlists = vec![playlist(1), playlist(2), playlist(3)];
-        data.likes = tracks_named(&["rave", "ambient"]);
+        let mut data = AppData {
+            playlists: vec![playlist(1), playlist(2), playlist(3)],
+            likes: tracks_named(&["rave", "ambient"]),
+            ..Default::default()
+        };
         let mut state = in_layout(Layout::Sidebar, 0, 0);
         filter(&mut state, &data, "amb");
         let items = nav_items(&state, &data, true);

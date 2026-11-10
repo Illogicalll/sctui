@@ -306,15 +306,14 @@ mod tests {
 
     #[test]
     fn overlay_swallows_unbound_and_bound_keys() {
-        let opens: [(&str, fn(&mut AppState)); 3] = [
+        let opens: [(&str, crate::tui::render::testkit::Setup); 3] = [
             ("queue", |s| s.queue_visible = true),
             ("history", |s| s.history_visible = true),
             ("picker", |s| playlist_picker::open_picker(s, track())),
         ];
         for (name, open) in opens {
             let mut state = AppState::default();
-            let mut data = AppData::default();
-            data.likes = vec![track(), track(), track()];
+            let mut data = AppData { likes: vec![track(), track(), track()], ..Default::default() };
             open(&mut state);
             // l = next sub-tab, j = down, tab = next tab, enter = play, z and F5 = unbound.
             for c in ['l', 'j', 'z', 'S'] {
@@ -377,8 +376,7 @@ mod tests {
 
         // Library filter.
         let mut state = AppState::default();
-        let mut data = AppData::default();
-        data.likes = vec![track(), Track { title: "ASQ".to_string(), ..track() }];
+        let mut data = AppData { likes: vec![track(), Track { title: "ASQ".to_string(), ..track() }], ..Default::default() };
         commands::run_command(Action::Search, &mut state, &mut data);
         for c in ['A', 'S', 'Q'] {
             assert!(matches!(ch(&mut state, &mut data, c), Routed::Done(_)));
@@ -469,9 +467,11 @@ mod tests {
         state.search_typing = false;
 
         // History and queue popups: g g and G reach the ends, j/k step.
-        let mut state = AppState::default();
-        state.queue_visible = true;
-        state.auto_queue = (0..30).collect();
+        let mut state = AppState {
+            queue_visible: true,
+            auto_queue: (0..30).collect(),
+            ..Default::default()
+        };
         ch(&mut state, &mut data, 'G');
         assert_eq!(state.queue_scroll, 29);
         ch(&mut state, &mut data, 'k');
@@ -624,8 +624,7 @@ mod tests {
     #[test]
     fn palette_is_insert_mode() {
         let mut state = AppState::default();
-        let mut data = AppData::default();
-        data.likes = vec![track(), track(), track()];
+        let mut data = AppData { likes: vec![track(), track(), track()], ..Default::default() };
         // A pending key does not survive into the query.
         ch(&mut state, &mut data, 'g');
         commands::run_command(Action::Palette, &mut state, &mut data);

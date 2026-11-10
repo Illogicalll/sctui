@@ -366,8 +366,9 @@ mod tests {
     use crate::tui::render::{MIN_COLS, MIN_ROWS};
 
     type Fixture = fn() -> (AppState, AppData, FilteredViews, NowPlaying);
+    type FreshState = fn(&AppData) -> AppState;
     /// Each fixture, and how to make another state like the one it came with.
-    const FIXTURES: [(&str, Fixture, fn(&AppData) -> AppState); 2] =
+    const FIXTURES: [(&str, Fixture, FreshState); 2] =
         [("populated", fixture, fixture_state), ("empty", fixture_empty, |_| AppState::default())];
 
     #[test]

@@ -99,8 +99,7 @@ mod tests {
     #[test]
     fn confirm_targets_playlist_by_identity_after_insert() {
         let mut state = AppState::default();
-        let mut data = AppData::default();
-        data.playlists = vec![playlist(1), playlist(2)];
+        let mut data = AppData { playlists: vec![playlist(1), playlist(2)], ..Default::default() };
         let b = data.playlists[1].tracks_uri.clone();
         state.confirm = Some(ConfirmAction::DeletePlaylist { tracks_uri: b.clone() });
         state.confirm_selected = 0;
