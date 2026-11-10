@@ -103,7 +103,8 @@ enum Msg {
     /// A playlist the user just created, to show at the top of the library.
     PlaylistCreated(Playlist),
     /// Lyrics lookup result for a track URN (`None` = nothing found).
-    Lyrics(String, Option<Lyrics>),
+    /// `Err` when the lyrics service could not be asked; that is not remembered as a miss.
+    Lyrics(String, Result<Option<Lyrics>, String>),
     Engagement(Engagement),
     /// A like or follow the server refused, and why; the optimistic change is undone.
     EngagementFailed(Engagement, String),
@@ -493,11 +494,15 @@ fn start(
                     data.playlists.insert(0, playlist);
                 }
                 Msg::Lyrics(urn, found) => {
-                    lyrics_cache.insert(urn.clone(), found.clone());
+                    if let Ok(found) = &found {
+                        lyrics_cache.insert(urn.clone(), found.clone());
+                    }
                     if state.lyrics_track_urn.as_deref() == Some(urn.as_str()) {
                         state.lyrics = match found {
-                            Some(l) => LyricsStatus::Found(l),
-                            None => LyricsStatus::NotFound,
+                            Ok(Some(l)) => LyricsStatus::Found(l),
+                            Ok(None) => LyricsStatus::NotFound,
+                            // Not cached, so the next time this track plays it is looked up again.
+                            Err(_) => LyricsStatus::Unavailable,
                         };
                     }
                 }

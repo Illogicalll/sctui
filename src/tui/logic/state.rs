@@ -27,6 +27,8 @@ pub enum LyricsStatus {
     Idle,
     Loading,
     NotFound,
+    /// The lyrics service could not be reached; nothing is known either way.
+    Unavailable,
     Found(Lyrics),
 }
 

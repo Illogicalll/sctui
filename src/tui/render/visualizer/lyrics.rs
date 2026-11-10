@@ -68,6 +68,9 @@ pub fn draw_lyrics(
         LyricsStatus::NotFound => {
             frame.render_widget(notice("No lyrics found for this track"), inner);
         }
+        LyricsStatus::Unavailable => {
+            frame.render_widget(notice("Couldn't reach the lyrics service"), inner);
+        }
         LyricsStatus::Found(lyrics) if lyrics.is_synced() => {
             let lines = &lyrics.synced;
             let current = lines.iter().rposition(|(t, _)| *t <= progress_ms);
