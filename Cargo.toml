@@ -46,3 +46,6 @@ lto = "thin"
 # Tests render every layout at every terminal size; unoptimised ratatui makes that slow.
 [profile.dev.package.ratatui]
 opt-level = 2
+
+[profile.test]
+opt-level = 1
