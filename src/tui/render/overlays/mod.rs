@@ -36,6 +36,7 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
             &state.auto_queue,
             current_playing_track,
             previous_playing_track,
+            state.queue_scroll,
         );
     }
 

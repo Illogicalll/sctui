@@ -1,106 +1,39 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::edit_text;
+use crate::tui::logic::filtering::{clear_filter, filter_edited};
+use crate::tui::logic::nav;
 use crate::tui::logic::state::{AppData, AppState};
-use crate::tui::logic::utils::build_search_matches;
 
-fn set_primary_selection(state: &mut AppState, data: &mut AppData, row: usize) {
-    match state.selected_subtab {
-        0 => {
-            state.selected_row = row;
-            data.likes_state.select(Some(row));
-        }
-        1 => {
-            state.selected_playlist_track_row = row;
-            data.playlist_tracks_state.select(Some(row));
-        }
-        2 => {
-            state.selected_row = row;
-            state.selected_album_row = row;
-            data.albums_state.select(Some(row));
-        }
-        3 => {
-            state.selected_row = row;
-            data.following_state.select(Some(row));
-        }
-        _ => {}
-    }
-}
-
-fn selected_original_index(state: &AppState) -> Option<usize> {
-    if state.search_query.trim().is_empty() {
-        return None;
-    }
-    match state.selected_subtab {
-        1 => state
-            .search_matches
-            .get(state.selected_playlist_track_row)
-            .copied(),
-        _ => state.search_matches.get(state.selected_row).copied(),
-    }
-}
-
-pub(crate) fn handle_search_input(
-    key: KeyEvent,
-    state: &mut AppState,
-    data: &mut AppData,
-) -> Option<InputOutcome> {
-    let mut handled = true;
+/// Insert mode: the Search query (Search tab) or the Library filter owns every key.
+/// Enter keeps the text, Esc cancels a filter, Up/Down step back out to the list;
+/// nothing here runs a bound action.
+pub(crate) fn handle_insert(key: KeyEvent, state: &mut AppState, data: &AppData) -> InputOutcome {
+    let library = state.selected_tab == 0;
     match key.code {
-        KeyCode::Backspace => {
-            let previously_selected = selected_original_index(state);
-            state.search_query.pop();
-            state.search_matches = build_search_matches(
-                state.selected_subtab,
-                &state.search_query,
-                &data.likes,
-                &data.playlist_tracks,
-                &data.albums,
-                &data.following,
-            );
-
-            if state.search_query.trim().is_empty() {
-                if let Some(idx) = previously_selected {
-                    set_primary_selection(state, data, idx);
-                }
-            } else {
-                set_primary_selection(state, data, 0);
+        KeyCode::Esc if library => {
+            state.search_typing = false;
+            clear_filter(state);
+        }
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Up | KeyCode::Down => {
+            state.search_typing = false;
+            if library && state.search_query.trim().is_empty() {
+                clear_filter(state);
             }
         }
-        KeyCode::Esc => {
-            let previously_selected = selected_original_index(state);
-            if let Some(idx) = previously_selected {
-                set_primary_selection(state, data, idx);
-            }
-            state.search_popup_visible = false;
-            state.search_query.clear();
-            state.search_matches.clear();
-        }
-        // Bound Shift/Ctrl/Alt chords stay commands while the filter is open.
-        KeyCode::Char(c)
-            if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && !(key.modifiers.contains(KeyModifiers::SHIFT) && state.keymap.action(&key).is_some()) =>
-        {
-            state.search_query.push(c);
-            state.search_matches = build_search_matches(
-                state.selected_subtab,
-                &state.search_query,
-                &data.likes,
-                &data.playlist_tracks,
-                &data.albums,
-                &data.following,
-            );
-            if !state.search_query.trim().is_empty() {
-                set_primary_selection(state, data, 0);
+        _ if library => {
+            let was_on = nav::filter_pane(state).and_then(|pane| nav::selected_index(state, pane));
+            if edit_text(&key, &mut state.search_query) {
+                filter_edited(state, data, was_on);
             }
         }
         _ => {
-            handled = false;
+            if edit_text(&key, &mut state.query) {
+                state.search_needs_fetch = true;
+                nav::reset_search(state);
+            }
         }
     }
-    if handled {
-        Some(InputOutcome::Continue)
-    } else {
-        None
-    }
+    InputOutcome::Continue
 }

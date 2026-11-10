@@ -6,24 +6,24 @@ use crate::player::{Player, TrackChange};
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::{play_queued_track, queued_from_current};
 
-/// Keys the history popup owns while it is open. Movement follows the user's
-/// keymap; Esc/Enter/Home/End are fixed. `None` lets the key fall through.
+/// The history popup is modal: it owns every key while it is open. Movement follows
+/// the user's keymap; Esc or its own key closes it.
 pub(crate) fn handle_history_input(
     key: KeyEvent,
     state: &mut AppState,
     data: &mut AppData,
     player: &Player,
-) -> Option<InputOutcome> {
+) -> InputOutcome {
     let last = state.playback_history.len().saturating_sub(1);
     let sel = &mut state.history_selected;
     match (key.code, state.keymap.action(&key)) {
-        (KeyCode::Esc, _) => state.history_visible = false,
+        (KeyCode::Esc, _) | (_, Some(Action::ToggleHistory)) => state.history_visible = false,
         (_, Some(Action::Up)) => *sel = sel.saturating_sub(1),
         (_, Some(Action::Down)) => *sel = (*sel + 1).min(last),
         (_, Some(Action::PageUp)) => *sel = sel.saturating_sub(10),
         (_, Some(Action::PageDown)) => *sel = (*sel + 10).min(last),
-        (KeyCode::Home, _) => *sel = 0,
-        (KeyCode::End, _) => *sel = last,
+        (KeyCode::Home, _) | (_, Some(Action::Top)) => *sel = 0,
+        (KeyCode::End, _) | (_, Some(Action::Bottom)) => *sel = last,
         (KeyCode::Enter, _) => {
             // The popup lists newest first; map the row back to the Vec index.
             let idx = last.saturating_sub(state.history_selected);
@@ -37,7 +37,7 @@ pub(crate) fn handle_history_input(
                 state.history_visible = false;
             }
         }
-        _ => return None,
+        _ => {}
     }
-    Some(InputOutcome::Continue)
+    InputOutcome::Continue
 }

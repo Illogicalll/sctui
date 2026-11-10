@@ -19,7 +19,7 @@ pub(crate) fn open_theme_picker(state: &mut AppState) {
 pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
     let last = Theme::BUILTIN.len() - 1;
     match (key.code, state.keymap.action(&key)) {
-        (KeyCode::Esc, _) => {
+        (KeyCode::Esc, _) | (_, Some(Action::Themes)) => {
             if let Some(previous) = state.theme_picker_previous.take() {
                 theme::set(previous);
             }

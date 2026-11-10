@@ -5,7 +5,8 @@ use rand::seq::SliceRandom;
 use crate::api::{Album, Artist, Playlist, Track};
 use crate::player::{Player, TrackChange};
 
-use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
+use super::nav;
+use super::state::{AppData, AppState, PlaybackSource, QueuedTrack};
 
 fn fuzzy_score_subsequence(query: &str, candidate: &str) -> Option<i64> {
     if query.is_empty() || candidate.is_empty() {
@@ -358,7 +359,7 @@ pub fn play_queued_track(
                 && data.playback_following_user_urn == data.following_tracks_user_urn
             {
                 state.selected_following_track_row = queued.index;
-                state.following_tracks_focus = FollowingTracksFocus::Published;
+                nav::set_focus(state, 1);
                 data.following_tracks_state.select(Some(queued.index));
             } else if queued.source == PlaybackSource::FollowingLikes
                 && state.selected_tab == 0
@@ -367,7 +368,7 @@ pub fn play_queued_track(
                 && data.playback_following_user_urn == data.following_likes_user_urn
             {
                 state.selected_following_like_row = queued.index;
-                state.following_tracks_focus = FollowingTracksFocus::Likes;
+                nav::set_focus(state, 2);
                 data.following_likes_state.select(Some(queued.index));
             }
         }

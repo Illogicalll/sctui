@@ -1,27 +1,21 @@
 use super::InputOutcome;
-use super::helpers::filtered_row;
 use crate::api::{Artist, Track};
+use crate::tui::logic::nav::{self, PaneId};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, FollowingTracksFocus};
 use crate::player::{Player, TrackChange};
 use crate::tui::logic::utils::{build_queue, enter_radio, queued_from_current};
 
 use super::queue::selected_queued;
 
-/// The artist row itself, when it (not either track pane) has the cursor.
-fn focused_artist(state: &AppState, data: &AppData) -> Option<Artist> {
-    if state.selected_tab == 0
-        && state.selected_subtab == 3
-        && state.following_tracks_focus == FollowingTracksFocus::Artists
-    {
-        data.following.get(state.selected_row).cloned()
-    } else if state.selected_tab == 1
-        && state.selected_searchfilter == 3
-        && state.search_people_tracks_focus == FollowingTracksFocus::Artists
-    {
-        data.search_people.get(state.selected_row).cloned()
-    } else {
-        None
-    }
+/// The artist row itself, when it (not either track pane) has focus.
+pub(crate) fn focused_artist(state: &AppState, data: &AppData) -> Option<Artist> {
+    let id = nav::focused(state);
+    let people = match id {
+        PaneId::Following => &data.following,
+        PaneId::SearchPeople => &data.search_people,
+        _ => return None,
+    };
+    people.get(nav::selected_index(state, id)?).cloned()
 }
 
 pub(crate) fn handle_enter(
@@ -45,7 +39,7 @@ pub(crate) fn handle_enter(
     InputOutcome::Continue
 }
 
-/// Shift+Enter (or Shift+G): play the selected track as a station — related tracks follow.
+/// Play the selected track as a station — related tracks follow.
 /// On a focused artist row, starts an artist station instead; the loop fetches it in the
 /// background (there is no synchronous path from here to the network).
 pub(crate) fn handle_station(
@@ -72,16 +66,11 @@ pub(crate) fn handle_station(
     InputOutcome::Continue
 }
 
-/// Enter on an activity moves focus to its tracks; Enter on a track plays it.
 fn handle_feed_enter(state: &mut AppState, data: &mut AppData, player: &Player) {
-    if !state.info_pane_selected {
-        state.info_pane_selected = true;
-        return;
-    }
-    let idx = state.selected_info_row;
+    let idx = nav::cursor(state, PaneId::FeedTracks);
     if start_playback(state, data, player, PlaybackSource::Feed, |d| &d.feed_tracks, idx, None, None, None) {
         data.feed_tracks_state.select(Some(idx));
-        state.feed_expand_from = Some(state.selected_row);
+        state.feed_expand_from = Some(nav::cursor(state, PaneId::Feed));
     }
 }
 
@@ -130,16 +119,16 @@ fn start_playback(
 fn handle_search_enter(state: &mut AppState, data: &mut AppData, player: &Player) {
     match state.selected_searchfilter {
         0 => {
-            let idx = state.selected_row;
+            let idx = nav::cursor(state, PaneId::SearchTracks);
             start_playback(state, data, player, PlaybackSource::Playlist, |d| &d.search_tracks, idx, None, None, None);
         }
         1 => {
-            let idx = state.search_selected_album_track_row;
+            let idx = nav::cursor(state, PaneId::SearchAlbumTracks);
             let uri = data.search_album_tracks_uri.clone();
             start_playback(state, data, player, PlaybackSource::Album, |d| &d.search_album_tracks, idx, None, uri, None);
         }
         2 => {
-            let idx = state.search_selected_playlist_track_row;
+            let idx = nav::cursor(state, PaneId::SearchPlaylistTracks);
             let uri = data.search_playlist_tracks_uri.clone();
             start_playback(state, data, player, PlaybackSource::Playlist, |d| &d.search_playlist_tracks, idx, uri, None, None);
         }
@@ -150,11 +139,11 @@ fn handle_search_enter(state: &mut AppState, data: &mut AppData, player: &Player
 
 fn handle_search_people_enter(state: &mut AppState, data: &mut AppData, player: &Player) {
     if state.search_people_tracks_focus == FollowingTracksFocus::Likes {
-        let idx = state.search_selected_person_like_row;
+        let idx = nav::cursor(state, PaneId::SearchPeopleLikes);
         let urn = data.search_people_likes_user_urn.clone();
         start_playback(state, data, player, PlaybackSource::FollowingLikes, |d| &d.search_people_likes_tracks, idx, None, None, urn);
     } else {
-        let idx = state.search_selected_person_track_row;
+        let idx = nav::cursor(state, PaneId::SearchPeopleTracks);
         let urn = data.search_people_tracks_user_urn.clone();
         start_playback(state, data, player, PlaybackSource::FollowingPublished, |d| &d.search_people_tracks, idx, None, None, urn);
     }
@@ -165,18 +154,10 @@ fn handle_likes_enter(
     data: &mut AppData,
     player: &Player,
 ) {
-    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-    let Some(selected_idx) = filtered_row(state, state.selected_row) else {
+    let Some(selected_idx) = nav::selected_index(state, PaneId::Likes) else {
         return;
     };
-    if start_playback(state, data, player, PlaybackSource::Likes, |d| &d.likes, selected_idx, None, None, None)
-        && !search_active
-        && state.selected_tab == 0
-        && state.selected_subtab == 0
-    {
-        state.selected_row = selected_idx;
-        data.likes_state.select(Some(state.selected_row));
-    }
+    start_playback(state, data, player, PlaybackSource::Likes, |d| &d.likes, selected_idx, None, None, None);
 }
 
 fn handle_playlist_enter(
@@ -184,16 +165,11 @@ fn handle_playlist_enter(
     data: &mut AppData,
     player: &Player,
 ) {
-    let search_active = state.search_popup_visible && !state.search_query.trim().is_empty();
-    let Some(selected_idx) = filtered_row(state, state.selected_playlist_track_row) else {
+    let Some(selected_idx) = nav::selected_index(state, PaneId::PlaylistTracks) else {
         return;
     };
     let uri = data.playlist_tracks_uri.clone();
-    if start_playback(state, data, player, PlaybackSource::Playlist, |d| &d.playlist_tracks, selected_idx, uri, None, None)
-        && !search_active
-    {
-        data.playlist_tracks_state.select(Some(state.selected_playlist_track_row));
-    }
+    start_playback(state, data, player, PlaybackSource::Playlist, |d| &d.playlist_tracks, selected_idx, uri, None, None);
 }
 
 fn handle_album_enter(
@@ -201,10 +177,10 @@ fn handle_album_enter(
     data: &mut AppData,
     player: &Player,
 ) {
-    let idx = state.selected_album_track_row;
+    let idx = nav::cursor(state, PaneId::AlbumTracks);
     let uri = data.album_tracks_uri.clone();
     if start_playback(state, data, player, PlaybackSource::Album, |d| &d.album_tracks, idx, None, uri, None) {
-        data.album_tracks_state.select(Some(state.selected_album_track_row));
+        data.album_tracks_state.select(Some(idx));
     }
 }
 
@@ -214,13 +190,13 @@ fn handle_following_enter(
     player: &Player,
 ) {
     if state.following_tracks_focus == FollowingTracksFocus::Likes {
-        let idx = state.selected_following_like_row;
+        let idx = nav::cursor(state, PaneId::FollowingLikes);
         let urn = data.following_likes_user_urn.clone();
         if start_playback(state, data, player, PlaybackSource::FollowingLikes, |d| &d.following_likes_tracks, idx, None, None, urn) {
             data.following_likes_state.select(Some(idx));
         }
     } else {
-        let idx = state.selected_following_track_row;
+        let idx = nav::cursor(state, PaneId::FollowingTracks);
         let urn = data.following_tracks_user_urn.clone();
         if start_playback(state, data, player, PlaybackSource::FollowingPublished, |d| &d.following_tracks, idx, None, None, urn) {
             data.following_tracks_state.select(Some(idx));

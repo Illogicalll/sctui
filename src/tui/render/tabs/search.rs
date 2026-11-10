@@ -7,7 +7,8 @@ use ratatui::{
 };
 use crate::theme;
 
-use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, SEARCHFILTERS};
+use crate::tui::logic::nav;
+use crate::tui::logic::state::{AppData, AppState, SEARCHFILTERS};
 
 use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
 
@@ -27,7 +28,8 @@ pub fn render_search(
 ) {
     let selected_searchfilter = state.selected_searchfilter;
     let selected_row = state.selected_row;
-    let people_focus_is_likes = state.search_people_tracks_focus == FollowingTracksFocus::Likes;
+    // Index of the focused pane: it alone gets the bright selection bar.
+    let focus = nav::focus(state);
     let subchunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(
@@ -127,7 +129,11 @@ pub fn render_search(
                     truncate_with_ellipsis(&playlist.duration, left_min_widths[3]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
+                    row = if focus == 0 {
+                        row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
+                    } else {
+                        row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
+                    };
                 }
                 row
             })
@@ -153,7 +159,7 @@ pub fn render_search(
             &data.search_playlist_tracks,
             track_cells,
             state.search_selected_playlist_track_row,
-            true,
+            focus == 1,
         );
     } else if selected_searchfilter == 1 {
         let columns = Layout::default()
@@ -190,7 +196,11 @@ pub fn render_search(
                     truncate_with_ellipsis(&album.duration, left_min_widths[5]),
                 ]);
                 if i == selected_row {
-                    row = row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg));
+                    row = if focus == 0 {
+                        row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
+                    } else {
+                        row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
+                    };
                 }
                 row
             })
@@ -216,7 +226,7 @@ pub fn render_search(
             &data.search_album_tracks,
             short_track_cells,
             state.search_selected_album_track_row,
-            true,
+            focus == 1,
         );
     } else if selected_searchfilter == 3 {
         let columns = Layout::default()
@@ -232,7 +242,6 @@ pub fn render_search(
         let left_col_widths = vec![Constraint::Length(1), Constraint::Percentage(100)];
         let left_min_widths = calculate_min_widths(&left_col_widths, columns[0].width as usize);
 
-        let people_focus_is_artists = state.search_people_tracks_focus == FollowingTracksFocus::Artists;
         let left_rows = data.search_people
             .iter()
             .enumerate()
@@ -247,7 +256,7 @@ pub fn render_search(
                     truncate_with_ellipsis(&artist.name, left_min_widths[1]),
                 ]);
                 if i == selected_row {
-                    row = if people_focus_is_artists {
+                    row = if focus == 0 {
                         row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
                     } else {
                         row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
@@ -277,7 +286,7 @@ pub fn render_search(
             &data.search_people_tracks,
             short_track_cells,
             state.search_selected_person_track_row,
-            !people_focus_is_likes,
+            focus == 1,
         );
 
         track_table(
@@ -290,7 +299,7 @@ pub fn render_search(
             &data.search_people_likes_tracks,
             track_cells,
             state.search_selected_person_like_row,
-            people_focus_is_likes,
+            focus == 2,
         );
     } else {
         let header = Row::new(vec![] as Vec<Cell>);

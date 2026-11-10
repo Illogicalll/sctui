@@ -1,8 +1,8 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::api::Track;
 use crate::keymap::{Action, Keymap};
-use crate::tui::logic::state::{AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
+use crate::tui::logic::state::{AppState, PlaybackSource, QueuedTrack};
 
 impl QueuedTrack {
     pub(crate) fn new(
@@ -38,22 +38,31 @@ pub(crate) fn insert_manual_queue(state: &mut AppState, queued: QueuedTrack) {
     state.manual_queue = items.into_iter().collect();
 }
 
-/// Maps a visible Library row to its index in the unfiltered list while the search filter is active.
-pub(crate) fn filtered_row(state: &AppState, row: usize) -> Option<usize> {
-    if state.search_popup_visible && !state.search_query.trim().is_empty() {
-        state.search_matches.get(row).copied()
-    } else {
-        Some(row)
+/// Insert-mode editing shared by every text field: printable keys type (capitals
+/// included), Backspace deletes, Ctrl+W deletes a word, Ctrl+U clears. Returns whether
+/// the key was an edit.
+pub(crate) fn edit_text(key: &KeyEvent, text: &mut String) -> bool {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Backspace => {
+            text.pop();
+        }
+        KeyCode::Char('w') if ctrl => {
+            let keep = text
+                .trim_end()
+                .char_indices()
+                .rev()
+                .find(|(_, c)| c.is_whitespace())
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            text.truncate(keep);
+        }
+        KeyCode::Char('u') if ctrl => text.clear(),
+        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+            text.push(c)
+        }
+        _ => return false,
     }
-}
-
-pub(crate) fn reset_search_rows(state: &mut AppState) {
-    state.selected_row = 0;
-    state.search_selected_playlist_track_row = 0;
-    state.search_selected_album_track_row = 0;
-    state.search_selected_person_track_row = 0;
-    state.search_selected_person_like_row = 0;
-    state.search_people_tracks_focus = FollowingTracksFocus::Published;
+    true
 }
 
 /// Arrow keys always flip a two-option Yes/No choice, plus whatever the user has bound to
@@ -69,7 +78,6 @@ pub(crate) fn toggles_binary_choice(key: &KeyEvent, keymap: &Keymap) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::crossterm::event::KeyModifiers;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

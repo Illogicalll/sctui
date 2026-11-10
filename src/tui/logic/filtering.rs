@@ -2,7 +2,9 @@ use ratatui::widgets::TableState;
 
 use crate::api::{Album, Artist, Track};
 
+use super::nav;
 use super::state::{AppData, AppState, clamp_row};
+use super::utils::build_search_matches;
 
 pub struct FilteredViews {
     pub likes: Vec<Track>,
@@ -68,47 +70,78 @@ pub fn build_filtered_views(state: &AppState, data: &AppData) -> FilteredViews {
     }
 }
 
-pub fn clamp_selection(
-    state: &mut AppState,
-    data: &mut AppData,
-    filter_active: bool,
-    likes_len: usize,
-    playlist_tracks_len: usize,
-    albums_len: usize,
-    following_len: usize,
-) {
-    if !filter_active {
-        return;
-    }
+fn matches_now(state: &AppState, data: &AppData) -> Vec<usize> {
+    build_search_matches(
+        state.selected_subtab,
+        &state.search_query,
+        &data.likes,
+        &data.playlist_tracks,
+        &data.albums,
+        &data.following,
+    )
+}
 
+/// Identity of each row of the list the filter applies to, in list order.
+fn keys<'a>(state: &AppState, data: &'a AppData) -> Box<dyn Iterator<Item = &'a str> + 'a> {
     match state.selected_subtab {
-        0 => {
-            if state.selected_row >= likes_len && likes_len > 0 {
-                state.selected_row = likes_len - 1;
-            }
-            data.likes_state.select(Some(state.selected_row));
-        }
-        1 => {
-            if state.selected_playlist_track_row >= playlist_tracks_len && playlist_tracks_len > 0 {
-                state.selected_playlist_track_row = playlist_tracks_len - 1;
-            }
-            data.playlist_tracks_state
-                .select(Some(state.selected_playlist_track_row));
-        }
-        2 => {
-            if state.selected_row >= albums_len && albums_len > 0 {
-                state.selected_row = albums_len - 1;
-            }
-            data.albums_state.select(Some(state.selected_row));
-        }
-        3 => {
-            if state.selected_row >= following_len && following_len > 0 {
-                state.selected_row = following_len - 1;
-            }
-            data.following_state.select(Some(state.selected_row));
-        }
-        _ => {}
+        0 => Box::new(data.likes.iter().map(|t| t.track_urn.as_str())),
+        1 => Box::new(data.playlist_tracks.iter().map(|t| t.track_urn.as_str())),
+        2 => Box::new(data.albums.iter().map(|a| a.tracks_uri.as_str())),
+        _ => Box::new(data.following.iter().map(|a| a.urn.as_str())),
     }
+}
+
+/// Recompute the filter's matches from the list as it is now, so they never point at
+/// rows that have since moved, and keep the cursor on the item it was on (not the
+/// index: rows are inserted and removed above it). Run once per loop pass.
+// ponytail: a fuzzy scan of the filtered list on every loop pass while a filter is
+// active. Fine for a few thousand rows; if it ever shows in a profile, bump a revision
+// counter where the lists change and rescan only when it moved.
+pub fn rebuild_matches_if_active(state: &mut AppState, data: &AppData) {
+    let Some(pane) = nav::filter_pane(state).filter(|_| is_filter_active(state)) else {
+        return;
+    };
+    let matches = matches_now(state, data);
+    let row = nav::cursor(state, pane);
+    if matches != state.search_matches {
+        state.search_matches = matches;
+        // Only while the cursor is still where the anchor was taken; if the user has
+        // moved since, their move wins.
+        if let Some((_, key)) = state.filter_anchor.as_ref().filter(|(at, _)| *at == row)
+            && let Some(raw) = keys(state, data).position(|k| k == key)
+            && let Some(now_at) = state.search_matches.iter().position(|&m| m == raw)
+        {
+            *nav::cursor_mut(state, pane) = now_at;
+        }
+    }
+    let row = nav::cursor(state, pane);
+    state.filter_anchor = state
+        .search_matches
+        .get(row)
+        .and_then(|&raw| keys(state, data).nth(raw))
+        .map(|key| (row, key.to_string()));
+}
+
+/// The filter text was edited: rematch and put the cursor on the best match, or, once
+/// the text is empty again, back on `was_on`, the unfiltered index that was highlighted
+/// before the edit.
+pub fn filter_edited(state: &mut AppState, data: &AppData, was_on: Option<usize>) {
+    let Some(pane) = nav::filter_pane(state) else { return };
+    state.search_matches = matches_now(state, data);
+    *nav::cursor_mut(state, pane) = if is_filter_active(state) { 0 } else { was_on.unwrap_or(0) };
+}
+
+/// Drop the Library filter, leaving the cursor on the row that was highlighted.
+pub fn clear_filter(state: &mut AppState) {
+    if let Some(pane) = nav::filter_pane(state)
+        && let Some(raw) = nav::selected_index(state, pane)
+    {
+        *nav::cursor_mut(state, pane) = raw;
+    }
+    state.search_popup_visible = false;
+    state.search_query.clear();
+    state.search_matches.clear();
+    state.filter_anchor = None;
 }
 
 /// Apply the "hide unplayable tracks" setting to every loaded list: take the unplayable

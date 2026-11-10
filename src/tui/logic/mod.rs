@@ -1,5 +1,6 @@
 pub(crate) mod filtering;
 mod input;
+pub(crate) mod nav;
 pub(crate) mod state;
 pub(crate) mod utils;
 
@@ -38,8 +39,8 @@ use reqwest::Method;
 use image::DynamicImage;
 
 use super::render::render;
-use self::filtering::{apply_unplayable_filter, build_filtered_views, clamp_selection, is_filter_active};
-use self::input::helpers::reset_search_rows;
+use self::filtering::{FilteredViews, apply_unplayable_filter, build_filtered_views, rebuild_matches_if_active};
+use self::nav::PaneId;
 use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
@@ -135,6 +136,16 @@ fn invalidate_screen(terminal: &mut DefaultTerminal) {
         cell.set_symbol("\u{E000}");
     }
     terminal.swap_buffers();
+}
+
+/// Bring filter matches, cursors and table states in line with the lists as they are
+/// now. Run before every draw.
+fn settle(state: &mut AppState, data: &mut AppData) -> FilteredViews {
+    rebuild_matches_if_active(state, data);
+    let views = build_filtered_views(state, data);
+    nav::clamp(state, data, &views);
+    nav::sync_tables(state, data);
+    views
 }
 
 fn spawn_fetch<F>(api: Arc<Mutex<API>>, tx: Sender<Msg>, fetch_fn: F)
@@ -462,9 +473,8 @@ fn start(
                 }
                 Msg::PlaylistCreated(playlist) => {
                     // Keep the cursor on the same playlist as the list shifts down by one.
-                    if state.selected_tab == 0 && state.selected_subtab == 1 && !data.playlists.is_empty() {
-                        state.selected_row += 1;
-                        data.playlists_state.select(Some(state.selected_row));
+                    if !data.playlists.is_empty() {
+                        *nav::cursor_mut(&mut state, PaneId::Playlists) += 1;
                     }
                     data.playlists.insert(0, playlist);
                 }
@@ -572,52 +582,10 @@ fn start(
             });
         }
 
-        let filter_active = is_filter_active(&state);
-        let filtered = build_filtered_views(&state, &data);
-        let likes_len = if filter_active && state.selected_subtab == 0 {
-            filtered.likes.len()
-        } else {
-            data.likes.len()
-        };
-        let playlist_tracks_len = if filter_active && state.selected_subtab == 1 {
-            filtered.playlist_tracks.len()
-        } else {
-            data.playlist_tracks.len()
-        };
-        let albums_len = if filter_active && state.selected_subtab == 2 {
-            filtered.albums.len()
-        } else {
-            data.albums.len()
-        };
-        let following_len = if filter_active && state.selected_subtab == 3 {
-            filtered.following.len()
-        } else {
-            data.following.len()
-        };
-
-        clamp_selection(
-            &mut state,
-            &mut data,
-            filter_active,
-            likes_len,
-            playlist_tracks_len,
-            albums_len,
-            following_len,
-        );
-
-        let albums_ref = if filter_active && state.selected_subtab == 2 {
-            &filtered.albums
-        } else {
-            &data.albums
-        };
-        let following_ref = if filter_active && state.selected_subtab == 3 {
-            &filtered.following
-        } else {
-            &data.following
-        };
+        let filtered = settle(&mut state, &mut data);
 
         if state.selected_tab == 0 && state.selected_subtab == 1 {
-            let selected = data.playlists.get(state.selected_row).map(|p| p.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::Playlists).and_then(|i| data.playlists.get(i)).map(|p| p.tracks_uri.clone());
             state.playlist_tracks_fetch.refetch(
                 &mut data.playlist_tracks,
                 &mut data.playlist_tracks_state,
@@ -633,7 +601,7 @@ fn start(
         }
 
         if state.selected_tab == 0 && state.selected_subtab == 2 {
-            let selected = albums_ref.get(state.selected_row).map(|a| a.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::Albums).and_then(|i| data.albums.get(i)).map(|a| a.tracks_uri.clone());
             state.album_tracks_fetch.refetch(
                 &mut data.album_tracks,
                 &mut data.album_tracks_state,
@@ -649,9 +617,7 @@ fn start(
         }
 
         if state.selected_tab == 0 && state.selected_subtab == 3 {
-            let selected = following_ref.get(state.selected_row).map(|a| a.urn.clone());
-            // Switching artists only happens via Shift+Up/Down, which already sets the focus
-            // (Artists, or a stale Published/Likes from before); nothing here should override it.
+            let selected = nav::selected_index(&state, PaneId::Following).and_then(|i| data.following.get(i)).map(|a| a.urn.clone());
             state.following_tracks_fetch.refetch(
                 &mut data.following_tracks,
                 &mut data.following_tracks_state,
@@ -679,7 +645,7 @@ fn start(
         }
 
         if state.selected_tab == 2 {
-            let selected = data.feed.get(state.selected_row);
+            let selected = nav::selected_index(&state, PaneId::Feed).and_then(|i| data.feed.get(i));
             let single = selected.and_then(|a| a.track.clone());
             let key = selected.map(|a| a.key.clone());
             state.feed_tracks_fetch.refetch(
@@ -775,7 +741,7 @@ fn start(
             let query = state.query.clone();
             let filter = state.selected_searchfilter;
 
-            reset_search_rows(&mut state);
+            nav::reset_search(&mut state);
 
             data.search_tracks.clear();
             data.search_tracks_state.select(Some(0));
@@ -834,40 +800,8 @@ fn start(
             }
         }
 
-        if state.selected_tab == 1 {
-            match state.selected_searchfilter {
-                0 => {
-                    if !data.search_tracks.is_empty() && state.selected_row >= data.search_tracks.len() {
-                        state.selected_row = data.search_tracks.len() - 1;
-                    }
-                    data.search_tracks_state.select(Some(state.selected_row));
-                }
-                1 => {
-                    if !data.search_albums.is_empty() && state.selected_row >= data.search_albums.len() {
-                        state.selected_row = data.search_albums.len() - 1;
-                        data.search_albums_state.select(Some(state.selected_row));
-                    }
-                }
-                2 => {
-                    if !data.search_playlists.is_empty()
-                        && state.selected_row >= data.search_playlists.len()
-                    {
-                        state.selected_row = data.search_playlists.len() - 1;
-                        data.search_playlists_state.select(Some(state.selected_row));
-                    }
-                }
-                3 => {
-                    if !data.search_people.is_empty() && state.selected_row >= data.search_people.len() {
-                        state.selected_row = data.search_people.len() - 1;
-                        data.search_people_state.select(Some(state.selected_row));
-                    }
-                }
-                _ => {}
-            }
-        }
-
         if state.selected_tab == 1 && state.selected_searchfilter == 2 {
-            let selected = data.search_playlists.get(state.selected_row).map(|p| p.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::SearchPlaylists).and_then(|i| data.search_playlists.get(i)).map(|p| p.tracks_uri.clone());
             state.search_playlist_tracks_fetch.refetch(
                 &mut data.search_playlist_tracks,
                 &mut data.search_playlist_tracks_state,
@@ -883,7 +817,7 @@ fn start(
         }
 
         if state.selected_tab == 1 && state.selected_searchfilter == 1 {
-            let selected = data.search_albums.get(state.selected_row).map(|a| a.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::SearchAlbums).and_then(|i| data.search_albums.get(i)).map(|a| a.tracks_uri.clone());
             state.search_album_tracks_fetch.refetch(
                 &mut data.search_album_tracks,
                 &mut data.search_album_tracks_state,
@@ -899,9 +833,7 @@ fn start(
         }
 
         if state.selected_tab == 1 && state.selected_searchfilter == 3 {
-            let selected = data.search_people.get(state.selected_row).map(|a| a.urn.clone());
-            // Switching people only happens via Shift+Up/Down, which already sets the focus;
-            // nothing here should override it.
+            let selected = nav::selected_index(&state, PaneId::SearchPeople).and_then(|i| data.search_people.get(i)).map(|a| a.urn.clone());
             state.search_people_tracks_fetch.refetch(
                 &mut data.search_people_tracks,
                 &mut data.search_people_tracks_state,
@@ -1025,6 +957,7 @@ fn start(
             invalidate_screen(&mut terminal);
             last_view = Some(view);
         }
+        nav::sync_tables(&state, &mut data);
         terminal.draw(|frame| {
             render(
                 frame,
@@ -1168,38 +1101,7 @@ fn start(
                 state.preload_triggered_for_track_urn = None;
             }
 
-            let filter_active = is_filter_active(&state);
-            let filtered = build_filtered_views(&state, &data);
-            let likes_len = if filter_active && state.selected_subtab == 0 {
-                filtered.likes.len()
-            } else {
-                data.likes.len()
-            };
-            let playlist_tracks_len = if filter_active && state.selected_subtab == 1 {
-                filtered.playlist_tracks.len()
-            } else {
-                data.playlist_tracks.len()
-            };
-            let albums_len = if filter_active && state.selected_subtab == 2 {
-                filtered.albums.len()
-            } else {
-                data.albums.len()
-            };
-            let following_len = if filter_active && state.selected_subtab == 3 {
-                filtered.following.len()
-            } else {
-                data.following.len()
-            };
-
-            clamp_selection(
-                &mut state,
-                &mut data,
-                filter_active,
-                likes_len,
-                playlist_tracks_len,
-                albums_len,
-                following_len,
-            );
+            let filtered = settle(&mut state, &mut data);
 
             let view = (
                 state.selected_tab,
@@ -1230,7 +1132,7 @@ fn start(
             last_tick = Instant::now();
 
             // Feed is unbounded: only page when the cursor nears the end of what is loaded.
-            if state.selected_tab == 2 && state.selected_row + 10 >= data.feed.len() {
+            if state.selected_tab == 2 && nav::cursor(&state, PaneId::Feed) + 10 >= data.feed.len() {
                 spawn_fetch(Arc::clone(api), tx.clone(), |api| {
                     api.get_activities().map(Msg::Feed)
                 });

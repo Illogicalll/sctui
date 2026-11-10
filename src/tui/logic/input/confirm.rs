@@ -2,7 +2,9 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
 use super::helpers::toggles_binary_choice;
-use crate::tui::logic::state::{AppData, AppState, ConfirmAction, PlaylistEdit, clamp_row};
+use crate::keymap::Action;
+use crate::tui::logic::nav::{self, PaneId};
+use crate::tui::logic::state::{AppData, AppState, ConfirmAction, PlaylistEdit};
 use crate::tui::logic::utils::{bump_track_count, soundcloud_playlist_id_from_tracks_uri};
 
 /// Yes / No popup for destructive playlist actions. Owns every key while open.
@@ -11,7 +13,13 @@ pub(crate) fn handle_confirm_input(
     state: &mut AppState,
     data: &mut AppData,
 ) -> InputOutcome {
+    // Esc, or the key that asked, cancels.
+    let asked = matches!(
+        state.keymap.action(&key),
+        Some(Action::RemoveFromPlaylist | Action::DeletePlaylist)
+    );
     match key.code {
+        _ if asked => state.confirm = None,
         KeyCode::Esc => state.confirm = None,
         KeyCode::Enter => {
             let action = state.confirm.take();
@@ -46,11 +54,6 @@ fn perform(action: ConfirmAction, state: &mut AppState, data: &mut AppData) {
             };
             if data.playlist_tracks_uri.as_deref() == Some(playlist.tracks_uri.as_str()) {
                 data.playlist_tracks.retain(|t| t.track_urn != track.track_urn);
-                clamp_row(
-                    &mut state.selected_playlist_track_row,
-                    &mut data.playlist_tracks_state,
-                    data.playlist_tracks.len(),
-                );
             }
             bump_track_count(playlist, -1);
             state.playlist_edit_queue.push_back(PlaylistEdit::Remove {
@@ -65,7 +68,11 @@ fn perform(action: ConfirmAction, state: &mut AppState, data: &mut AppData) {
                 data.playlist_tracks.clear();
                 data.playlist_tracks_uri = None;
             }
-            clamp_row(&mut state.selected_row, &mut data.playlists_state, data.playlists.len());
+            // Rows below the deleted one move up; keep the cursor on the playlist it was on.
+            let row = nav::cursor_mut(state, PaneId::Playlists);
+            if playlist_idx < *row {
+                *row -= 1;
+            }
             if let Some(playlist_id) = soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri) {
                 state.playlist_edit_queue.push_back(PlaylistEdit::Delete { playlist_id });
             }
@@ -115,5 +122,13 @@ mod tests {
         perform(ConfirmAction::DeletePlaylist { tracks_uri: b }, &mut state, &mut data);
         assert_eq!(data.playlists.len(), 2);
         assert!(state.playlist_edit_queue.is_empty());
+
+        // Deleting a playlist above the cursor keeps the cursor on its playlist.
+        nav::set_location(&mut state, 0, Some(1));
+        *nav::cursor_mut(&mut state, PaneId::Playlists) = 1;
+        let above = data.playlists[0].tracks_uri.clone();
+        perform(ConfirmAction::DeletePlaylist { tracks_uri: above }, &mut state, &mut data);
+        assert_eq!(nav::cursor(&state, PaneId::Playlists), 0);
+        assert_eq!(data.playlists[0].title, "playlist 1");
     }
 }

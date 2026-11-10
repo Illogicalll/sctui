@@ -5,6 +5,7 @@ use crate::config::{SettingRow, Settings};
 use crate::keymap::{Action, Chord};
 use crate::player::{Player, eq};
 use crate::tui::logic::filtering::apply_unplayable_filter;
+use crate::tui::logic::nav;
 use crate::tui::logic::state::{AppData, AppState, HelpPage, visible_tabs};
 
 /// The `?` popup: a modal key editor, with a settings page and an equaliser page
@@ -186,8 +187,7 @@ fn nudge(gains: &mut [i8; eq::BANDS.len()], band: usize, delta: i8) -> Option<i8
 /// Make a just-changed setting take effect on what is already loaded.
 fn apply_settings(state: &mut AppState, data: &mut AppData, player: &Player) {    apply_unplayable_filter(state, data);
     if state.selected_tab >= visible_tabs(state).len() {
-        state.selected_tab = 0;
-        state.selected_row = 0;
+        nav::set_location(state, 0, None);
     }
     player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
 }

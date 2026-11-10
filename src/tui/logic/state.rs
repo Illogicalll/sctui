@@ -1,6 +1,7 @@
 use crate::api::{API, Activity, Album, Artist, Playlist, Track};
 use crate::api::Lyrics;
 use crate::keymap::Keymap;
+use super::nav::PaneId;
 use crate::theme::{Overrides, Theme};
 use ratatui::widgets::TableState;
 use std::collections::{HashSet, VecDeque};
@@ -84,12 +85,12 @@ pub struct QueuedTrack {
     pub user_added: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum FollowingTracksFocus {
-    #[default]
     Published,
     Likes,
     /// The artist name list itself, not either track pane.
+    #[default]
     Artists,
 }
 
@@ -321,32 +322,23 @@ const RAMP_SPAN: Duration = Duration::from_millis(1200);
 /// Fastest step, matching the Alt+Up/Down page jump.
 const MAX_STEP: usize = 10;
 
-/// Which cursor a held movement key is driving. Each is ramped separately, so
-/// moving to another pane mid-hold starts again at one row.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lane {
-    Primary,
-    Secondary,
-    Tertiary,
-}
-
 /// The current run of same-direction movement keypresses, so a held key scrolls
 /// faster the longer it is held.
 #[derive(Default)]
 pub struct MoveAccel {
-    /// Lane, direction, when the run started, and when its last press arrived.
-    run: Option<(Lane, isize, Instant, Instant)>,
+    /// Pane, direction, when the run started, and when its last press arrived.
+    run: Option<(PaneId, isize, Instant, Instant)>,
 }
 
 impl MoveAccel {
-    /// Records a movement press on `lane` in `dir` at `now` and returns how many rows it
-    /// should move. A pause longer than [`HOLD_GAP`], a change of direction, or a change of
-    /// lane starts a new run at one row.
+    /// Records a movement press in pane `lane` in `dir` at `now` and returns how many rows
+    /// it should move. A pause longer than [`HOLD_GAP`], a change of direction, or a change
+    /// of pane starts a new run at one row.
     // ponytail: crossterm events carry no arrival timestamp, so `now` is when the press is
     // handled, not when it was typed. A frame that stalls for longer than HOLD_GAP therefore
     // resets the ramp (it falls back to single rows, never overshoots). Upgrade path: stamp
     // each event with `Instant::now()` in the poll loop and pass that in.
-    pub fn step_rows(&mut self, lane: Lane, dir: isize, now: Instant) -> usize {
+    pub fn step_rows(&mut self, lane: PaneId, dir: isize, now: Instant) -> usize {
         let started = match self.run {
             Some((l, d, started, last))
                 if l == lane && d == dir && now.duration_since(last) <= HOLD_GAP =>
@@ -396,9 +388,16 @@ impl HelpPage {
 pub struct AppState {
     pub selected_tab: usize,
     pub selected_subtab: usize,
+    /// Cursor of the first pane of the location on screen. Like every `*_row` field
+    /// below it is storage for `nav`; read and write cursors through `nav`.
     pub selected_row: usize,
-    pub selected_playlist_row: usize,
-    pub selected_album_row: usize,
+    /// Focused pane index per location, `[main tab][sub-tab]`. Read through `nav::focus`.
+    pub focus: [[usize; 4]; 3],
+    /// `selected_row` of each location that is not on screen, `[main tab][sub-tab]`.
+    pub primary_rows: [[usize; 4]; 3],
+    /// Visible rows of the focused pane, written by the renderer; 0 until it has drawn
+    /// (`nav::page_rows` then answers 10).
+    pub page_rows: usize,
     pub query: String,
     pub selected_searchfilter: usize,
     pub search_needs_fetch: bool,
@@ -471,9 +470,12 @@ pub struct AppState {
     pub help_message: Option<String>,
     /// `config::Loaded::load_failed`: saving the config is refused while set.
     pub config_load_failed: bool,
-    /// Search tab: printable keys go to the query until Enter/Esc.
+    /// Insert mode: keys type into the Search query (Search tab) or the Library
+    /// filter (`search_popup_visible`) until Enter/Esc.
     pub search_typing: bool,
     pub queue_visible: bool,
+    /// Upcoming tracks scrolled off the top of the queue popup.
+    pub queue_scroll: usize,
     pub history_visible: bool,
     pub playlist_picker_visible: bool,
     /// Row in the picker: 0 = "+ New playlist…", then owned playlists in order.
@@ -492,9 +494,13 @@ pub struct AppState {
     pub help_visible: bool,
     pub quit_confirm_visible: bool,
     pub quit_confirm_selected: usize,
+    /// A Library filter exists (being typed or kept); its box is drawn.
     pub search_popup_visible: bool,
     pub search_query: String,
     pub search_matches: Vec<usize>,
+    /// Row and identity (urn / tracks_uri) of the highlighted filtered row as of the last
+    /// loop pass, so the highlight can follow that item when the list changes under it.
+    pub filter_anchor: Option<(usize, String)>,
     pub visualizer_mode: bool,
     pub visualizer_view: VisualizerMode,
     /// Ramp for held Up/Down, so long lists scroll faster the longer the key is held.
@@ -647,16 +653,6 @@ impl AppData {
     }
 }
 
-pub fn table_rows_count(selected_subtab: usize, data: &AppData) -> usize {
-    match selected_subtab {
-        0 => data.likes.len(),
-        1 => data.playlists.len(),
-        2 => data.albums.len(),
-        3 => data.following.len(),
-        _ => 0,
-    }
-}
-
 pub const TAB_TITLES: [&str; 3] = ["Library", "Search", "Feed"];
 pub const SUBTAB_TITLES: [&str; 4] = ["Likes", "Playlists", "Albums", "Following"];
 pub const SEARCHFILTERS: [&str; 4] = ["Tracks", "Albums", "Playlists", "People"];
@@ -679,7 +675,7 @@ mod tests {
         let mut accel = MoveAccel::default();
         let t0 = Instant::now();
         let press = |accel: &mut MoveAccel, dir, ms: u64| {
-            accel.step_rows(Lane::Primary, dir, t0 + Duration::from_millis(ms))
+            accel.step_rows(PaneId::Likes, dir, t0 + Duration::from_millis(ms))
         };
         // Full speed is reached RAMP_DELAY + RAMP_SPAN after the run starts.
         let to_max = (RAMP_DELAY + RAMP_SPAN).as_millis() as u64;
@@ -697,7 +693,7 @@ mod tests {
         let mut grace = MoveAccel::default();
         let grace_rows: Vec<usize> = (0..=RAMP_DELAY.as_millis() as u64)
             .step_by(50)
-            .map(|ms| grace.step_rows(Lane::Primary, 1, t0 + Duration::from_millis(ms)))
+            .map(|ms| grace.step_rows(PaneId::Likes, 1, t0 + Duration::from_millis(ms)))
             .collect();
         assert!(grace_rows.iter().all(|&r| r == 1), "accelerated too early: {grace_rows:?}");
 
@@ -718,11 +714,11 @@ mod tests {
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         let mut lane_ms = reversed;
         for _ in 0..((to_max / 50) + 2) {
-            accel.step_rows(Lane::Secondary, 1, at(lane_ms));
+            accel.step_rows(PaneId::Playlists, 1, at(lane_ms));
             lane_ms += 50;
         }
-        assert_eq!(accel.step_rows(Lane::Secondary, 1, at(lane_ms)), MAX_STEP);
-        assert_eq!(accel.step_rows(Lane::Tertiary, 1, at(lane_ms + 50)), 1);
-        assert_eq!(accel.step_rows(Lane::Secondary, 1, at(lane_ms + 100)), 1);
+        assert_eq!(accel.step_rows(PaneId::Playlists, 1, at(lane_ms)), MAX_STEP);
+        assert_eq!(accel.step_rows(PaneId::PlaylistTracks, 1, at(lane_ms + 50)), 1);
+        assert_eq!(accel.step_rows(PaneId::Playlists, 1, at(lane_ms + 100)), 1);
     }
 }

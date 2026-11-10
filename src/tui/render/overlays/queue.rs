@@ -21,6 +21,7 @@ pub fn render_queue(
     auto_queue: &VecDeque<usize>,
     current_playing_track: Option<Track>,
     previous_playing_track: Option<Track>,
+    scroll: usize,
 ) {
     let popup_area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, popup_area);
@@ -59,14 +60,14 @@ pub fn render_queue(
         rows.push(Row::new(vec!["Now Playing: None", "", ""]));
     }
 
+    // Upcoming tracks, manual queue first; `scroll` of them are off the top.
     let max_rows = popup_area.height.saturating_sub(3) as usize;
-    let remaining_slots = max_rows.saturating_sub(rows.len());
-    let mut remaining = remaining_slots;
-    for queued in manual_queue.iter() {
-        if remaining == 0 {
-            break;
-        }
-        let track = &queued.track;
+    let upcoming = manual_queue
+        .iter()
+        .map(|queued| &queued.track)
+        .chain(auto_queue.iter().filter_map(|idx| queue_tracks.get(*idx)));
+    let scroll = scroll.min((manual_queue.len() + auto_queue.len()).saturating_sub(1));
+    for track in upcoming.skip(scroll).take(max_rows.saturating_sub(rows.len())) {
         let mut row = Row::new(vec![
             truncate_with_ellipsis(&track.title, title_width),
             truncate_with_ellipsis(&track.artists, artist_width),
@@ -76,25 +77,6 @@ pub fn render_queue(
             row = row.style(Style::default().fg(theme::current().dim));
         }
         rows.push(row);
-        remaining -= 1;
-    }
-
-    for idx in auto_queue.iter() {
-        if remaining == 0 {
-            break;
-        }
-        if let Some(track) = queue_tracks.get(*idx) {
-            let mut row = Row::new(vec![
-                truncate_with_ellipsis(&track.title, title_width),
-                truncate_with_ellipsis(&track.artists, artist_width),
-                track.duration.clone(),
-            ]);
-            if !track.is_playable() {
-                row = row.style(Style::default().fg(theme::current().dim));
-            }
-            rows.push(row);
-            remaining -= 1;
-        }
     }
 
     if rows.len() <= 2 {

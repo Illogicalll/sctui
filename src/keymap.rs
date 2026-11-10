@@ -35,10 +35,12 @@ pub enum Action {
     Down,
     PageUp,
     PageDown,
-    SecondaryUp,
-    SecondaryDown,
-    TertiaryUp,
-    TertiaryDown,
+    HalfPageUp,
+    HalfPageDown,
+    Top,
+    Bottom,
+    PaneLeft,
+    PaneRight,
     PlayPause,
     PlaySelected,
     StartStation,
@@ -67,7 +69,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 39] = [
+    pub const ALL: [Action; 41] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
@@ -78,10 +80,12 @@ impl Action {
         Action::Down,
         Action::PageUp,
         Action::PageDown,
-        Action::SecondaryUp,
-        Action::SecondaryDown,
-        Action::TertiaryUp,
-        Action::TertiaryDown,
+        Action::HalfPageUp,
+        Action::HalfPageDown,
+        Action::Top,
+        Action::Bottom,
+        Action::PaneLeft,
+        Action::PaneRight,
         Action::PlayPause,
         Action::PlaySelected,
         Action::StartStation,
@@ -122,10 +126,12 @@ impl Action {
             Action::Down => "down",
             Action::PageUp => "page_up",
             Action::PageDown => "page_down",
-            Action::SecondaryUp => "secondary_up",
-            Action::SecondaryDown => "secondary_down",
-            Action::TertiaryUp => "tertiary_up",
-            Action::TertiaryDown => "tertiary_down",
+            Action::HalfPageUp => "half_page_up",
+            Action::HalfPageDown => "half_page_down",
+            Action::Top => "top",
+            Action::Bottom => "bottom",
+            Action::PaneLeft => "pane_left",
+            Action::PaneRight => "pane_right",
             Action::PlayPause => "play_pause",
             Action::PlaySelected => "play_selected",
             Action::StartStation => "start_station",
@@ -157,22 +163,24 @@ impl Action {
     /// Shown in the help popup and as comments in the dumped config.
     pub fn description(self) -> &'static str {
         match self {
-            Action::Quit => "Quit (Esc also closes an open popup first)",
+            Action::Quit => "Quit",
             Action::Help => "Key reference and editor",
             Action::NextTab => "Next main tab / next visualiser mode",
             Action::PrevTab => "Previous main tab",
             Action::SubTabLeft => "Previous sub-tab / search filter",
             Action::SubTabRight => "Next sub-tab / search filter",
-            Action::Up => "Move selection up",
-            Action::Down => "Move selection down",
-            Action::PageUp => "Move selection up by 10",
-            Action::PageDown => "Move selection down by 10",
-            Action::SecondaryUp => "Second pane up (or up by 10 when there is only one pane)",
-            Action::SecondaryDown => "Second pane down (or down by 10 when there is only one pane)",
-            Action::TertiaryUp => "Move the third pane's selection up (likes of a person)",
-            Action::TertiaryDown => "Move the third pane's selection down (likes of a person)",
+            Action::Up => "Move up in the focused pane",
+            Action::Down => "Move down in the focused pane",
+            Action::PageUp => "Move up a page",
+            Action::PageDown => "Move down a page",
+            Action::HalfPageUp => "Move up half a page",
+            Action::HalfPageDown => "Move down half a page",
+            Action::Top => "Go to the first row",
+            Action::Bottom => "Go to the last row",
+            Action::PaneLeft => "Focus the pane to the left",
+            Action::PaneRight => "Focus the pane to the right",
             Action::PlayPause => "Play / pause",
-            Action::PlaySelected => "Play the selected track",
+            Action::PlaySelected => "Play the selected track / step into the selected row",
             Action::StartStation => "Start a station from the selected track (or artist)",
             Action::NextTrack => "Next track",
             Action::PrevTrack => "Previous track",
@@ -192,7 +200,7 @@ impl Action {
             Action::ToggleVisualizer => "Toggle the visualiser",
             Action::AddToPlaylist => "Add the selected track to a playlist (or a new one)",
             Action::AddToPlaylistPlaying => "Add the currently playing track to a playlist (or a new one)",
-            Action::NewPlaylist => "Create an empty playlist (Playlists tab)",
+            Action::NewPlaylist => "Create an empty playlist",
             Action::RemoveFromPlaylist => "Remove the selected track from your open playlist",
             Action::DeletePlaylist => "Delete the selected playlist of yours",
             Action::Themes => "Choose a colour theme",
@@ -206,7 +214,7 @@ impl Action {
 
 /// The default bindings. Every chord is unique; a test enforces it.
 pub const DEFAULTS: &[(Action, &[&str])] = &[
-    (Action::Quit, &["esc"]),
+    (Action::Quit, &["q"]),
     (Action::Help, &["?"]),
     (Action::NextTab, &["tab"]),
     (Action::PrevTab, &["shift+tab"]),
@@ -216,12 +224,12 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::Down, &["down", "j"]),
     (Action::PageUp, &["pageup"]),
     (Action::PageDown, &["pagedown"]),
-    (Action::SecondaryUp, &["shift+up", "shift+k"]),
-    (Action::SecondaryDown, &["shift+down", "shift+j"]),
-    // macOS sends Option+K / Option+J as ˚ / ∆ unless the terminal maps Option to Alt;
-    // bind both spellings so either setup works.
-    (Action::TertiaryUp, &["alt+up", "alt+k", "˚"]),
-    (Action::TertiaryDown, &["alt+down", "alt+j", "∆"]),
+    (Action::HalfPageUp, &["ctrl+u"]),
+    (Action::HalfPageDown, &["ctrl+d"]),
+    (Action::Top, &["home"]),
+    (Action::Bottom, &["end"]),
+    (Action::PaneLeft, &["["]),
+    (Action::PaneRight, &["]"]),
     (Action::PlayPause, &["space"]),
     (Action::PlaySelected, &["enter"]),
     (Action::StartStation, &["shift+enter"]),
@@ -633,14 +641,26 @@ mod tests {
             assert!(!km.chords(action).is_empty(), "{} has no default key", action.name());
         }
         assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::NONE)), Some(Action::Down));
-        assert_eq!(km.action(&key(KeyCode::Char('J'), KeyModifiers::SHIFT)), Some(Action::SecondaryDown));
         assert_eq!(km.action(&key(KeyCode::Char('?'), KeyModifiers::SHIFT)), Some(Action::Help));
-        assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), Some(Action::Quit));
+        assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::NONE)), Some(Action::Quit));
+        assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), None, "Esc is never a command");
         assert_eq!(km.action(&key(KeyCode::Char('h'), KeyModifiers::SHIFT)), Some(Action::SeekBackward));
-        // Option+J on macOS, with and without the terminal mapping Option to Alt.
-        assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::ALT)), Some(Action::TertiaryDown));
-        assert_eq!(km.action(&key(KeyCode::Char('∆'), KeyModifiers::NONE)), Some(Action::TertiaryDown));
-        assert_eq!(km.action(&key(KeyCode::Char('˚'), KeyModifiers::NONE)), Some(Action::TertiaryUp));
+        // One focused pane: the second- and third-pane keys are gone, focus moves instead.
+        assert_eq!(km.action(&key(KeyCode::Char('J'), KeyModifiers::SHIFT)), None);
+        assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::ALT)), None);
+        assert_eq!(km.action(&key(KeyCode::Char('['), KeyModifiers::NONE)), Some(Action::PaneLeft));
+        assert_eq!(km.action(&key(KeyCode::Char(']'), KeyModifiers::NONE)), Some(Action::PaneRight));
+        assert_eq!(km.action(&key(KeyCode::Home, KeyModifiers::NONE)), Some(Action::Top));
+        assert_eq!(km.action(&key(KeyCode::End, KeyModifiers::NONE)), Some(Action::Bottom));
+        assert_eq!(km.action(&key(KeyCode::Char('d'), KeyModifiers::CONTROL)), Some(Action::HalfPageDown));
+        assert_eq!(km.action(&key(KeyCode::Char('u'), KeyModifiers::CONTROL)), Some(Action::HalfPageUp));
+        for (name, action) in [
+            ("pane_left", Action::PaneLeft), ("pane_right", Action::PaneRight), ("top", Action::Top),
+            ("bottom", Action::Bottom), ("half_page_down", Action::HalfPageDown), ("half_page_up", Action::HalfPageUp),
+        ] {
+            assert_eq!(Action::from_name(name), Some(action));
+        }
+        assert_eq!(Action::from_name("secondary_up"), None);
         // Option+F on macOS, with and without the terminal mapping Option to Alt.
         assert_eq!(km.action(&key(KeyCode::Char('f'), KeyModifiers::ALT)), Some(Action::ToggleLikePlaying));
         assert_eq!(km.action(&key(KeyCode::Char('ƒ'), KeyModifiers::NONE)), Some(Action::ToggleLikePlaying));
@@ -653,7 +673,7 @@ mod tests {
     fn user_config_overrides_unbinds_and_warns() {
         let mut km = Keymap::default();
         let warnings = km.apply_toml(
-            "[keys]\nplay_pause = \"p\"\nnext_track = [\"ctrl+n\", \"n\"]\ndelete_playlist = []\nbogus = \"x\"\nvolume_up = \"esc\"\n",
+            "[keys]\nplay_pause = \"p\"\nnext_track = [\"ctrl+n\", \"n\"]\ndelete_playlist = []\nbogus = \"x\"\nvolume_up = \"q\"\nsecondary_up = \"K\"\n",
         );
         assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), Some(Action::PlayPause));
         assert_eq!(km.action(&key(KeyCode::Char(' '), KeyModifiers::NONE)), None, "old chord dropped");
@@ -661,9 +681,11 @@ mod tests {
         assert!(km.chords(Action::DeletePlaylist).is_empty());
         assert_eq!(km.labels(Action::DeletePlaylist), "unbound");
         assert!(warnings.iter().any(|w| w.contains("unknown action 'bogus'")));
-        // esc stays with quit (earlier in Action::ALL); the conflict is reported.
-        assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), Some(Action::Quit));
-        assert!(warnings.iter().any(|w| w.contains("Esc is bound to both quit and volume_up")));
+        // An action that no longer exists is named, and the rest still loads.
+        assert!(warnings.iter().any(|w| w.contains("unknown action 'secondary_up'")));
+        // q stays with quit (earlier in Action::ALL); the conflict is reported.
+        assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::NONE)), Some(Action::Quit));
+        assert!(warnings.iter().any(|w| w.contains("q is bound to both quit and volume_up")));
         assert!(km.apply_toml("this is not toml").iter().any(|w| w.contains("could not be parsed")));
     }
 

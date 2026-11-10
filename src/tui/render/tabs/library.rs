@@ -9,7 +9,8 @@ use crate::theme;
 
 use crate::api::Track;
 use crate::tui::logic::filtering::{FilteredViews, is_filter_active};
-use crate::tui::logic::state::{AppData, AppState, FollowingTracksFocus, SUBTAB_TITLES};
+use crate::tui::logic::nav;
+use crate::tui::logic::state::{AppData, AppState, SUBTAB_TITLES};
 
 use crate::tui::render::utils::{calculate_min_widths, styled_header, truncate_with_ellipsis};
 
@@ -64,7 +65,8 @@ pub fn render_library(
     } else {
         &data.following
     };
-    let following_focus_is_likes = state.following_tracks_focus == FollowingTracksFocus::Likes;
+    // Index of the focused pane: it alone gets the bright selection bar.
+    let focus = nav::focus(state);
 
     let subchunks = if search_popup_visible {
         Layout::default()
@@ -99,7 +101,8 @@ pub fn render_library(
     frame.render_widget(subtabs_widget, subchunks[0]);
 
     if search_popup_visible {
-        let input = Paragraph::new(state.search_query.to_string())
+        let cursor = if state.search_typing { "▏" } else { "" };
+        let input = Paragraph::new(format!("{}{cursor}", state.search_query))
             .block(
                 Block::default()
                     .title("search")
@@ -198,13 +201,12 @@ pub fn render_library(
         _ => vec![],
     };
 
-    let artists_focused = selected_subtab == 3 && state.following_tracks_focus == FollowingTracksFocus::Artists;
     let rows: Vec<_> = rows
         .into_iter()
         .enumerate()
         .map(|(i, row)| {
             if i == selected_row {
-                if artists_focused {
+                if focus == 0 {
                     row.style(Style::default().bg(theme::current().selection_bg).fg(theme::current().fg))
                 } else {
                     row.style(Style::default().bg(theme::current().muted).fg(theme::current().selection_fg))
@@ -241,7 +243,7 @@ pub fn render_library(
             playlist_tracks,
             track_cells,
             state.selected_playlist_track_row,
-            true,
+            focus == 1,
         );
         return;
     }
@@ -272,7 +274,7 @@ pub fn render_library(
             &data.album_tracks,
             short_track_cells,
             state.selected_album_track_row,
-            true,
+            focus == 1,
         );
         return;
     }
@@ -307,7 +309,7 @@ pub fn render_library(
             &data.following_tracks,
             short_track_cells,
             state.selected_following_track_row,
-            !following_focus_is_likes,
+            focus == 1,
         );
 
         track_table(
@@ -320,7 +322,7 @@ pub fn render_library(
             &data.following_likes_tracks,
             track_cells,
             state.selected_following_like_row,
-            following_focus_is_likes,
+            focus == 2,
         );
         return;
     }

@@ -1,41 +1,20 @@
 use crate::keymap::Action;
 
 use super::InputOutcome;
-use crate::api::Track;
-use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, FollowingTracksFocus, HelpPage, PlaybackSource};
-use crate::player::Player;
+use crate::api::{Album, Artist, Playlist, Track};
+use crate::tui::logic::filtering::build_filtered_views;
+use crate::tui::logic::nav::{self, PaneId};
+use crate::tui::logic::state::{AppData, AppState, ConfirmAction, Engagement, HelpPage, PlaybackSource};
 use crate::tui::logic::utils::{active_tracks, build_queue};
-use crate::tui::logic::utils::build_search_matches;
 use crate::tui::logic::utils::queued_from_current;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
-use super::helpers::{filtered_row, reset_search_rows};
 use super::queue::{handle_add_to_queue, handle_add_next_to_queue, selected_queued};
-
-pub(crate) fn handle_backspace(state: &mut AppState) -> InputOutcome {
-    if state.selected_tab == 1 {
-        state.query.pop();
-        state.search_needs_fetch = true;
-        reset_search_rows(state);
-    }
-    InputOutcome::Continue
-}
 
 /// Commands that are plain state changes; movement, playback and tab actions
 /// are dispatched in `input::run_action`.
-pub(crate) fn run_command(
-    action: Action,
-    state: &mut AppState,
-    data: &mut AppData,
-    player: &Player,
-) -> InputOutcome {
+pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppData) -> InputOutcome {
     match action {
-        Action::VolumeUp => {
-            player.volume_up();
-        }
-        Action::VolumeDown => {
-            player.volume_down();
-        }
         Action::ToggleShuffle => {
             state.shuffle_enabled = !state.shuffle_enabled;
             if let Some(current_idx) = state.current_playing_index {
@@ -53,26 +32,23 @@ pub(crate) fn run_command(
             handle_add_next_to_queue(state, data);
         }
         Action::ToggleLike => {
-            enqueue_like_follow_selected(state, data);
+            toggle_like_selected(state, data);
         }
         Action::ToggleLikePlaying => {
             let playing = queued_from_current(state, data).map(|q| q.track);
             toggle_track_like(playing, state, data);
         }
         Action::Search => {
+            // Insert mode: the query on Search, the filter of the location's filterable
+            // pane (which takes focus) in Library. An existing filter is edited, not cleared.
             if state.selected_tab == 1 {
                 state.search_typing = true;
-            } else if state.selected_tab == 0 {
+            } else if let Some(pane) = nav::filter_pane(state) {
+                if let Some(at) = nav::panes(state).iter().position(|p| *p == pane) {
+                    nav::set_focus(state, at);
+                }
                 state.search_popup_visible = true;
-                state.search_query.clear();
-                state.search_matches = build_search_matches(
-                    state.selected_subtab,
-                    &state.search_query,
-                    &data.likes,
-                    &data.playlist_tracks,
-                    &data.albums,
-                    &data.following,
-                );
+                state.search_typing = true;
             }
         }
         Action::Help => {
@@ -99,30 +75,27 @@ pub(crate) fn run_command(
             }
         }
         Action::NewPlaylist => {
-            if state.selected_tab == 0 && state.selected_subtab == 1 {
-                super::playlist_picker::open_new_playlist_prompt(state);
-            }
+            super::playlist_picker::open_new_playlist_prompt(state);
         }
         Action::RemoveFromPlaylist => {
-            if state.selected_tab == 0 && state.selected_subtab == 1 {
-                let open_playlist = data.playlists.iter().position(|p| {
-                    Some(p.tracks_uri.as_str()) == data.playlist_tracks_uri.as_deref()
-                });
-                let track = filtered_row(state, state.selected_playlist_track_row)
-                    .and_then(|idx| data.playlist_tracks.get(idx).cloned());
-                if let (Some(playlist_idx), Some(track)) = (open_playlist, track)
-                    && data.playlists[playlist_idx].is_owned
-                {
-                    let tracks_uri = data.playlists[playlist_idx].tracks_uri.clone();
-                    state.confirm = Some(ConfirmAction::RemoveTrack { tracks_uri, track });
-                    state.confirm_selected = 1;
-                }
+            let open_playlist = data
+                .playlists
+                .iter()
+                .find(|p| Some(p.tracks_uri.as_str()) == data.playlist_tracks_uri.as_deref());
+            if nav::focused(state) == PaneId::PlaylistTracks
+                && let Some(playlist) = open_playlist.filter(|p| p.is_owned)
+                && let Some(track) = nav::selected_index(state, PaneId::PlaylistTracks)
+                    .and_then(|idx| data.playlist_tracks.get(idx).cloned())
+            {
+                let tracks_uri = playlist.tracks_uri.clone();
+                state.confirm = Some(ConfirmAction::RemoveTrack { tracks_uri, track });
+                state.confirm_selected = 1;
             }
         }
         Action::DeletePlaylist => {
-            if state.selected_tab == 0
-                && state.selected_subtab == 1
-                && let Some(playlist) = data.playlists.get(state.selected_row).filter(|p| p.is_owned)
+            if nav::focused(state) == PaneId::Playlists
+                && let Some(playlist) =
+                    data.playlists.get(nav::cursor(state, PaneId::Playlists)).filter(|p| p.is_owned)
             {
                 state.confirm = Some(ConfirmAction::DeletePlaylist {
                     tracks_uri: playlist.tracks_uri.clone(),
@@ -137,6 +110,7 @@ pub(crate) fn run_command(
         }
         Action::ToggleQueue => {
             state.queue_visible = !state.queue_visible;
+            state.queue_scroll = 0;
             if state.queue_visible
                 && let Some(current_idx) = state.current_playing_index {
                     // In radio mode an empty queue means related tracks are loading;
@@ -150,184 +124,75 @@ pub(crate) fn run_command(
                     }
                 }
         }
-        Action::TertiaryDown => {
-            if state.selected_tab == 0 && state.selected_subtab == 3 {
-                if state.selected_following_like_row + 1 < data.following_likes_tracks.len() {
-                    state.selected_following_like_row += 1;
-                    state.following_tracks_focus = FollowingTracksFocus::Likes;
-                    data.following_likes_state
-                        .select(Some(state.selected_following_like_row));
-                }
-            } else if state.selected_tab == 1 && state.selected_searchfilter == 3
-                && state.search_selected_person_like_row + 1 < data.search_people_likes_tracks.len() {
-                    state.search_selected_person_like_row += 1;
-                    state.search_people_tracks_focus = FollowingTracksFocus::Likes;
-                    data.search_people_likes_state
-                        .select(Some(state.search_selected_person_like_row));
-                }
-        }
-        Action::TertiaryUp => {
-            if state.selected_tab == 0 && state.selected_subtab == 3 {
-                if state.selected_following_like_row > 0 {
-                    state.selected_following_like_row -= 1;
-                    state.following_tracks_focus = FollowingTracksFocus::Likes;
-                    data.following_likes_state
-                        .select(Some(state.selected_following_like_row));
-                }
-            } else if state.selected_tab == 1 && state.selected_searchfilter == 3
-                && state.search_selected_person_like_row > 0 {
-                    state.search_selected_person_like_row -= 1;
-                    state.search_people_tracks_focus = FollowingTracksFocus::Likes;
-                    data.search_people_likes_state
-                        .select(Some(state.search_selected_person_like_row));
-                }
-        }
         _ => {}
     }
     InputOutcome::Continue
 }
 
-fn enqueue_like_follow_selected(state: &mut AppState, data: &mut AppData) {
-    if state.selected_tab == 0 {
-        match state.selected_subtab {
-            0 => {
-                let track = filtered_row(state, state.selected_row).and_then(|idx| data.likes.get(idx));
-                if let Some(track) = track
-                    && let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) {
-                        data.liked_track_urns.remove(&track.track_urn);
-                        state
-                            .engagement_queue
-                            .push_back(Engagement::UnlikeTrack {
-                                track_urn: track.track_urn.clone(),
-                                track_id,
-                            });
-                    }
-            }
-            1 => {
-                if let Some(playlist) = data.playlists.get(state.selected_row)
-                    && let Some(playlist_id) =
-                        soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri)
-                    {
-                        let is_liked = data.liked_playlist_uris.contains(&playlist.tracks_uri);
-                        if is_liked {
-                            data.liked_playlist_uris.remove(&playlist.tracks_uri);
-                            state.engagement_queue.push_back(Engagement::UnlikePlaylist {
-                                tracks_uri: playlist.tracks_uri.clone(),
-                                playlist_id,
-                            });
-                        } else {
-                            data.liked_playlist_uris.insert(playlist.tracks_uri.clone());
-                            let mut liked_playlist = playlist.clone();
-                            liked_playlist.is_owned = false;
-                            state
-                                .engagement_queue
-                                .push_back(Engagement::LikePlaylist {
-                                playlist: liked_playlist,
-                                    playlist_id,
-                                });
-                        }
-                    }
-            }
-            2 => {
-                let album = filtered_row(state, state.selected_row).and_then(|idx| data.albums.get(idx));
-                if let Some(album) = album
-                    && let Some(playlist_id) =
-                        soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri)
-                    {
-                        data.liked_album_uris.remove(&album.tracks_uri);
-                        state.engagement_queue.push_back(Engagement::UnlikeAlbum {
-                            tracks_uri: album.tracks_uri.clone(),
-                            playlist_id,
-                        });
-                    }
-            }
-            3 => {
-                let artist = filtered_row(state, state.selected_row).and_then(|idx| data.following.get(idx));
-                if let Some(artist) = artist
-                    && let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
-                        data.followed_user_urns.remove(&artist.urn);
-                        state.engagement_queue.push_back(Engagement::UnfollowUser {
-                            urn: artist.urn.clone(),
-                            user_id,
-                        });
-                    }
-            }
-            _ => {}
+/// Like/unlike or follow/unfollow the focused pane's selected row: the track in a
+/// tracks pane, the playlist, album or person in a container pane. Never the parent of
+/// a focused track.
+fn toggle_like_selected(state: &mut AppState, data: &mut AppData) {
+    let id = nav::focused(state);
+    let Some(idx) = nav::selected_index(state, id) else { return };
+    match id {
+        PaneId::Playlists => toggle_playlist_like(data.playlists.get(idx).cloned(), state, data),
+        PaneId::SearchPlaylists => toggle_playlist_like(data.search_playlists.get(idx).cloned(), state, data),
+        PaneId::Albums => toggle_album_like(data.albums.get(idx).cloned(), state, data),
+        PaneId::SearchAlbums => toggle_album_like(data.search_albums.get(idx).cloned(), state, data),
+        PaneId::Following => toggle_follow(data.following.get(idx).cloned(), state, data),
+        PaneId::SearchPeople => toggle_follow(data.search_people.get(idx).cloned(), state, data),
+        // A feed item is not something SoundCloud lets you like; its tracks are.
+        PaneId::Feed => {}
+        _ => {
+            let views = build_filtered_views(state, data);
+            toggle_track_like(nav::selected_track(state, data, &views), state, data);
         }
-    } else if state.selected_tab == 1 {
-        match state.selected_searchfilter {
-            0 => toggle_track_like(data.search_tracks.get(state.selected_row).cloned(), state, data),
-            1 => {
-                if let Some(album) = data.search_albums.get(state.selected_row)
-                    && let Some(playlist_id) =
-                        soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri)
-                    {
-                        let is_liked = data.liked_album_uris.contains(&album.tracks_uri);
-                        if is_liked {
-                            data.liked_album_uris.remove(&album.tracks_uri);
-                            state.engagement_queue.push_back(Engagement::UnlikeAlbum {
-                                tracks_uri: album.tracks_uri.clone(),
-                                playlist_id,
-                            });
-                        } else {
-                            data.liked_album_uris.insert(album.tracks_uri.clone());
-                            state.engagement_queue.push_back(Engagement::LikeAlbum {
-                                album: album.clone(),
-                                playlist_id,
-                            });
-                        }
-                    }
-            }
-            2 => {
-                if let Some(playlist) = data.search_playlists.get(state.selected_row)
-                    && let Some(playlist_id) =
-                        soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri)
-                    {
-                        let is_liked = data.liked_playlist_uris.contains(&playlist.tracks_uri);
-                        if is_liked {
-                            data.liked_playlist_uris.remove(&playlist.tracks_uri);
-                            state.engagement_queue.push_back(Engagement::UnlikePlaylist {
-                                tracks_uri: playlist.tracks_uri.clone(),
-                                playlist_id,
-                            });
-                        } else {
-                            data.liked_playlist_uris.insert(playlist.tracks_uri.clone());
-                            state
-                                .engagement_queue
-                                .push_back(Engagement::LikePlaylist {
-                                    playlist: playlist.clone(),
-                                    playlist_id,
-                                });
-                        }
-                    }
-            }
-            3 => {
-                if let Some(artist) = data.search_people.get(state.selected_row)
-                    && let Some(user_id) = soundcloud_id_from_urn(&artist.urn) {
-                        let is_followed = data.followed_user_urns.contains(&artist.urn);
-                        if is_followed {
-                            data.followed_user_urns.remove(&artist.urn);
-                            state.engagement_queue.push_back(Engagement::UnfollowUser {
-                                urn: artist.urn.clone(),
-                                user_id,
-                            });
-                        } else {
-                            data.followed_user_urns.insert(artist.urn.clone());
-                            state.engagement_queue.push_back(Engagement::FollowUser {
-                                artist: artist.clone(),
-                                user_id,
-                            });
-                        }
-                    }
-            }
-            _ => {}
-        }
-    } else if state.selected_tab == 2 {
-        toggle_track_like(data.feed_tracks.get(state.selected_info_row).cloned(), state, data);
     }
 }
 
-/// Like/unlike a track from outside the Likes list, optimistically.
+fn toggle_playlist_like(playlist: Option<Playlist>, state: &mut AppState, data: &mut AppData) {
+    let Some(mut playlist) = playlist else { return };
+    let Some(playlist_id) = soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri) else { return };
+    if data.liked_playlist_uris.remove(&playlist.tracks_uri) {
+        state.engagement_queue.push_back(Engagement::UnlikePlaylist {
+            tracks_uri: playlist.tracks_uri,
+            playlist_id,
+        });
+    } else {
+        data.liked_playlist_uris.insert(playlist.tracks_uri.clone());
+        // The Library row this adds is the liked copy, never an owned playlist.
+        playlist.is_owned = false;
+        state.engagement_queue.push_back(Engagement::LikePlaylist { playlist, playlist_id });
+    }
+}
+
+fn toggle_album_like(album: Option<Album>, state: &mut AppState, data: &mut AppData) {
+    let Some(album) = album else { return };
+    let Some(playlist_id) = soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri) else { return };
+    if data.liked_album_uris.remove(&album.tracks_uri) {
+        state.engagement_queue.push_back(Engagement::UnlikeAlbum {
+            tracks_uri: album.tracks_uri,
+            playlist_id,
+        });
+    } else {
+        data.liked_album_uris.insert(album.tracks_uri.clone());
+        state.engagement_queue.push_back(Engagement::LikeAlbum { album, playlist_id });
+    }
+}
+
+fn toggle_follow(artist: Option<Artist>, state: &mut AppState, data: &mut AppData) {
+    let Some(artist) = artist else { return };
+    let Some(user_id) = soundcloud_id_from_urn(&artist.urn) else { return };
+    if data.followed_user_urns.remove(&artist.urn) {
+        state.engagement_queue.push_back(Engagement::UnfollowUser { urn: artist.urn, user_id });
+    } else {
+        data.followed_user_urns.insert(artist.urn.clone());
+        state.engagement_queue.push_back(Engagement::FollowUser { artist, user_id });
+    }
+}
+
+/// Like/unlike a track, optimistically.
 fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppData) {
     let Some(track) = track else { return };
     let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) else { return };
@@ -342,11 +207,4 @@ fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppD
             .engagement_queue
             .push_back(Engagement::LikeTrack { track, track_id });
     }
-}
-
-pub(crate) fn handle_search_char(c: char, state: &mut AppState) -> InputOutcome {
-    state.query.push(c);
-    state.search_needs_fetch = true;
-    reset_search_rows(state);
-    InputOutcome::Continue
 }
