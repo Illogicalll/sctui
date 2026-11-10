@@ -75,7 +75,7 @@ pub fn draw(
     cover: Option<&mut ThreadProtocol>,
 ) {
     let mut rest = frame.area();
-    let hint_rows = hints::rows(state, rest.height);
+    let hint_rows = hints::rows(state, rest);
     take_bottom(&mut rest, hint_rows);
     let size = player_size(true, frame.area().height);
     let player = take_bottom(&mut rest, size.height());

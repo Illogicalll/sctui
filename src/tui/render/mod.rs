@@ -77,7 +77,7 @@ pub fn render(
     }
 
     // Layouts leave the last row free for the hint line; so does the visualiser.
-    let hint_rows = widgets::hints::rows(state, area.height);
+    let hint_rows = widgets::hints::rows(state, area);
     if state.visualizer_mode {
         render_visualizer(
             frame,
@@ -94,7 +94,10 @@ pub fn render(
     }
     overlays::render_overlays(frame, state, data);
     widgets::toasts::draw(frame, &state.toasts);
-    if hint_rows > 0 {
+    if overlays::wizard::is_strip(state, area) {
+        // The lesson, in the hint line's place.
+        overlays::wizard::draw_strip(frame, Rect { y: area.bottom() - hint_rows, height: hint_rows, ..area }, state);
+    } else if hint_rows > 0 {
         widgets::hints::draw(frame, Rect { y: area.bottom() - 1, height: 1, ..area }, state, data);
     }
 }

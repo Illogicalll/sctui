@@ -17,14 +17,20 @@ use crate::tui::logic::nav::{self, PaneId, PaneKind};
 use crate::tui::logic::state::{AppData, AppState, HelpPage};
 
 use super::{put, put_right, text_width};
+use crate::tui::logic::wizard::Stage;
+use crate::tui::render::overlays::wizard;
 
 /// Terminal rows below which the hint line is not drawn.
 pub const ROWS_HINTS: u16 = 14;
 
-/// Rows a layout leaves free at the bottom of a terminal `height` rows tall: 1, or 0
-/// when the hint line is switched off or there is no room for it.
-pub fn rows(state: &AppState, height: u16) -> u16 {
-    (state.settings.hint_line && height >= ROWS_HINTS) as u16
+/// Rows a layout leaves free at the bottom of a terminal the size of `screen`: 1, or 0
+/// when the hint line is switched off or there is no room for it. The setup wizard's
+/// lesson strip, when the terminal is too small for its card, takes 2 instead.
+pub fn rows(state: &AppState, screen: Rect) -> u16 {
+    if wizard::is_strip(state, screen) {
+        return wizard::STRIP_ROWS;
+    }
+    (state.settings.hint_line && screen.height >= ROWS_HINTS) as u16
 }
 
 /// The keys that apply in the current mode, most useful first, each with a one-word
@@ -43,7 +49,15 @@ pub fn pairs(state: &AppState, data: &AppData, cols: u16) -> Vec<(String, &'stat
     let sides = |what| two(Action::SubTabLeft, Action::SubTabRight, what);
     let (enter, esc) = (|what| fixed("enter", what), |what| fixed("esc", what));
 
-    let mut out = if state.palette.is_some() {
+    let mut out = if state.tour_prompt {
+        vec![sides("choose"), enter("confirm"), esc("no")]
+    } else if let Some(stage) = state.wizard.as_ref().map(|w| w.stage).filter(|s| *s != Stage::Practice) {
+        match stage {
+            Stage::Layout | Stage::Theme => vec![rows("preview"), enter("keep"), esc("skip setup")],
+            Stage::Done => vec![enter("finish")],
+            _ => vec![enter("continue"), esc("skip setup")],
+        }
+    } else if state.palette.is_some() {
         vec![enter("run"), fixed("↑ ↓", "move"), esc("close")]
     } else if state.quit_confirm_visible {
         vec![sides("choose"), enter("confirm"), esc("cancel")]
@@ -302,12 +316,13 @@ mod tests {
         assert!(shown.starts_with(" enter play   a queue"), "{shown:?}");
         let hidden = last(render_text(80, 13, &mut state, &mut data, &views, &np));
         assert!(!hidden.contains("enter play"), "{hidden:?}");
-        assert_eq!((rows(&state, 14), rows(&state, 13)), (1, 0));
+        let tall = |height| Rect::new(0, 0, 80, height);
+        assert_eq!((rows(&state, tall(14)), rows(&state, tall(13))), (1, 0));
         // The setting turns it off at any height, and the layout takes the row back.
         state.settings.hint_line = false;
         let off = render_text(80, 24, &mut state, &mut data, &views, &np);
         assert!(!off.contains("enter play"), "{off}");
-        assert_eq!(rows(&state, 24), 0);
+        assert_eq!(rows(&state, tall(24)), 0);
         // It is drawn last: over the visualiser and under no popup, in its own colours.
         state.settings.hint_line = true;
         (state.visualizer_mode, state.help_visible) = (true, true);

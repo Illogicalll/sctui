@@ -18,14 +18,23 @@ pub(crate) fn open_theme_picker(state: &mut AppState) {
 /// Modal while open. Moving previews the theme; Enter keeps and saves it,
 /// Esc restores what was active before.
 pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
-    let last = Theme::BUILTIN.len() - 1;
     let action = lookup(state, &key);
+    if let Some(theme) = step(key, action, state) {
+        theme::set(theme);
+    }
+    InputOutcome::Continue
+}
+
+/// The picker's state change for one key, and the theme to show as a result (the
+/// preview, or the one to go back to). Applying it is the caller's job: the theme is
+/// process-wide, so tests drive this and never set it. The wizard's theme stage is
+/// this too.
+pub(crate) fn step(key: KeyEvent, action: Option<Action>, state: &mut AppState) -> Option<Theme> {
+    let last = Theme::BUILTIN.len() - 1;
     match (key.code, action) {
         (KeyCode::Esc, _) | (_, Some(Action::Themes)) => {
-            if let Some(previous) = state.theme_picker_previous.take() {
-                theme::set(previous);
-            }
             state.theme_picker_visible = false;
+            return state.theme_picker_previous.take();
         }
         (KeyCode::Enter, _) => {
             let chosen = Theme::BUILTIN[state.theme_picker_selected.min(last)];
@@ -47,15 +56,9 @@ pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> 
         _ => {
             if let Some(next) = list_step(&key, action, state.theme_picker_selected, last) {
                 state.theme_picker_selected = next;
-                preview(state);
+                return Some(Theme::BUILTIN[next].with_overrides(&state.theme_overrides).0);
             }
         }
     }
-    InputOutcome::Continue
-}
-
-fn preview(state: &AppState) {
-    let base = Theme::BUILTIN[state.theme_picker_selected.min(Theme::BUILTIN.len() - 1)];
-    let (resolved, _) = base.with_overrides(&state.theme_overrides);
-    theme::set(resolved);
+    None
 }

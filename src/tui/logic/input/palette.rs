@@ -58,10 +58,7 @@ pub(crate) fn run(command: Command, state: &mut AppState) {
             state.settings.hint_line = !state.settings.hint_line;
             format!("Hint line {}", if state.settings.hint_line { "on" } else { "off" })
         }
-        Command::SetupWizard => {
-            state.wizard_requested = true;
-            return;
-        }
+        Command::SetupWizard => return crate::tui::logic::wizard::start(state),
     };
     match crate::config::save(
         state.config_load_failed,

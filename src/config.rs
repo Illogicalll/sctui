@@ -24,6 +24,8 @@ pub struct Loaded {
     /// partly defaults. `save` refuses while this is set, or it would overwrite
     /// the user's file with them.
     pub load_failed: bool,
+    /// There was no config file at all: a fresh install, which gets the setup wizard.
+    pub fresh: bool,
 }
 
 /// Per-band equaliser gains in dB, edited from the EQ page of the `?` overlay.
@@ -264,7 +266,18 @@ struct ThemeSection {
 
 /// Defaults plus whatever the file overrides. Also installs the theme.
 pub fn load() -> Loaded {
-    load_from(&std::fs::read_to_string(path()).unwrap_or_default())
+    let text = match std::fs::read_to_string(path()) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        // There, but unreadable: not a fresh install.
+        Err(_) => Some(String::new()),
+    };
+    load_text(text.as_deref())
+}
+
+/// [`load`] given the file's text, or `None` when there is no file.
+fn load_text(text: Option<&str>) -> Loaded {
+    Loaded { fresh: text.is_none(), ..load_from(text.unwrap_or_default()) }
 }
 
 fn load_from(text: &str) -> Loaded {
@@ -323,6 +336,7 @@ fn load_from(text: &str) -> Loaded {
         eq: file.eq.clamped(),
         warnings,
         load_failed,
+        fresh: false,
     }
 }
 
@@ -523,6 +537,16 @@ mod tests {
         assert_eq!(row.display(settings), ("on".to_string(), true));
         settings.crossfade_user_skips = false;
         assert_eq!(row.display(settings), ("off".to_string(), false));
+    }
+
+    #[test]
+    fn only_a_missing_file_is_a_fresh_install() {
+        assert!(load_text(None).fresh);
+        // An empty file, or one written before the wizard existed, is an upgrade.
+        assert!(!load_text(Some("")).fresh);
+        let old = load_text(Some("[settings]\ncrossfade = true\n"));
+        assert!(!old.fresh && !old.settings.onboarded && old.settings.layout == Layout::Classic);
+        assert!(load_text(Some("[settings]\nonboarded = true\n")).settings.onboarded);
     }
 
     #[test]

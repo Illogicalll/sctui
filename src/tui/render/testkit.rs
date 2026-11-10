@@ -14,6 +14,7 @@ use crate::tui::logic::filtering::{FilteredViews, build_filtered_views};
 use crate::tui::logic::nav;
 use crate::tui::logic::palette::PaletteState;
 use crate::tui::logic::state::{AppData, AppState, ConfirmAction, HelpPage, PanelPage, PlaybackSource, QueuedTrack};
+use crate::tui::logic::wizard::{Stage, Wizard};
 
 use super::widgets::pane::pane_view;
 use super::widgets::text_width;
@@ -75,6 +76,12 @@ pub const OVERLAYS: &[(&str, Setup)] = &[
     ("history", |s| s.history_visible = true),
     ("palette", |s| s.palette = Some(PaletteState { query: "lay".into(), selected: 1 })),
     ("palette: no match", |s| s.palette = Some(PaletteState { query: WIDE_TITLES[0].into(), selected: 9 })),
+    ("wizard: welcome", |s| s.wizard = Some(Wizard::at(Stage::Welcome))),
+    ("wizard: layout", |s| s.wizard = Some(Wizard { selected: 3, ..Wizard::at(Stage::Layout) })),
+    ("wizard: theme", |s| s.wizard = Some(Wizard::at(Stage::Theme))),
+    ("wizard: practice", |s| s.wizard = Some(Wizard { step: 3, sub: 1, ticked: Some(2), ..Wizard::at(Stage::Practice) })),
+    ("wizard: done", |s| s.wizard = Some(Wizard::at(Stage::Done))),
+    ("wizard: upgrade prompt", |s| s.tour_prompt = true),
 ];
 
 /// Things drawn over every layout that are not overlays: rendered at every size
@@ -416,6 +423,7 @@ mod tests {
         let wants = [
             "Want to Quit", "Delete playlist", "Go to Search", "Setting", "Equaliser", " Theme ", "+ New playlist",
             "Visibility:", "Queue", "History", "› lay▏", "no matching command",
+            "Welcome to sctui", "Miller columns", "catppuccin-mocha", "Tour 4 / 10", "You're set", "Keys have changed",
         ];
         assert_eq!(wants.len(), OVERLAYS.len());
         for ((name, open), want) in OVERLAYS.iter().zip(wants) {

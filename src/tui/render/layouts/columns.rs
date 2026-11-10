@@ -54,7 +54,7 @@ pub fn draw(
 ) {
     let screen = frame.area();
     let mut rest = screen;
-    let hint_rows = hints::rows(state, screen.height);
+    let hint_rows = hints::rows(state, screen);
     take_bottom(&mut rest, hint_rows);
     let size = player_size(false, screen.height);
     let player = take_bottom(&mut rest, size.height());

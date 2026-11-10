@@ -4,6 +4,7 @@ mod history;
 mod palette;
 mod playlist_picker;
 mod theme_picker;
+pub mod wizard;
 pub mod queue;
 mod quit;
 pub mod utils;
@@ -62,7 +63,8 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
     }
 
     if state.theme_picker_visible {
-        theme_picker::render_theme_picker(frame, state.theme_picker_selected, &state.theme_name);
+        let area = utils::centered_rect_fixed(theme_picker::WIDTH, theme_picker::HEIGHT, frame.area());
+        theme_picker::render_theme_picker(frame, area, state.theme_picker_selected, &state.theme_name);
     }
 
     if state.help_visible {
@@ -75,5 +77,11 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
 
     if state.quit_confirm_visible {
         quit::render_quit_confirm(frame, state.quit_confirm_selected);
+    }
+
+    // Last: the lesson card stays readable over the popup a lesson asks for.
+    wizard::render(frame, state);
+    if state.tour_prompt {
+        confirm::render_confirm(frame, wizard::TOUR_PROMPT, state.confirm_selected);
     }
 }

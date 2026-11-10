@@ -19,7 +19,8 @@ OPTIONS:
   -V, --version          print version and exit
   -h, --help             print this help and exit
       --dump-config      print the default config (theme + key bindings) to stdout and exit
-      --no-update-check  don't check GitHub for a newer release on startup";
+      --no-update-check  don't check GitHub for a newer release on startup
+      --setup            run the setup wizard (layout, theme, key tour) again";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -85,7 +86,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    tui::run(&mut api, player, loaded).map_err(|e| anyhow::anyhow!(e))?;
+    tui::run(&mut api, player, loaded, args.iter().any(|a| a == "--setup")).map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())
 }

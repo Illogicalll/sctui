@@ -583,8 +583,11 @@ pub struct AppState {
     pub help_visible: bool,
     /// The command palette, while it is open.
     pub palette: Option<super::palette::PaletteState>,
-    /// The palette's `Setup wizard` command was run; the wizard picks this up.
-    pub wizard_requested: bool,
+    /// The setup wizard, while it is running.
+    pub wizard: Option<super::wizard::Wizard>,
+    /// The one-time "take the tour?" popup for a config that predates the wizard.
+    /// Its Yes / No cursor is `confirm_selected`: no other confirm can be open with it.
+    pub tour_prompt: bool,
     pub quit_confirm_visible: bool,
     pub quit_confirm_selected: usize,
     /// A Library filter exists (being typed or kept); its box is drawn.

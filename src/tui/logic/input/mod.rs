@@ -7,6 +7,7 @@ use crate::tui::logic::filtering::clear_filter;
 use crate::tui::logic::nav;
 use crate::tui::logic::palette::Command;
 use crate::tui::logic::state::{AppData, AppState};
+use crate::tui::logic::wizard as tour;
 
 pub(crate) mod helpers;
 mod quit;
@@ -21,6 +22,7 @@ mod confirm;
 mod playlist_picker;
 mod palette;
 mod queue;
+mod wizard;
 pub(crate) mod commands;
 
 pub enum InputOutcome {
@@ -53,12 +55,17 @@ pub fn handle_key_event(
     player: &Player,
 ) -> InputOutcome {
     let before = mode(state);
-    let outcome = match route(key, state, data) {
+    // The wizard's lessons watch what each key did; they never take a key.
+    let watched = tour::watch(state, data);
+    let routed = route(key, state, data);
+    let action = if let Routed::Action(action) = routed { Some(action) } else { None };
+    let outcome = match routed {
         Routed::Done(outcome) => outcome,
         Routed::Help => help_editor::handle_help_input(key, state, data, player),
         Routed::History => history::handle_history_input(key, state, data, player),
         Routed::Action(action) => run_action(action, state, data, player),
     };
+    tour::observe(state, data, action, watched);
     // A half-typed sequence never survives an overlay opening or closing, or a
     // switch into or out of insert mode.
     if mode(state) != before {
@@ -69,8 +76,9 @@ pub fn handle_key_event(
 
 /// Which mode owns the keyboard: each overlay, and each place that takes typed text.
 /// A new overlay adds its flag here.
-fn mode(state: &AppState) -> [bool; 11] {
+fn mode(state: &AppState) -> [bool; 12] {
     [
+        tour::modal(state),
         state.palette.is_some(),
         state.quit_confirm_visible,
         state.help_visible,
@@ -116,10 +124,19 @@ fn route(key: KeyEvent, state: &mut AppState, data: &mut AppData) -> Routed {
         // ttys only ever emit Press, so this is a no-op there.
         return done;
     }
+    if tour::modal(state) {
+        return Routed::Done(wizard::handle_wizard_input(key, state, data));
+    }
     if state.palette.is_some() {
         // Insert mode: the keymap is never consulted, so nothing can be left pending.
         helpers::clear_pending(state);
-        return match palette::handle_palette_input(key, state) {
+        let command = palette::handle_palette_input(key, state);
+        if command.is_some()
+            && let Some(wizard) = &mut state.wizard
+        {
+            wizard.ran_command();
+        }
+        return match command {
             Some(Command::Action(action)) if state.visualizer_mode && needs_lists(action) => done,
             Some(Command::Action(action)) => Routed::Action(action),
             Some(command) => {
@@ -159,8 +176,11 @@ fn route(key: KeyEvent, state: &mut AppState, data: &mut AppData) -> Routed {
         helpers::clear_pending(state);
         if state.visualizer_mode {
             state.visualizer_mode = false;
-        } else {
+        } else if state.search_popup_visible {
             clear_filter(state);
+        } else if tour::practising(state) {
+            // Nothing else for Esc to close: it skips the rest of the tour.
+            tour::skip(state);
         }
         return done;
     }
@@ -591,7 +611,7 @@ mod tests {
         commands::run_command(Action::Palette, &mut state, &mut data);
         type_into_palette(&mut state, &mut data, "setup wiz");
         press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
-        assert!(state.wizard_requested && state.palette.is_none());
+        assert!(state.wizard.take().is_some() && state.palette.is_none());
 
         // Behind the visualiser a selection action is dropped, as its key would be.
         state.visualizer_mode = true;

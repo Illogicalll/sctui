@@ -28,7 +28,7 @@ pub struct PaletteState {
 }
 
 /// Movement means nothing run from a list, and the palette is already open.
-fn listed(action: Action) -> bool {
+pub(crate) fn listed(action: Action) -> bool {
     !matches!(
         action,
         Action::Up

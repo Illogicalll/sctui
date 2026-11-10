@@ -5,6 +5,7 @@ pub(crate) mod palette;
 pub(crate) mod state;
 pub(crate) mod toast;
 pub(crate) mod utils;
+pub(crate) mod wizard;
 
 use crate::api::{
     Lyrics, fetch_lyrics,
@@ -112,7 +113,7 @@ enum Msg {
     FetchFailed(String),
 }
 
-pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded) -> anyhow::Result<()> {
+pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded, setup: bool) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
     // Lets terminals that speak the kitty keyboard protocol report Shift+Enter; others still
@@ -124,7 +125,7 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loa
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         );
     }
-    let result = start(terminal, api, player, config);
+    let result = start(terminal, api, player, config, setup);
     if enhanced_keys {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     }
@@ -255,6 +256,7 @@ fn start(
     api: &mut Arc<Mutex<API>>,
     player: Player,
     config: crate::config::Loaded,
+    setup: bool,
 ) -> anyhow::Result<()> {
     let mut state = AppState::default();
     state.keymap = config.keymap;
@@ -262,6 +264,7 @@ fn start(
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
     state.config_load_failed = config.load_failed;
+    wizard::on_start(&mut state, config.fresh, setup);
     player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
     state.eq = config.eq;
     crate::player::eq::set(state.eq.gains);
@@ -967,6 +970,9 @@ fn start(
             state.queue_visible,
             state.history_visible,
             state.help_visible,
+            // A layout change moves the cover art; so does each wizard screen.
+            state.settings.layout,
+            state.wizard.as_ref().map(|w| w.stage),
         );
         if last_view != Some(view) {
             invalidate_screen(&mut terminal);
@@ -1130,6 +1136,8 @@ fn start(
                 state.queue_visible,
                 state.history_visible,
                 state.help_visible,
+                state.settings.layout,
+                state.wizard.as_ref().map(|w| w.stage),
             );
             if last_view != Some(view) {
                 invalidate_screen(&mut terminal);

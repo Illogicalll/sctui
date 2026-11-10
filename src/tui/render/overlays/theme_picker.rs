@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -8,14 +8,15 @@ use ratatui::{
 
 use crate::theme::{self, Theme};
 
-use super::utils::centered_rect_fixed;
+/// The size the list wants.
+pub const WIDTH: u16 = 52;
+pub const HEIGHT: u16 = Theme::BUILTIN.len() as u16 + 5;
 
-/// Theme chooser: one row per built-in theme with a swatch of its roles. The
-/// highlighted theme is applied live as a preview.
-pub fn render_theme_picker(frame: &mut Frame, selected: usize, active_name: &str) {
+/// Theme chooser in `popup_area` (centred as a popup; to one side in the setup wizard):
+/// one row per built-in theme with a swatch of its roles. The highlighted theme is
+/// applied live as a preview.
+pub fn render_theme_picker(frame: &mut Frame, popup_area: Rect, selected: usize, active_name: &str) {
     let t = theme::current();
-    let height = Theme::BUILTIN.len() as u16 + 5;
-    let popup_area = centered_rect_fixed(52, height, frame.area());
     crate::tui::render::widgets::clear(frame, popup_area);
 
     let block = Block::default()
