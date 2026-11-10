@@ -1,0 +1,319 @@
+<style>
+  .term { background:#14171c; color:#d7dae0; font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+          font-size:11.5px; line-height:1.22; padding:10px 12px; border-radius:8px; overflow-x:auto;
+          white-space:pre; margin:0.5rem 0 0.25rem; border:1px solid #2a2f3a; }
+  .term i { display:inline-block; width:1ch; text-align:center; font-style:normal; overflow:visible; }
+  .gal-btns { display:flex; flex-wrap:wrap; gap:6px; margin-top:0.75rem; }
+  .gal-btns button { font:inherit; font-size:0.8rem; padding:4px 10px; border-radius:6px; cursor:pointer;
+          border:1px solid var(--border, #8884); background:transparent; color:inherit; }
+  .gal-btns button.on { background:#5f87ff; border-color:#5f87ff; color:#fff; }
+  .gal-note { font-size:0.85rem; color:var(--text-secondary); margin:0.4rem 0 0; max-width:95ch; }
+  .gal-note b { color:var(--text-primary); }
+  .sec { margin-bottom:3rem; }
+  .pain { font-size:0.85rem; margin:0.75rem 0 0 1.1rem; max-width:100ch; }
+  .pain li { margin-bottom:0.3rem; }
+  .jump a { margin-right:1rem; font-size:0.85rem; }
+  .layout-block { margin-top:2rem; padding-top:1rem; border-top:1px solid #8883; }
+  .qol-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:0.6rem; }
+  .qol-grid .option { margin:0; }
+</style>
+
+<h2>sctui — current UI, four layout directions, QOL picks</h2>
+<p class="subtitle">Three sections. Click a layout card and any QOL items you want, then reply in the terminal.</p>
+<p class="jump"><a href="#s-current">1 · Current UI</a><a href="#s-layouts">2 · Layout directions</a><a href="#s-qol">3 · QOL picks</a></p>
+
+<div class="sec" id="s-current">
+  <h3>1 · Current UI (recreated from the render code, 120×32)</h3>
+  <p class="subtitle">Is this an accurate picture of what you have today?</p>
+  <div id="gal-current"></div>
+  <ul class="pain">
+    <li><b>Chrome eats the list.</b> Tab box (3) + sub-tab box (3) + now-playing (7) = 13 rows before any content; Search spends 16. On an 80×24 terminal Likes shows 8 tracks.</li>
+    <li><b>Panes have no focus.</b> Pane 1 moves with ↑↓, pane 2 with Shift+↑↓, pane 3 with Alt+↑↓ (plus the ˚ ∆ macOS fallbacks). Which pane Enter / like / queue acts on is implied by which key you pressed last.</li>
+    <li><b>Almost everything is Shift+letter and nothing on screen says so.</b> 39 actions, zero hints outside the <code>?</code> popup.</li>
+    <li><b><code>?</code> is four things:</b> key reference, key editor, settings and equaliser. Themes live somewhere else again (Shift+O).</li>
+    <li><b>Now-playing bar is 7 rows but says little.</b> No playing/paused/buffering state, no liked state, no up-next; 30% of its width is a decorative sine wave.</li>
+    <li><b>Lists don't show state.</b> Library tables have no ♥ column and no marker for the playing track; Search has ♥ only.</li>
+    <li><b>Queue popup is read-only,</b> history is a separate popup, and neither shows where the queue came from.</li>
+    <li><b>No feedback line.</b> Like, add-to-queue, add-to-playlist and API failures have nowhere to report.</li>
+    <li><b>Inconsistent placement.</b> Library sub-tabs sit above the list, Search filters below it; the Library filter box pushes the table down 3 rows when opened.</li>
+  </ul>
+</div>
+
+<div class="sec" id="s-layouts">
+  <h3>2 · Layout directions</h3>
+  <p class="subtitle">Which skeleton feels right? All four keep your themes, rounded borders and visualiser modes; all four assume a pane-focus model.</p>
+  <div class="options">
+    <div class="option" data-choice="layout-a-tighten" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Tighten</h3><p>Same bones, half the chrome. Smallest change, lowest risk.</p></div></div>
+    <div class="option" data-choice="layout-b-sidebar" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Sidebar</h3><p>Library tree on the left, content in the middle, optional queue on the right.</p></div></div>
+    <div class="option" data-choice="layout-c-columns" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Columns</h3><p>Ranger-style drill-down. One navigation rule for everything.</p></div></div>
+    <div class="option" data-choice="layout-d-player" onclick="toggleSelect(this)"><div class="letter">D</div><div class="content"><h3>Player panel</h3><p>Browser left, permanent now-playing / queue / lyrics panel right.</p></div></div>
+  </div>
+
+  <div class="layout-block"><h3>A · Tighten</h3><div id="gal-a"></div>
+    <div class="pros-cons"><div class="pros"><h4>Pros</h4><ul><li>13 rows of chrome → 7; Likes gains 6 rows</li><li>Every existing screen maps 1:1, so render code is reshuffled not rewritten</li><li>Hint line teaches the keys</li></ul></div>
+    <div class="cons"><h4>Cons</h4><ul><li>Still tab → sub-tab → pane; Following stays three cramped panes</li><li>Queue, history, lyrics remain popups / full-screen modes</li></ul></div></div></div>
+
+  <div class="layout-block"><h3>B · Sidebar</h3><div id="gal-b"></div>
+    <div class="pros-cons"><div class="pros"><h4>Pros</h4><ul><li>Your playlists are one keypress away from anywhere; no tab/sub-tab hop</li><li>Track tables always get the wide pane</li><li>Queue can stay open while browsing</li></ul></div>
+    <div class="cons"><h4>Cons</h4><ul><li>Costs ~26 columns permanently; needs a collapse rule under ~100 cols</li><li>Largest restructure of state: tab/sub-tab indices become one tree selection</li></ul></div></div></div>
+
+  <div class="layout-block"><h3>C · Columns</h3><div id="gal-c"></div>
+    <div class="pros-cons"><div class="pros"><h4>Pros</h4><ul><li>h/l in-out, j/k up-down, everywhere; secondary/tertiary keys disappear</li><li>Following → artist → tracks/likes stops being three squeezed panes</li><li>Scales to deeper things later (artist → album → tracks)</li></ul></div>
+    <div class="cons"><h4>Cons</h4><ul><li>Least familiar for a music player; left/right can no longer switch sub-tabs</li><li>Track columns are narrower while the parent columns are visible</li></ul></div></div></div>
+
+  <div class="layout-block"><h3>D · Player panel</h3><div id="gal-d"></div>
+    <div class="pros-cons"><div class="pros"><h4>Pros</h4><ul><li>Cover art, up-next and lyrics/visualiser visible all the time on wide terminals</li><li>Absorbs the queue and history popups into one place</li><li>No bottom bar: the list runs to the bottom edge</li></ul></div>
+    <div class="cons"><h4>Cons</h4><ul><li>Needs ≥ ~110 cols to pay off; below that it must fall back to A's bar</li><li>Multi-pane views (Following) get tight on the left side</li></ul></div></div></div>
+</div>
+
+<div class="sec" id="s-qol">
+  <h3>3 · QOL picks (independent of layout; pick any)</h3>
+  <p class="subtitle">Which of these would you actually use?</p>
+  <div id="gal-qol"></div>
+  <div class="options qol-grid" data-multiselect style="margin-top:1rem">
+    <div class="option" data-choice="qol-focus" onclick="toggleSelect(this)"><div class="letter">1</div><div class="content"><h3>Pane focus model</h3><p>←/→ (h/l) moves focus between panes, ↑↓ always moves the focused one. Retires Secondary/Tertiary keys and the ˚ ∆ fallbacks. Sub-tabs move to [ ].</p></div></div>
+    <div class="option" data-choice="qol-hints" onclick="toggleSelect(this)"><div class="letter">2</div><div class="content"><h3>Context hint line</h3><p>One dim row at the bottom listing the keys that work on the focused thing, read from the live keymap.</p></div></div>
+    <div class="option" data-choice="qol-markers" onclick="toggleSelect(this)"><div class="letter">3</div><div class="content"><h3>♥ and ▶ in every list</h3><p>Liked column and a marker on the playing row in Library, Feed and Search alike.</p></div></div>
+    <div class="option" data-choice="qol-toast" onclick="toggleSelect(this)"><div class="letter">4</div><div class="content"><h3>Status / toast line</h3><p>"Liked", "Added to queue (3)", "Couldn't load playlist: 429" for a few seconds, sharing the hint row.</p></div></div>
+    <div class="option" data-choice="qol-queue" onclick="toggleSelect(this)"><div class="letter">5</div><div class="content"><h3>Editable queue + history in one popup</h3><p>Move, remove, clear, jump-to; History as a second tab of the same popup.</p></div></div>
+    <div class="option" data-choice="qol-palette" onclick="toggleSelect(this)"><div class="letter">6</div><div class="content"><h3>Command palette</h3><p>One key opens a fuzzy list of every action with its binding. Rare actions stop needing a memorised chord.</p></div></div>
+    <div class="option" data-choice="qol-settings-split" onclick="toggleSelect(this)"><div class="letter">7</div><div class="content"><h3>Split Help from Settings</h3><p><code>?</code> = read-only key cheat sheet. <code>,</code> = Settings with Keys editor, Options, Equaliser and Themes as its pages.</p></div></div>
+    <div class="option" data-choice="qol-playerinfo" onclick="toggleSelect(this)"><div class="letter">8</div><div class="content"><h3>Richer player readout</h3><p>▶/⏸/buffering state, ♥ for the playing track, up-next title, volume as a bar, source ("from Likes").</p></div></div>
+    <div class="option" data-choice="qol-plainkeys" onclick="toggleSelect(this)"><div class="letter">9</div><div class="content"><h3>Unshifted default keys</h3><p>Normal mode has no text entry, so <code>a</code> queue, <code>f</code> like, <code>s</code> shuffle, <code>r</code> repeat, <code>v</code> visualiser. Old Shift bindings stay as aliases.</p></div></div>
+    <div class="option" data-choice="qol-jumps" onclick="toggleSelect(this)"><div class="letter">10</div><div class="content"><h3>Jumps</h3><p><code>g</code>/<code>G</code> top/bottom, and a key to jump to the playing track in its source list.</p></div></div>
+    <div class="option" data-choice="qol-sort" onclick="toggleSelect(this)"><div class="letter">11</div><div class="content"><h3>Sort lists</h3><p>Cycle sort by title / artist / duration / streams / date added, shown as an arrow in the header.</p></div></div>
+    <div class="option" data-choice="qol-responsive" onclick="toggleSelect(this)"><div class="letter">12</div><div class="content"><h3>Responsive breakpoints</h3><p>Under ~100 cols multi-pane views show one pane at a time; under ~24 rows the player collapses to one line.</p></div></div>
+    <div class="option" data-choice="qol-minivis" onclick="toggleSelect(this)"><div class="letter">13</div><div class="content"><h3>Mini visualiser in the player</h3><p>Replace the decorative sine with a small live spectrum fed by the same sample buffer.</p></div></div>
+    <div class="option" data-choice="qol-persist" onclick="toggleSelect(this)"><div class="letter">14</div><div class="content"><h3>Remember session state</h3><p>Volume, shuffle, repeat, last tab and visualiser mode restored on start.</p></div></div>
+  </div>
+</div>
+
+<script>
+(function(){
+const C={fg:'#d7dae0',mut:'#9aa0aa',dim:'#5b6270',acc:'#6fd3d3',sec:'#c678dd',sel:'#5f87ff',selfg:'#ffffff',warn:'#e5c07b',red:'#e06c75',grn:'#98c379'};
+const W=120,H=32;
+class G{
+  constructor(w,h){this.w=w;this.h=h;this.c=[];for(let i=0;i<w*h;i++)this.c.push({ch:' '});}
+  cell(x,y){return (x<0||y<0||x>=this.w||y>=this.h)?null:this.c[y*this.w+x];}
+  set(x,y,ch,st){const c=this.cell(x,y);if(!c)return;c.ch=ch;if(st)Object.assign(c,st);}
+  put(x,y,s,st,max){const a=[...String(s)];const n=max===undefined?a.length:Math.max(0,Math.min(a.length,max));for(let i=0;i<n;i++)this.set(x+i,y,a[i],st);return x+n;}
+  tr(s,w){const a=[...String(s)];return a.length>w&&w>3?a.slice(0,w-3).join('')+'...':a.slice(0,Math.max(0,w)).join('');}
+  fill(x,y,w,h,st){for(let j=0;j<h;j++)for(let i=0;i<w;i++){const c=this.cell(x+i,y+j);if(c)Object.assign(c,st);}}
+  clear(x,y,w,h){for(let j=0;j<h;j++)for(let i=0;i<w;i++){const c=this.cell(x+i,y+j);if(c){c.ch=' ';delete c.fg;delete c.bg;delete c.b;}}}
+  center(x,y,w,s,st){return this.put(x+Math.max(0,Math.floor((w-[...s].length)/2)),y,s,st);}
+  right(x,y,w,s,st){return this.put(x+w-[...s].length,y,s,st);}
+  box(x,y,w,h,o){o=o||{};const st={fg:o.fg||C.fg};
+    for(let i=1;i<w-1;i++){this.set(x+i,y,'─',st);this.set(x+i,y+h-1,'─',st);}
+    for(let j=1;j<h-1;j++){this.set(x,y+j,'│',st);this.set(x+w-1,y+j,'│',st);}
+    this.set(x,y,'╭',st);this.set(x+w-1,y,'╮',st);this.set(x,y+h-1,'╰',st);this.set(x+w-1,y+h-1,'╯',st);
+    if(o.title){const ts=o.tst||{fg:o.fg||C.fg,b:o.tb?1:0};if(o.left)this.put(x+2,y,o.title,ts);else this.center(x,y,w,o.title,ts);}
+    if(o.foot)this.right(x,y+h-1,w-2,o.foot,{fg:C.dim});}
+  tabs(x,y,titles,sel,div){let cx=x;titles.forEach((t,i)=>{cx=this.put(cx+1,y,t,i===sel?{fg:C.acc,b:1}:{fg:C.fg})+1;if(i<titles.length-1)cx=this.put(cx,y,div||'│',{fg:div?C.dim:C.fg});});return cx;}
+  // table inside a box. cols:[{t,p}|{t,w}], rows: arrays or {c:[],dim:1}
+  table(x,y,w,h,cols,rows,o){o=o||{};if(!o.nobox)this.box(x,y,w,h,{title:o.title,fg:o.bfg,left:o.left,foot:o.foot,tst:o.tst});
+    const ix=x+1,iw=w-2;const fixed=cols.reduce((a,c)=>a+(c.w||0),0);const rem=iw-(cols.length-1)-fixed;
+    const ws=cols.map(c=>c.w||Math.floor(rem*c.p/100));let cx=ix;const xs=ws.map(v=>{const r=cx;cx+=v+1;return r;});
+    cols.forEach((c,i)=>this.put(xs[i],y+1,this.tr(c.t,ws[i]),{fg:C.sec,b:1},ws[i]));
+    const max=h-3;rows.slice(0,max).forEach((r,ri)=>{const cells=r.c||r;const yy=y+2+ri;let st={fg:r.dim?C.dim:(r.fg||C.fg)};
+      if(ri===o.sel){st=o.focus===false?{bg:C.mut,fg:C.selfg}:{bg:C.sel,fg:C.selfg};this.fill(ix,yy,iw,1,st);}
+      cells.forEach((v,i)=>{let s2=st;if(ri!==o.sel&&(v==='♥'||v==='▶'))s2={fg:v==='♥'?C.red:C.acc};this.put(xs[i],yy,this.tr(v,ws[i]),s2,ws[i]);});});}
+  html(){let out='';for(let y=0;y<this.h;y++){let run='',key=null;const flush=()=>{if(run==='')return;out+=key?'<span style="'+key+'">'+run+'</span>':run;run='';};
+      for(let x=0;x<this.w;x++){const c=this.c[y*this.w+x];const k=(c.fg?'color:'+c.fg+';':'')+(c.bg?'background:'+c.bg+';':'')+(c.b?'font-weight:700;':'');
+        if(k!==key){flush();key=k;}
+        const cp=c.ch.codePointAt(0);let ch=c.ch==='<'?'&lt;':c.ch==='&'?'&amp;':c.ch;
+        if(cp>126&&!(cp>=0x2500&&cp<=0x259f))ch='<i>'+ch+'</i>';run+=ch;}
+      flush();out+='\n';}return out;}
+}
+const T=[
+ ['10 - Belfast','ORBITAL','08:09','187.37K'],['C418 - Warmth','IndexForPara','03:58','60.41K'],['C418 - Biome Fest','IndexForPara','06:17','12.01K'],
+ ['C418 - Taswell','IndexForPara','08:35','11.36K'],['I Remember (Vocal Mix)','deadmau5, Kaskade','09:53','354.46K'],["god's chariots - oklou",'oklou','02:42','1.12K'],
+ ['tokyona - Perpetual Descent','Sickredsofa','04:48','187.46K'],["Waeys - I Don't Wanna Know (feat. Nathan Smoker & Verbz)",'Waeys','03:35','10.75K'],
+ ['Alberto Balsalm','Aphex Twin','05:10','330.79K'],['Big Bass Vs Michelle Narine - What You Do (Tommy Mc Remix) [FREE DOWNLOAD]','Tommy Mc','03:06','8.41K'],
+ ['On Melancholy Hill','Gorillaz','03:53','424.64K'],['November Has Come','Gorillaz, MF DOOM','02:45','180.10K'],['Starman (2012 Remaster)','David Bowie','04:14','3.10M'],
+ ['Paint Me A Picture','Magdalena Bay','03:51','5.01K'],['Human Happens','Magdalena Bay','04:03','7.61K'],['2hollis - nice [cross rebirth]','cross','03:05','197.14K'],
+ ['Illegal + Nia Archives','PinkPantheress','02:40','173.68K'],['Stateside + Kylie Minogue','PinkPantheress','02:48','28.13K'],['All I Am','Ninajirachi','03:02','91.48K'],
+ ['Soulstice Colour','A.n.a.s.t.a.s.i.a','05:03','3.73K'],['BICEP, ELIZA | CHROMA 008 TANGZ','BICEP, ELIZA','05:12','73.56K'],['Soulstice - Fall Into You','Soulstice','05:02','5.74K'],
+ ['Everlong','Foo Fighters','04:10','30.09M'],['Furney & Tayla - Moodrain','TAYLA.','06:37','2.85K'],['Coco Bryce - Trust Issues','cocobrycebeats','05:18','55.17K'],
+ ['Star Eyes','Magdalena Bay','03:34','8.33K'],['Second Sleep','Magdalena Bay','04:48','11.37K'],['fakemink - blow me (prod @mag)','mag','02:10','1.46M']];
+const PL=[['late night','42','3:02:11'],['rave tunes','118','9:40:02'],['dnb / jungle','67','5:12:48'],['ambient','31','2:44:10'],['gym','54','3:21:37'],['to sort','203','14:08:55'],['Hyperpop Essentials','50','2:31:09']];
+const PPL=['Aphex Twin','BICEP','Magdalena Bay','Ninajirachi','oklou','PinkPantheress','Sickredsofa','Soulstice','TAYLA.','Waeys'];
+const TC=[{t:'Title',p:55},{t:'Artist(s)',p:25},{t:'Duration',p:10},{t:'Streams',p:10}];
+const SC=[{t:'Title',p:55},{t:'Duration',p:25},{t:'Streams',p:20}];
+const short=r=>[r[0],r[2],r[3]];
+const marked=(rows,play,liked)=>rows.map((r,i)=>[i===play?'▶':(liked&&liked(i)?'♥':''),...r]);
+const MC=[{t:'',w:1},{t:'Title',p:54},{t:'Artist(s)',p:25},{t:'Duration',p:10},{t:'Streams',p:11}];
+
+function sine(g,x,y,w,h){for(let i=0;i<w;i++){const v=Math.round((Math.sin(i*0.55)+1)/2*(h-1));g.set(x+i,y+v,'·',{fg:C.acc});}}
+function cover(g,x,y,w,h){const cols=['#7b1e22','#a12a2e','#c9c4c0','#8f2327','#5e171a'];for(let j=0;j<h;j++)for(let i=0;i<w;i++){const d=Math.hypot((i-w/2+0.5)/w,(j-h/2+0.5)/h);g.fill(x+i,y+j,1,1,{bg:d<0.17?cols[2]:d<0.38?cols[1]:(i+j)%5===0?cols[4]:cols[0]});}}
+function gauge(g,x,y,w,ratio,label){const f=Math.round(w*ratio);g.fill(x,y,f,1,{bg:C.acc,fg:'#14171c'});g.fill(x+f,y,w-f,1,{bg:C.sel,fg:C.selfg});g.center(x,y,w,label);}
+function bar(g,x,y,w,ratio){const f=Math.round(w*ratio);for(let i=0;i<w;i++)g.set(x+i,y,i<f?'━':'─',{fg:i<f?C.acc:C.dim});}
+
+// ---------- current UI ----------
+function curChrome(g,tab){g.box(0,0,W,3,{title:'sctui',tb:1});g.tabs(1,1,['Library','Search','Feed'],tab);}
+function curNP(g){const y=H-7,sw=18,mw=W-2*sw;sine(g,0,y,sw,7);sine(g,W-sw,y,sw,7);g.box(sw,y,mw,7);cover(g,sw+2,y+1,12,5);
+  g.center(sw+19,y+1,mw-34,'I Remember (Vocal Mix)',{b:1});g.center(sw+19,y+3,mw-34,'deadmau5, Kaskade');gauge(g,sw+19,y+5,mw-34,0.24,'02:21 / 09:53');
+  g.put(sw+mw-11,y+3,'shf:   ✔',{b:1});g.put(sw+mw-11,y+4,'vol: 1.0',{b:1});g.put(sw+mw-11,y+5,'rep:   ×',{b:1});}
+function curLib(sub){const g=new G(W,H);curChrome(g,0);g.box(0,3,W,3);g.tabs(1,4,['Likes','Playlists','Albums','Following'],sub);curNP(g);return g;}
+function curLikes(){const g=curLib(0);g.table(0,6,W,H-13,TC,T,{sel:4});return g;}
+function curPlaylists(){const g=curLib(1);const lw=40;g.table(0,6,lw,H-13,[{t:'Name',p:70},{t:'No. Songs',p:15},{t:'Duration',p:15}],PL,{sel:1,focus:false});
+  g.table(lw,6,W-lw,H-13,TC,T.slice(6),{sel:2});return g;}
+function curFollowing(){const g=curLib(3);const a=24,b=48;g.table(0,6,a,H-13,[{t:'Name',p:100}],PPL.map(p=>[p]),{sel:2,focus:false});
+  g.table(a,6,b,H-13,[{t:'Title',p:70},{t:'Duration',p:15},{t:'Streams',p:15}],T.filter(t=>t[1]==='Magdalena Bay').map(short),{sel:1,title:'tracks'});
+  g.table(a+b,6,W-a-b,H-13,TC,T.slice(8,20),{sel:0,focus:false,title:'liked'});return g;}
+function curSearch(){const g=new G(W,H);curChrome(g,1);g.box(0,3,W,3,{title:'search'});g.center(0,4,W,'magdalena bay');
+  g.table(0,6,W,H-16,[{t:'♥',w:1},{t:'Title',p:53},{t:'Artist(s)',p:26},{t:'Duration',p:11},{t:'Streams',p:10}],
+    marked(T.filter(t=>/Magdalena|Gorillaz|Pink/.test(t[1])),-1,i=>i<4),{sel:1});
+  g.box(0,H-10,W,3,{title:'filter'});['Tracks','Albums','Playlists','People'].forEach((f,i)=>g.center(1+i*30,H-9,28,f,i===0?{fg:C.acc,b:1}:null));
+  [30,60,90].forEach(x=>g.set(x,H-9,'│'));curNP(g);return g;}
+function curFeed(){const g=new G(W,H);curChrome(g,2);const lw=48;
+  g.table(0,3,lw,H-10,[{t:'User',p:40},{t:'Action',p:20},{t:'Media Type',p:25},{t:'Age',p:15}],
+    [['Ninajirachi','posted','track','2h'],['BICEP','reposted','track','5h'],['Magdalena Bay','posted','album','1d'],['oklou','posted','track','2d'],['TAYLA.','reposted','playlist','3d'],['Waeys','posted','track','4d'],['Soulstice','posted','track','6d']],{sel:2,title:'activity'});
+  g.table(lw,3,W-lw,H-10,TC,T.filter(t=>t[1]==='Magdalena Bay'),{sel:0,focus:false,title:'info'});curNP(g);return g;}
+function curQueue(){const g=curLikes();const w=84,h=19,x=18,y=6;g.clear(x,y,w,h);
+  const rows=[{c:['10 - Belfast','ORBITAL','08:09'],dim:1},...T.slice(4,16).map(r=>[r[0],r[1],r[2]])];
+  g.table(x,y,w,h,[{t:'Title',p:65},{t:'Artist',p:25},{t:'Duration',p:10}],rows,{sel:1,title:'Queue'});return g;}
+function curHelp(){const g=curLikes();const w=92,h=25,x=14,y=3;g.clear(x,y,w,h);g.box(x,y,w,h);
+  const tx=x+Math.floor((w-27)/2);g.tabs(tx,y+1,['Keys','Settings','Equaliser'],0);for(let i=1;i<w-1;i++)g.set(x+i,y+2,'─');
+  const rows=[['Quit (Esc also closes an open popup first)','Esc'],['Key reference and editor','?'],['Next main tab / next visualiser mode','Tab'],['Previous main tab','Shift+Tab'],['Previous sub-tab / search filter','Left, h'],['Next sub-tab / search filter','Right, l'],['Move selection up','Up, k'],['Move selection down','Down, j'],['Move selection up by 10','PageUp'],['Move selection down by 10','PageDown'],['Second pane up (or up by 10 when there is only one pane)','Shift+Up, Shift+k'],['Second pane down (or down by 10 when there is only one pane)','Shift+Down, Shift+j'],["Move the third pane's selection up (likes of a person)",'Alt+Up, Alt+k, ˚'],["Move the third pane's selection down (likes of a person)",'Alt+Down, Alt+j, ∆'],['Play / pause','Space'],['Play the selected track','Enter'],['Start a station from the selected track (or artist)','Shift+Enter']];
+  g.table(x,y+2,w,h-5,[{t:'Action',p:62},{t:'Keys',p:38}],rows,{sel:10,nobox:1});
+  g.center(x,y+h-3,w,'Enter: add key   Backspace: unbind   r: default   ↑↓: move   Tab: page   Esc: close   ·  saved to',{fg:C.dim});
+  g.center(x,y+h-2,w,'~/.config/sctui/config.toml',{fg:C.dim});return g;}
+
+// ---------- shared new pieces ----------
+function hint(g,y,pairs,msg){let x=1;pairs.forEach(([k,d])=>{x=g.put(x,y,k,{fg:C.acc,b:1});x=g.put(x+1,y,d,{fg:C.dim})+3;});if(msg)g.right(0,y,g.w-1,msg,{fg:C.grn});}
+function player(g,x,y,w,o){o=o||{};g.box(x,y,w,4,{fg:C.dim});cover(g,x+1,y+1,5,2);const ix=x+8;
+  let cx=g.put(ix,y+1,'▶',{fg:C.acc,b:1});cx=g.put(cx+2,y+1,'I Remember (Vocal Mix)',{b:1});cx=g.put(cx+1,y+1,'· deadmau5, Kaskade',{fg:C.mut});g.put(cx+2,y+1,'♥',{fg:C.red});
+  g.right(x,y+1,w-2,'⇄ on   ↻ off   vol ▮▮▮▮▮▮▮▯▯▯',{fg:C.fg});
+  g.put(ix,y+2,'02:21',{fg:C.mut});const bw=Math.floor(w*0.45);bar(g,ix+6,y+2,bw,0.24);g.put(ix+7+bw,y+2,'09:53',{fg:C.mut});
+  g.right(x,y+2,w-2,"next › god's chariots - oklou",{fg:C.dim});}
+const HK=[['enter','play'],['a','queue'],['n','play next'],['f','like'],['t','playlist'],['s','station'],['/','filter'],['q','queue'],['?','keys']];
+
+// ---------- A: tighten ----------
+function aHead(g,tab,sub,subs,filter){let x=g.put(1,0,'sctui',{fg:C.acc,b:1});x=g.put(x+2,0,'│',{fg:C.dim});
+  ['Library','Search','Feed'].forEach((t,i)=>{x=g.put(x+2,0,(i+1)+' ',{fg:C.dim});x=g.put(x,0,t,i===tab?{fg:C.acc,b:1}:null);});
+  g.right(0,0,W-1,', settings   ? keys',{fg:C.dim});
+  let sx=1;(subs||['Likes','Playlists','Albums','Following']).forEach((t,i)=>{if(i===sub){g.fill(sx,1,[...t].length+2,1,{bg:C.acc,fg:'#14171c',b:1});}sx=g.put(sx+1,1,t,i===sub?{bg:C.acc,fg:'#14171c',b:1}:{fg:C.mut})+2;});
+  g.put(sx+1,1,'[ ]',{fg:C.dim});g.right(0,1,W-1,filter||'/ filter',{fg:filter?C.fg:C.dim});}
+function aLikes(){const g=new G(W,H);aHead(g,0,0);g.table(0,2,W,H-7,MC,marked(T,4,i=>i%3!==1),{sel:6,left:1,title:' Likes ',foot:' 7 / 1,204 ',bfg:C.acc,tst:{fg:C.acc,b:1}});player(g,0,H-5,W);hint(g,H-1,HK);return g;}
+function aPlaylists(){const g=new G(W,H);aHead(g,0,1);const lw=36;
+  g.table(0,2,lw,H-7,[{t:'Name',p:72},{t:'Songs',p:28}],PL.map(p=>[p[0],p[1]]),{sel:1,focus:false,left:1,title:' Playlists ',bfg:C.dim});
+  g.table(lw,2,W-lw,H-7,MC,marked(T.slice(2),2,i=>i%2===0),{sel:5,left:1,title:' rave tunes · 118 tracks · 9:40:02 ',foot:' 6 / 118 ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  player(g,0,H-5,W);hint(g,H-1,[['←→','pane'],['enter','play'],['a','queue'],['f','like'],['d','remove'],['t','playlist'],['/','filter'],['?','keys']],'✓ Added to queue (3)');return g;}
+function aSearch(){const g=new G(W,H);aHead(g,1,0,['Tracks','Albums','Playlists','People'],'/ magdalena bay▏');
+  g.table(0,2,W,H-7,MC,marked(T.filter(t=>/Magdalena|Gorillaz|Pink/.test(t[1])),-1,i=>i<4),{sel:1,left:1,title:' Results for "magdalena bay" ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  player(g,0,H-5,W);hint(g,H-1,[['enter','search'],['esc','stop typing'],['[ ]','filter type']]);return g;}
+
+// ---------- B: sidebar ----------
+function bSide(g,sel,focus){const w=26,h=H-5;g.box(0,0,w,h,{fg:focus?C.acc:C.dim,title:' sctui ',left:1,tst:{fg:C.acc,b:1}});
+  const items=[['LIBRARY',0],['♥ Likes',1],['≡ Playlists',1],['  late night',2],['  rave tunes',2],['  dnb / jungle',2],['  ambient',2],['  gym',2],['  to sort',2],['◉ Albums',1],['☺ Following',1],['',0],['DISCOVER',0],['/ Search',1],['~ Feed',1],['',0],['SESSION',0],['↺ History',1]];
+  items.forEach(([t,k],i)=>{const y=1+i;if(k===0){g.put(2,y,t,{fg:C.sec,b:1});return;}
+    if(i===sel){const st=focus?{bg:C.sel,fg:C.selfg}:{bg:C.mut,fg:C.selfg};g.fill(1,y,w-2,1,st);g.put(2,y,t,st);}else g.put(2,y,t,{fg:k===2?C.mut:C.fg});});return w;}
+function bMain(){const g=new G(W,H);const sw=bSide(g,4,false);
+  g.table(sw,0,W-sw,H-5,MC,marked(T.slice(2),2,i=>i%2===0),{sel:5,left:1,title:' rave tunes · 118 tracks · 9:40:02 ',foot:' 6 / 118 ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  player(g,0,H-5,W);hint(g,H-1,[['←→','pane'],['enter','play'],['a','queue'],['f','like'],['d','remove'],['/','filter'],['q','queue panel'],['?','keys']]);return g;}
+function bQueue(){const g=new G(W,H);const sw=bSide(g,1,false),qw=34;
+  g.table(sw,0,W-sw-qw,H-5,[{t:'',w:1},{t:'Title',p:60},{t:'Artist(s)',p:28},{t:'Time',p:12}],marked(T,4,i=>i%3!==1).map(r=>r.slice(0,4)),{sel:6,left:1,title:' Likes ',foot:' 7 / 1,204 ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  const qx=W-qw;g.box(qx,0,qw,H-5,{fg:C.dim,title:' Up next ',left:1});
+  g.put(qx+2,1,'QUEUED BY YOU',{fg:C.sec,b:1});['Alberto Balsalm','On Melancholy Hill','All I Am'].forEach((t,i)=>{g.put(qx+2,2+i,(i+1)+'',{fg:C.dim});g.put(qx+4,2+i,g.tr(t,qw-6));});
+  g.put(qx+2,6,'FROM LIKES · SHUFFLED',{fg:C.sec,b:1});T.slice(10,24).forEach((t,i)=>{g.put(qx+2,7+i,(i+4)+'',{fg:C.dim});g.put(qx+5,7+i,g.tr(t[0],qw-7),{fg:C.mut});});
+  player(g,0,H-5,W);hint(g,H-1,[['←→','pane'],['enter','play'],['a','queue'],['f','like'],['/','filter'],['q','hide queue'],['?','keys']]);return g;}
+function bFollowing(){const g=new G(W,H);const sw=bSide(g,10,false),aw=24;
+  g.table(sw,0,aw,H-5,[{t:'Name',p:100}],PPL.map(p=>[p]),{sel:2,focus:false,left:1,title:' Following ',bfg:C.dim});
+  const x=sw+aw,w=W-x;g.box(x,0,w,H-5,{fg:C.acc});g.tabs(x+1,0,[' Tracks ',' Liked ',' Reposts '],0);
+  g.table(x,0,w,H-5,MC,marked(T.filter(t=>t[1]==='Magdalena Bay'),-1,i=>i<2),{sel:1,nobox:1});
+  player(g,0,H-5,W);hint(g,H-1,[['←→','pane'],['[ ]','tracks / liked'],['enter','play'],['s','station'],['f','follow'],['?','keys']]);return g;}
+
+// ---------- C: columns ----------
+function cCrumb(g,parts){let x=g.put(1,0,'sctui',{fg:C.acc,b:1});parts.forEach((p,i)=>{x=g.put(x+1,0,'›',{fg:C.dim});x=g.put(x+1,0,p,i===parts.length-1?{b:1}:{fg:C.mut});});g.right(0,0,W-1,'/ search   , settings   ? keys',{fg:C.dim});}
+function cList(g,x,w,title,items,sel,focus){g.box(x,1,w,H-6,{fg:focus?C.acc:C.dim,title:' '+title+' ',left:1,tst:{fg:focus?C.acc:C.mut,b:focus?1:0}});
+  items.forEach((t,i)=>{const y=2+i;const st=i===sel?(focus?{bg:C.sel,fg:C.selfg}:{bg:C.mut,fg:C.selfg}):{fg:C.fg};if(i===sel)g.fill(x+1,y,w-2,1,st);g.put(x+2,y,g.tr(t[0],w-8),st);if(t[1])g.right(x,y,w-2,t[1],i===sel?st:{fg:C.dim});});}
+function cOne(){const g=new G(W,H);cCrumb(g,['Library','Playlists']);
+  cList(g,0,20,'Library',[['Likes','›'],['Playlists','›'],['Albums','›'],['Following','›'],['Feed','›'],['History','›']],1,false);
+  cList(g,20,30,'Playlists',PL.map(p=>[p[0],p[1]+' ›']),1,true);
+  g.table(50,1,W-50,H-6,[{t:'',w:1},{t:'Title',p:62},{t:'Artist(s)',p:26},{t:'Time',p:12}],marked(T.slice(2),2,i=>i%2===0).map(r=>r.slice(0,4)),{left:1,title:' rave tunes · 118 tracks ',bfg:C.dim,tst:{fg:C.mut}});
+  player(g,0,H-5,W);hint(g,H-1,[['h l','out / in'],['j k','move'],['enter','play all'],['a','queue all'],['f','like'],['x','delete'],['c','new'],['?','keys']]);return g;}
+function cTwo(){const g=new G(W,H);cCrumb(g,['Library','Playlists','rave tunes']);
+  cList(g,0,24,'Playlists',PL.map(p=>[p[0],'›']),1,false);const iw=30;
+  g.table(24,1,W-24-iw,H-6,[{t:'',w:1},{t:'Title',p:60},{t:'Artist(s)',p:28},{t:'Time',p:12}],marked(T.slice(2),2,i=>i%2===0).map(r=>r.slice(0,4)),{sel:5,left:1,title:' rave tunes · 118 tracks ',foot:' 6 / 118 ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  const x=W-iw;g.box(x,1,iw,H-6,{fg:C.dim,title:' Track ',left:1,tst:{fg:C.mut}});cover(g,x+5,3,20,8);
+  g.center(x,12,iw,g.tr("Waeys - I Don't Wanna Know",iw-4),{b:1});g.center(x,13,iw,'Waeys',{fg:C.mut});
+  [['Duration','03:35'],['Streams','10.75K'],['Liked','♥ yes'],['In playlists','rave tunes, gym']].forEach(([k,v],i)=>{g.put(x+2,15+i,k,{fg:C.dim});g.right(x,15+i,iw-2,v);});
+  [['l','artist page'],['s','start station'],['t','add to playlist']].forEach(([k,v],i)=>{const cx=g.put(x+2,20+i,k,{fg:C.acc,b:1});g.put(cx+1,20+i,v,{fg:C.dim});});
+  player(g,0,H-5,W);hint(g,H-1,[['h l','out / in'],['j k','move'],['enter','play'],['a','queue'],['f','like'],['d','remove'],['/','filter'],['?','keys']]);return g;}
+function cThree(){const g=new G(W,H);cCrumb(g,['Library','Following','Magdalena Bay','Tracks']);
+  cList(g,0,24,'Following',PPL.map(p=>[p,'›']),2,false);cList(g,24,22,'Magdalena Bay',[['Tracks','38 ›'],['Liked','412 ›'],['Albums','4 ›'],['Playlists','9 ›'],['Station','▶']],0,false);
+  g.table(46,1,W-46,H-6,[{t:'',w:1},{t:'Title',p:66},{t:'Time',p:16},{t:'Streams',p:18}],marked(T.filter(t=>t[1]==='Magdalena Bay').map(short),-1,i=>i<2),{sel:1,left:1,title:' Tracks ',foot:' 2 / 38 ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  player(g,0,H-5,W);hint(g,H-1,[['h l','out / in'],['j k','move'],['enter','play'],['a','queue'],['f','like'],['s','station'],['?','keys']]);return g;}
+
+// ---------- D: player panel ----------
+function dPanel(g,mode){const pw=44,x=W-pw,h=H-1;g.box(x,0,pw,h,{fg:C.dim,title:' Now playing ',left:1,tst:{fg:C.mut}});cover(g,x+10,2,24,9);
+  g.center(x,12,pw,'I Remember (Vocal Mix)',{b:1});g.center(x,13,pw,'deadmau5, Kaskade  ♥',{fg:C.mut});
+  g.put(x+2,15,'02:21',{fg:C.mut});bar(g,x+8,15,pw-16,0.24);g.right(x,15,pw-2,'09:53',{fg:C.mut});
+  g.center(x,16,pw,'▶ playing    ⇄ on    ↻ off    vol ▮▮▮▮▮▮▮▯▯▯');
+  for(let i=1;i<pw-1;i++)g.set(x+i,17,'─',{fg:C.dim});g.set(x,17,'├',{fg:C.dim});g.set(x+pw-1,17,'┤',{fg:C.dim});
+  g.tabs(x+1,17,['Up next','Lyrics','Spectrum','History'],mode);
+  if(mode===0){g.put(x+2,18,'QUEUED BY YOU',{fg:C.sec,b:1});['Alberto Balsalm','On Melancholy Hill','All I Am'].forEach((t,i)=>{g.put(x+2,19+i,(i+1)+'',{fg:C.dim});g.put(x+5,19+i,t);});
+    g.put(x+2,23,'FROM LIKES · SHUFFLED',{fg:C.sec,b:1});T.slice(10,16).forEach((t,i)=>{g.put(x+2,24+i,(i+4)+'',{fg:C.dim});g.put(x+5,24+i,g.tr(t[0],pw-8),{fg:C.mut});});}
+  else{const L=['I remember','the feeling in the air','','You came around','and the world stood still','','I remember','every word you said','','(instrumental)','','I remember'];L.forEach((l,i)=>g.center(x,18+i,pw,l,i===4?{fg:C.acc,b:1}:{fg:i<4?C.dim:C.mut}));}
+  return pw;}
+function dHead(g,w,tab,sub){let x=g.put(1,0,'sctui',{fg:C.acc,b:1});x=g.put(x+2,0,'│',{fg:C.dim});['Library','Search','Feed'].forEach((t,i)=>{x=g.put(x+2,0,t,i===tab?{fg:C.acc,b:1}:null);});
+  let sx=1;['Likes','Playlists','Albums','Following'].forEach((t,i)=>{if(i===sub)g.fill(sx,1,[...t].length+2,1,{bg:C.acc,fg:'#14171c',b:1});sx=g.put(sx+1,1,t,i===sub?{bg:C.acc,fg:'#14171c',b:1}:{fg:C.mut})+2;});g.right(0,1,w-1,'/ filter',{fg:C.dim});}
+function dLikes(mode){const g=new G(W,H);const pw=dPanel(g,mode),w=W-pw;dHead(g,w,0,0);
+  g.table(0,2,w,H-3,[{t:'',w:1},{t:'Title',p:56},{t:'Artist(s)',p:30},{t:'Time',p:14}],marked(T,4,i=>i%3!==1).map(r=>r.slice(0,4)),{sel:6,left:1,title:' Likes ',foot:' 7 / 1,204 ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  hint(g,H-1,[['enter','play'],['a','queue'],['f','like'],['t','playlist'],['p','panel page'],['v','full visualiser'],['?','keys']]);return g;}
+function dNarrow(){const g=new G(84,24);let x=g.put(1,0,'sctui',{fg:C.acc,b:1});x=g.put(x+2,0,'│',{fg:C.dim});['Library','Search','Feed'].forEach((t,i)=>{x=g.put(x+2,0,t,i===0?{fg:C.acc,b:1}:null);});
+  let sx=1;['Likes','Playlists','Albums','Following'].forEach((t,i)=>{if(i===0)g.fill(sx,1,[...t].length+2,1,{bg:C.acc,fg:'#14171c',b:1});sx=g.put(sx+1,1,t,i===0?{bg:C.acc,fg:'#14171c',b:1}:{fg:C.mut})+2;});
+  g.table(0,2,84,17,[{t:'',w:1},{t:'Title',p:56},{t:'Artist(s)',p:30},{t:'Time',p:14}],marked(T,4,i=>i%3!==1).map(r=>r.slice(0,4)),{sel:6,left:1,title:' Likes ',bfg:C.acc,tst:{fg:C.acc,b:1}});
+  g.box(0,19,84,4,{fg:C.dim});let cx=g.put(2,20,'▶',{fg:C.acc,b:1});cx=g.put(cx+2,20,'I Remember (Vocal Mix)',{b:1});g.put(cx+1,20,'· deadmau5, Kaskade',{fg:C.mut});g.right(0,20,82,'⇄ on  ↻ off  vol 70%');
+  g.put(2,21,'02:21',{fg:C.mut});bar(g,8,21,40,0.24);g.put(49,21,'09:53',{fg:C.mut});g.right(0,21,82,"next › god's chariots",{fg:C.dim});
+  hint(g,23,[['enter','play'],['a','queue'],['f','like'],['p','open panel'],['?','keys']]);return g;}
+
+// ---------- QOL mini mocks ----------
+function qWhich(){const g=new G(78,11);g.box(0,0,78,10,{fg:C.acc,title:' Keys for: track in Likes ',left:1,tst:{fg:C.acc,b:1}});
+  const k=[['enter','Play'],['a','Add to queue'],['n','Play next'],['f','Unlike'],['t','Add to playlist…'],['s','Start station'],['o','Go to artist'],['y','Copy link'],['space','Play / pause'],['< >','Prev / next track'],[', .','Seek ∓10s'],['- +','Volume'],['S','Shuffle'],['R','Repeat'],['v','Visualiser'],['q','Queue']];
+  k.forEach(([a,b],i)=>{const col=Math.floor(i/8),row=i%8;const x=3+col*38;const cx=g.put(x,1+row,a,{fg:C.acc,b:1});g.put(x+8,1+row,b);});g.put(1,10,'? opens this sheet for whatever is focused; Esc closes',{fg:C.dim});return g;}
+function qPalette(){const g=new G(78,11);g.box(8,0,62,10,{fg:C.acc,title:' Command ',left:1,tst:{fg:C.acc,b:1}});g.put(10,1,'› play▏');for(let i=9;i<69;i++)g.set(i,2,'─',{fg:C.dim});
+  [['Play the selected track','enter'],['Play the selected track next','n'],['Play / pause','space'],['Add the playing track to a playlist','alt+t'],['Create an empty playlist','c'],['Delete the selected playlist','x']].forEach(([a,b],i)=>{const st=i===0?{bg:C.sel,fg:C.selfg}:null;if(i===0)g.fill(9,3,60,1,st);g.put(10,3+i,a,st);g.right(8,3+i,60,b,i===0?st:{fg:C.dim});});
+  g.put(1,10,'One key (e.g. : or Ctrl+P). Every action, fuzzy-matched, binding shown on the right',{fg:C.dim});return g;}
+function qQueue(){const g=new G(78,11);g.box(0,0,78,10,{fg:C.acc});g.tabs(1,0,[' Queue · 17 ',' History · 42 '],0);
+  g.put(2,1,'▶ I Remember (Vocal Mix)',{fg:C.acc,b:1});g.right(0,1,76,'deadmau5, Kaskade   09:53',{fg:C.mut});
+  g.put(2,2,'QUEUED BY YOU',{fg:C.sec,b:1});[['Alberto Balsalm','Aphex Twin   05:10'],['On Melancholy Hill','Gorillaz   03:53'],['All I Am','Ninajirachi   03:02']].forEach(([a,b],i)=>{const st=i===1?{bg:C.sel,fg:C.selfg}:null;if(i===1)g.fill(1,3+i,76,1,st);g.put(2,3+i,(i+1)+'  '+a,st);g.right(0,3+i,76,b,i===1?st:{fg:C.mut});});
+  g.put(2,6,'FROM LIKES · SHUFFLED',{fg:C.sec,b:1});[['November Has Come','Gorillaz, MF DOOM   02:45'],['Starman (2012 Remaster)','David Bowie   04:14']].forEach(([a,b],i)=>{g.put(2,7+i,(i+4)+'  '+a,{fg:C.mut});g.right(0,7+i,76,b,{fg:C.dim});});
+  hint(g,10,[['enter','jump to'],['J K','move'],['d','remove'],['D','clear'],['tab','history'],['esc','close']]);return g;}
+function qToast(){const g=new G(78,11);player(g,0,1,78);hint(g,5,[['enter','play'],['a','queue'],['f','like']],'♥ Liked "Alberto Balsalm"');
+  hint(g,7,[['enter','play'],['a','queue'],['f','like']]);g.right(0,7,77,"✗ Couldn't load playlist (429) · r retry",{fg:C.red});
+  g.put(1,9,'Messages take the right end of the hint row for ~3s, then fade. Errors stay until dismissed.',{fg:C.dim});return g;}
+
+function gallery(id,items){const root=document.getElementById(id);const btns=document.createElement('div');btns.className='gal-btns';const pre=document.createElement('pre');pre.className='term';const note=document.createElement('p');note.className='gal-note';
+  const show=i=>{[...btns.children].forEach((b,j)=>b.classList.toggle('on',i===j));pre.innerHTML=items[i].g().html();note.innerHTML=items[i].n||'';};
+  items.forEach((it,i)=>{const b=document.createElement('button');b.textContent=it.t;b.onclick=e=>{e.stopPropagation();show(i);};btns.appendChild(b);});
+  root.appendChild(btns);root.appendChild(pre);root.appendChild(note);show(0);}
+
+gallery('gal-current',[
+ {t:'Library › Likes',g:curLikes,n:'13 of 32 rows are chrome. No ♥ column, nothing marks the playing row.'},
+ {t:'Library › Playlists',g:curPlaylists,n:'Left list moves with ↑↓, right with Shift+↑↓. The grey bar on the left is the only cue for which is which.'},
+ {t:'Library › Following',g:curFollowing,n:'Three panes at 20/40/40; third pane needs Alt+↑↓. Titles truncate hard.'},
+ {t:'Search',g:curSearch,n:'Search box above, type filter below: 16 rows of chrome. Filter tabs are at the opposite end from Library\'s sub-tabs.'},
+ {t:'Feed',g:curFeed,n:'Two panes, focus shown only by bar colour.'},
+ {t:'Queue popup',g:curQueue,n:'Read-only: previous, current, then manual and auto queue merged with no divider.'},
+ {t:'? popup',g:curHelp,n:'Keys editor, Settings and Equaliser share one popup behind the help key.'}]);
+gallery('gal-a',[
+ {t:'Likes',g:aLikes,n:'<b>7 rows of chrome instead of 13.</b> One header line, sub-tabs as pills with the filter on the same row, 4-row player, 1-row hints. ♥/▶ gutter in every list.'},
+ {t:'Playlists (2 panes)',g:aPlaylists,n:'Focused pane has the accent border and a position counter. ←/→ moves focus, ↑↓ moves whatever is focused. Toast shares the hint row.'},
+ {t:'Search',g:aSearch,n:'Search types into the same slot the Library filter uses; result types are the sub-tab pills. No extra boxes.'}]);
+gallery('gal-b',[
+ {t:'Playlist open',g:bMain,n:'Sidebar lists your playlists directly. The table always has the wide pane.'},
+ {t:'Likes + queue panel',g:bQueue,n:'<b>q</b> toggles a docked Up next panel that separates what you queued from what the source will play.'},
+ {t:'Following',g:bFollowing,n:'Artist list plus one track pane with Tracks / Liked as tabs on its border, instead of two squeezed tables.'}]);
+gallery('gal-c',[
+ {t:'Playlists',g:cOne,n:'Parent · current · preview. <b>l</b> or → steps in, <b>h</b> or ← steps out. Breadcrumb replaces both tab bars.'},
+ {t:'Inside a playlist',g:cTwo,n:'Columns slide left. The preview column becomes a track card with the actions that apply to it.'},
+ {t:'Following › artist',g:cThree,n:'An artist is just another node: Tracks, Liked, Albums, Playlists, Station.'}]);
+gallery('gal-d',[
+ {t:'Likes · Up next',g:()=>dLikes(0),n:'No bottom bar. The right panel is the player; its lower half pages between Up next, Lyrics, Spectrum and History with <b>p</b>.'},
+ {t:'Likes · Lyrics',g:()=>dLikes(1),n:'Lyrics while browsing. Full-screen visualiser still exists on <b>v</b>.'},
+ {t:'Narrow terminal (84×24)',g:dNarrow,n:'Below ~110 columns the panel folds into A\'s compact bar; <b>p</b> opens the panel full-screen.'}]);
+gallery('gal-qol',[
+ {t:'Context key sheet (2, 9)',g:qWhich},{t:'Command palette (6)',g:qPalette},{t:'Queue + history (5)',g:qQueue},{t:'Toasts (4, 8)',g:qToast}]);
+})();
+</script>
