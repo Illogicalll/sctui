@@ -117,11 +117,10 @@ fn begin_playback(
 ) -> Option<Track> {
     let track = tracks(data).get(idx).filter(|t| t.is_playable())?.clone();
 
-    if state.playback_source != source {
-        state.playback_history.clear();
-        state.manual_queue.clear();
-    } else if let Some(queued) = queued_from_current(state, data)
-        && !(queued.source == source && queued.index == idx) {
+    // Tracks queued by hand and the listening history outlive a change of list. What
+    // was playing joins the history unless it is the very track being started again.
+    if let Some(queued) = queued_from_current(state, data)
+        && queued.track.track_urn != track.track_urn {
             state.push_history(queued);
         }
 
@@ -221,5 +220,86 @@ fn handle_following_enter(
         if start_playback(state, data, player, PlaybackSource::FollowingPublished, |d| &d.following_tracks, idx, None, None, urn) {
             data.following_tracks_state.select(Some(idx));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::logic::state::QueuedTrack;
+    use crate::tui::logic::utils::active_tracks;
+
+    fn tracks(prefix: &str, n: usize) -> Vec<Track> {
+        (0..n)
+            .map(|i| Track {
+                title: format!("{prefix}{i}"),
+                artists: String::new(),
+                duration: String::new(),
+                duration_ms: 0,
+                playback_count: String::new(),
+                artwork_url: String::new(),
+                access: String::new(),
+                track_urn: format!("{prefix}{i}"),
+            })
+            .collect()
+    }
+
+    fn library() -> AppData {
+        AppData {
+            likes: tracks("like", 4),
+            playlist_tracks: tracks("listed", 4),
+            search_tracks: tracks("found", 4),
+            ..Default::default()
+        }
+    }
+
+    fn enter(state: &mut AppState, data: &mut AppData, source: PlaybackSource, tracks: fn(&AppData) -> &Vec<Track>, idx: usize) -> Option<String> {
+        begin_playback(state, data, source, tracks, idx, None, None, None).map(|t| t.track_urn)
+    }
+
+    fn history(state: &AppState) -> Vec<&str> {
+        state.playback_history.iter().map(|q| q.track.track_urn.as_str()).collect()
+    }
+
+    /// T2: Enter on a like plays from a copy of the list, as every other source does.
+    #[test]
+    fn enter_on_a_like_queues_from_a_copy_of_the_likes() {
+        let (mut state, mut data) = (AppState::default(), library());
+        assert_eq!(enter(&mut state, &mut data, PlaybackSource::Likes, |d| &d.likes, 1).as_deref(), Some("like1"));
+        data.likes.insert(0, tracks("new", 1).remove(0));
+        let list = active_tracks(&state, &data);
+        assert_eq!(list[state.current_playing_index.unwrap()].track_urn, "like1");
+        assert_eq!(state.auto_queue.iter().map(|&i| list[i].track_urn.as_str()).collect::<Vec<_>>(), ["like2", "like3"]);
+    }
+
+    /// T13: choosing something else to play keeps the hand-built queue and the history,
+    /// whatever kind of list it comes from.
+    #[test]
+    fn enter_keeps_the_manual_queue_and_history_across_sources() {
+        let (mut state, mut data) = (AppState::default(), library());
+        enter(&mut state, &mut data, PlaybackSource::Playlist, |d| &d.playlist_tracks, 0);
+        let queued = data.playlist_tracks[3].clone();
+        state.manual_queue.push_back(QueuedTrack::new(PlaybackSource::Playlist, 3, &queued, None, None, None, None, true));
+
+        // A different kind of source.
+        enter(&mut state, &mut data, PlaybackSource::Likes, |d| &d.likes, 2);
+        assert_eq!(state.manual_queue.len(), 1, "the queued track survives");
+        assert_eq!(history(&state), ["listed0"]);
+
+        // Same source kind and same row, but another list (search results also play as
+        // `Playlist`): the outgoing track still goes into the history.
+        enter(&mut state, &mut data, PlaybackSource::Playlist, |d| &d.playlist_tracks, 2);
+        enter(&mut state, &mut data, PlaybackSource::Playlist, |d| &d.search_tracks, 2);
+        assert_eq!(history(&state), ["listed0", "like2", "listed2"]);
+
+        // Starting the playing track again is not a new history entry.
+        enter(&mut state, &mut data, PlaybackSource::Playlist, |d| &d.search_tracks, 2);
+        assert_eq!(history(&state).len(), 3);
+        assert_eq!(state.manual_queue.len(), 1);
+
+        // A row that cannot be played changes nothing.
+        data.likes[0].access = "blocked".into();
+        assert_eq!(enter(&mut state, &mut data, PlaybackSource::Likes, |d| &d.likes, 0), None);
+        assert_eq!((history(&state).len(), state.playback_source == PlaybackSource::Playlist), (3, true));
     }
 }
