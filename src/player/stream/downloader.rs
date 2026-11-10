@@ -2,7 +2,7 @@ use reqwest::Url;
 use std::sync::mpsc::Sender;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::AtomicU64,
 };
 use std::time::Duration;
 
@@ -32,7 +32,6 @@ pub(crate) struct SegmentPumpParams {
     pub start_segment_index: usize,
     /// Feeds the track's single continuous decoder (see `stream::reader`).
     pub bytes_tx: Sender<Arc<Vec<u8>>>,
-    pub is_playing_flag: Arc<std::sync::atomic::AtomicBool>,
     pub position: Arc<Mutex<Position>>,
     /// Needed to re-resolve the manifest when its signed URLs expire.
     pub track_urn: String,
@@ -103,7 +102,6 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
             segment_cache,
             start_segment_index,
             bytes_tx,
-            is_playing_flag,
             position,
             track_urn,
             token,
@@ -117,19 +115,7 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                 break;
             }
 
-            let approx_pos_ms = {
-                let pos = position.lock().unwrap();
-                let base = pos.elapsed;
-                if is_playing_flag.load(Ordering::SeqCst) {
-                    if let Some(start) = pos.last_start {
-                        (base + start.elapsed()).as_millis() as u64
-                    } else {
-                        base.as_millis() as u64
-                    }
-                } else {
-                    base.as_millis() as u64
-                }
-            };
+            let approx_pos_ms = position.lock().unwrap().now().as_millis() as u64;
             let (current_seg, _) = manifest.locate_position(approx_pos_ms);
             if next_index > current_seg.saturating_add(PREFETCH_SEGMENTS) {
                 std::thread::sleep(Duration::from_millis(50));

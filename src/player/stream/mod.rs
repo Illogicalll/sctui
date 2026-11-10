@@ -6,4 +6,6 @@ mod downloader;
 mod reader;
 mod engine;
 
-pub(crate) use engine::{PlaybackEngine, open_output_stream};
+pub(crate) use cache::CachedHls;
+pub(crate) use engine::{LoadFailure, Loaded, PlaybackEngine, Shared, open_output_stream};
+pub(crate) use reader::Feed;

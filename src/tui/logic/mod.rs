@@ -925,6 +925,14 @@ fn start(
                 MediaCommand::SeekBackward => player.rewind(),
             }
         }
+        if let Some(failure) = player.take_load_failure() {
+            state.toast_err(format!("Couldn't play {}", failure.track.title));
+            // Move on to the next track, unless several in a row have failed
+            // (offline, most likely): then stop instead of emptying the queue.
+            if !failure.give_up {
+                next_track(&mut state, &mut data, &player);
+            }
+        }
         {
             let track = player.current_track();
             let playing = player.is_playing();
@@ -1112,7 +1120,10 @@ fn start(
                     state.preload_triggered_for_track_urn = None;
                 }
 
-                let at_end = state.progress >= handover_ms && current_track.duration_ms > 0;
+                // The clock reaching the handover point, or the stream itself running
+                // out first (a preview, or a track the network gave up on).
+                let at_end = (state.progress >= handover_ms || player.track_ended())
+                    && current_track.duration_ms > 0;
 
                 if !at_end {
                     state.end_handled_track_urn = None;

@@ -1,72 +1,82 @@
 use crate::api::Track;
 use crate::auth::Token;
-use rodio::Sink;
 use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::Ordering,
     mpsc::{self, Sender},
 };
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::commands::{PlayerCommand, TrackChange};
+use super::stream::{Feed, LoadFailure, Shared};
 use super::worker::player_loop;
 
+/// Where playback is in the current track: a wall clock that runs while the
+/// track is playing, less whatever time the output spent starved of audio.
 #[derive(Default)]
 pub(crate) struct Position {
     pub elapsed: Duration,
+    /// When the clock was last set running; `None` while it is stopped.
     pub last_start: Option<Instant>,
     pub track: Option<Track>,
+    /// The audio thread's side of the current track.
+    pub feed: Feed,
+}
+
+impl Position {
+    pub(crate) fn at(&self, now: Instant) -> Duration {
+        let running = self
+            .last_start
+            .map_or(Duration::ZERO, |start| now.saturating_duration_since(start));
+        // Silence played while waiting on the network is not progress through
+        // the track, or a stall would cut that much off the end.
+        (self.elapsed + running).saturating_sub(self.feed.starved())
+    }
+
+    pub(crate) fn now(&self) -> Duration {
+        self.at(Instant::now())
+    }
+
+    /// Sets the clock running. One that is already running is left alone:
+    /// restarting it would throw away the time since it started.
+    pub(crate) fn start(&mut self, now: Instant) {
+        if self.last_start.is_none() {
+            self.last_start = Some(now);
+        }
+    }
+
+    pub(crate) fn stop(&mut self, now: Instant) {
+        if let Some(start) = self.last_start.take() {
+            self.elapsed += now.saturating_duration_since(start);
+        }
+    }
 }
 
 pub struct Player {
     tx: Sender<PlayerCommand>,
-    is_playing_flag: Arc<AtomicBool>,
-    is_seeking_flag: Arc<AtomicBool>,
-    position: Arc<Mutex<Position>>,
-    sink: Arc<Mutex<Option<Sink>>>,
-    wave_buffer: Arc<Mutex<VecDeque<f32>>>,
+    shared: Shared,
 }
 
 impl Player {
-    pub fn new(token: Arc<Mutex<Token>>) -> Self {
+    /// Starts the player thread. Fails if no audio output could be opened, so
+    /// the caller can say so before the TUI takes over the terminal.
+    pub fn new(token: Arc<Mutex<Token>>) -> anyhow::Result<Self> {
         let (tx, rx) = mpsc::channel();
-        let is_playing_flag = Arc::new(AtomicBool::new(false));
-        let is_seeking_flag = Arc::new(AtomicBool::new(false));
-        let sink = Arc::new(Mutex::new(None));
-        let position = Arc::new(Mutex::new(Position::default()));
-        let wave_buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let shared = Shared::new();
 
         {
-            let flag_clone = Arc::clone(&is_playing_flag);
-            let sink_clone = Arc::clone(&sink);
-            let token_clone = Arc::clone(&token);
-            let position_clone = Arc::clone(&position);
-            let seeking_clone = Arc::clone(&is_seeking_flag);
-            let wave_buffer_clone = Arc::clone(&wave_buffer);
-
-            thread::spawn(move || {
-                player_loop(
-                    rx,
-                    token_clone,
-                    flag_clone,
-                    seeking_clone,
-                    sink_clone,
-                    position_clone,
-                    wave_buffer_clone,
-                );
-            });
+            let results = tx.clone();
+            let shared = shared.clone();
+            thread::spawn(move || player_loop(rx, results, token, shared, ready_tx));
         }
+        ready_rx
+            .recv()
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("the player thread stopped while starting")))?;
 
-        Self {
-            tx,
-            is_playing_flag,
-            is_seeking_flag,
-            position,
-            sink,
-            wave_buffer,
-        }
+        Ok(Self { tx, shared })
     }
 
     /// Set the crossfade length, in milliseconds (0 turns crossfading off), and
@@ -111,25 +121,32 @@ impl Player {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.is_playing_flag.load(Ordering::SeqCst)
+        self.shared.is_playing.load(Ordering::SeqCst)
     }
 
     pub fn is_seeking(&self) -> bool {
-        self.is_seeking_flag.load(Ordering::SeqCst)
+        self.shared.is_seeking.load(Ordering::SeqCst)
     }
 
     pub fn elapsed(&self) -> u64 {
-        let pos = self.position.lock().unwrap();
-        let mut elapsed = pos.elapsed;
-        if self.is_playing()
-            && let Some(start) = pos.last_start {
-                elapsed += start.elapsed();
-            }
-        elapsed.as_millis().try_into().unwrap()
+        self.shared.position.lock().unwrap().now().as_millis().try_into().unwrap()
+    }
+
+    /// The current track has nothing left to play: its stream ran out and
+    /// everything decoded from it has been heard, whatever the clock says.
+    pub fn track_ended(&self) -> bool {
+        self.shared.position.lock().unwrap().feed.ended()
+    }
+
+    /// The track that most recently failed to start, if the caller has not
+    /// already been told about it.
+    pub fn take_load_failure(&self) -> Option<LoadFailure> {
+        self.shared.load_failure.lock().unwrap().take()
     }
 
     pub fn current_track(&self) -> Track {
-        self.position
+        self.shared
+            .position
             .lock()
             .unwrap()
             .track
@@ -147,14 +164,38 @@ impl Player {
     }
 
     pub fn get_volume(&self) -> f32 {
-        if let Some(ref s) = *self.sink.lock().unwrap() {
-            s.volume()
-        } else {
-            1.0
-        }
+        self.shared.volume.get()
     }
 
     pub fn wave_buffer(&self) -> Arc<Mutex<VecDeque<f32>>> {
-        Arc::clone(&self.wave_buffer)
+        Arc::clone(&self.shared.wave_buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starting_a_clock_that_is_already_running_does_not_rewind_it() {
+        let t0 = Instant::now();
+        let mut pos = Position::default();
+        pos.start(t0);
+        // A second "play" 40 s in, as an OS media key sends while playing.
+        pos.start(t0 + Duration::from_secs(40));
+        assert_eq!(pos.at(t0 + Duration::from_secs(41)), Duration::from_secs(41));
+    }
+
+    #[test]
+    fn the_clock_only_runs_between_start_and_stop() {
+        let t0 = Instant::now();
+        let secs = Duration::from_secs;
+        let mut pos = Position { elapsed: secs(10), ..Position::default() };
+        assert_eq!(pos.at(t0 + secs(5)), secs(10), "stopped");
+        pos.start(t0);
+        assert_eq!(pos.at(t0 + secs(5)), secs(15));
+        pos.stop(t0 + secs(7));
+        pos.stop(t0 + secs(9));
+        assert_eq!(pos.at(t0 + secs(60)), secs(17));
     }
 }

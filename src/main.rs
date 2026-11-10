@@ -62,7 +62,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut api = Arc::new(Mutex::new(api::API::init(Arc::clone(&token))));
 
-    let player = Player::new(Arc::clone(&token));
+    // Before the TUI takes the terminal: with no audio output there is nothing to run.
+    let player = Player::new(Arc::clone(&token))?;
 
     // spawn a thread to handle re-authentication requests
     let token_clone = Arc::clone(&token);

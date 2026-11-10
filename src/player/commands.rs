@@ -1,4 +1,5 @@
 use crate::api::Track;
+use crate::player::stream::{CachedHls, Loaded};
 
 /// What prompted a change of track. A natural handover always crossfades (when
 /// crossfading is on at all); a user skip only does when the user asked for
@@ -13,7 +14,7 @@ pub enum TrackChange {
     Seek,
 }
 
-pub enum PlayerCommand {
+pub(crate) enum PlayerCommand {
     Play(Track, TrackChange),
     PreloadNext(Track),
     Pause,
@@ -25,4 +26,9 @@ pub enum PlayerCommand {
     VolumeDown,
     FastForward,
     Rewind,
+    /// From a fetch thread back to the player thread: the network half of the
+    /// play or seek numbered `seq` has finished.
+    Loaded { seq: u64, result: anyhow::Result<Loaded> },
+    /// Likewise for a preload of the next track.
+    Preloaded(CachedHls),
 }
