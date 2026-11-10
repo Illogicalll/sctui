@@ -48,7 +48,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         Stage::Welcome => welcome(frame),
         Stage::Layout => layout_list(frame, wizard.selected),
         Stage::Theme => {
-            let area = side(screen, theme_picker::WIDTH, theme_picker::HEIGHT);
+            let area = centered_rect_fixed(theme_picker::WIDTH, theme_picker::HEIGHT, screen);
             theme_picker::render_theme_picker(frame, area, state.theme_picker_selected, &state.theme_name);
         }
         Stage::Practice if !is_strip(state, screen) => draw_card(frame, card_area(state, screen), state),
@@ -57,11 +57,6 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 }
 
-/// A `width`×`height` box at the left edge, vertically centred, clamped to `screen`.
-fn side(screen: Rect, width: u16, height: u16) -> Rect {
-    let area = centered_rect_fixed(width, height, screen);
-    Rect { x: screen.x + 2.min(screen.width - area.width), ..area }
-}
 
 fn boxed(frame: &mut Frame, area: Rect, title: &str) -> Rect {
     let t = theme::current();
@@ -126,7 +121,7 @@ fn done(frame: &mut Frame, state: &AppState) {
 
 fn layout_list(frame: &mut Frame, selected: usize) {
     let t = theme::current();
-    let area = side(frame.area(), theme_picker::WIDTH, Layout::ALL.len() as u16 + 5);
+    let area = centered_rect_fixed(theme_picker::WIDTH, Layout::ALL.len() as u16 + 5, frame.area());
     let inner = boxed(frame, area, "Layout");
     for (i, layout) in Layout::ALL.into_iter().enumerate() {
         let what = match layout {
@@ -311,6 +306,40 @@ mod tests {
     use super::*;
     use crate::tui::logic::wizard::{self, Wizard};
     use crate::tui::render::testkit::{fixture, go, render_text};
+
+    /// The welcome, layout, theme and done boxes sit in the middle of the terminal at
+    /// any size, whatever the layout behind them puts on the left.
+    #[test]
+    fn setup_boxes_are_centred() {
+        use crate::tui::logic::wizard::Stage;
+        for (stage, title) in [
+            (Stage::Welcome, " Welcome to sctui "),
+            (Stage::Layout, " Layout "),
+            (Stage::Theme, " Theme "),
+            (Stage::Done, " You're set "),
+        ] {
+            for layout in crate::config::Layout::ALL {
+                for (w, h) in [(80u16, 24u16), (121, 33), (229, 98)] {
+                    // An empty library: wide glyphs behind the box would shift the text columns.
+                    let (mut state, mut data, views, np) = crate::tui::render::testkit::fixture_empty();
+                    state.settings.layout = layout;
+                    state.wizard = Some(Wizard::at(stage));
+                    let text = render_text(w, h, &mut state, &mut data, &views, &np);
+                    let (_, line) = text
+                        .lines()
+                        .enumerate()
+                        .find(|(_, l)| l.contains(title))
+                        .unwrap_or_else(|| panic!("{title:?} not drawn at {w}x{h}"));
+                    let chars: Vec<char> = line.chars().collect();
+                    let at = line[..line.find(title).unwrap()].chars().count();
+                    let left = (0..at).rev().find(|&i| chars[i] == '╭').expect("box left corner");
+                    let right = (at..chars.len()).find(|&i| chars[i] == '╮').expect("box right corner");
+                    let (lead, trail) = (left, w as usize - 1 - right);
+                    assert!(lead.abs_diff(trail) <= 1, "{title:?} off centre at {w}x{h} in {layout:?}: {lead} vs {trail}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn card_becomes_two_row_strip_when_narrow() {

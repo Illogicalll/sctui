@@ -55,7 +55,7 @@ fn step(key: KeyEvent, state: &mut AppState, data: &AppData) -> Option<Theme> {
             let wizard = state.wizard.as_mut()?;
             (wizard.stage, wizard.revert_layout) = (Stage::Theme, None);
             theme_picker::open_theme_picker(state);
-            // The wizard draws the list itself, to one side of the preview.
+            // The wizard draws the list itself, centred over the preview.
             state.theme_picker_visible = false;
         }
         (_, Stage::Layout) => {
