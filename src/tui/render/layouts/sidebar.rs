@@ -238,6 +238,7 @@ mod tests {
         assert!((0..27).all(|y| buf[(119, y)].symbol() != " "), "a wide title broke the dock's border:\n{}", text(&buf));
         // A station's queue is its own list, empty until related tracks arrive.
         state.playback_source = PlaybackSource::Radio;
+        data.playback_tracks.clear();
         assert!(docked(&mut state, &mut data, 120).1.contains("queue is empty"));
         data.playback_tracks = data.likes[30..40].to_vec();
         assert!(docked(&mut state, &mut data, 120).1.contains("│ FROM STATION · SHUFFLED"));

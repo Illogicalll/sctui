@@ -49,7 +49,7 @@ use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
-    active_tracks, append_feed_tracks, next_track_trigger_ms, play_queued_track, queued_from_current,
+    active_tracks, append_feed_tracks, extend_likes_playback, next_track_trigger_ms, play_queued_track, queued_from_current,
 };
 
 /// How long a track must have been playing before its lyrics are looked up.
@@ -389,6 +389,7 @@ fn start(
                     for t in &new {
                         data.liked_track_urns.insert(t.track_urn.clone());
                     }
+                    extend_likes_playback(&mut state, &mut data, &new);
                     data.likes.extend(new);
                 }
                 Msg::Playlists(new) => {
@@ -455,14 +456,14 @@ fn start(
                     if id == state.feed_queue_fetch.request_id
                         && state.playback_source == PlaybackSource::Feed
                     {
-                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, t);
+                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, t, false);
                     }
                 }
                 Msg::Related(id, tracks) => {
                     if id == state.radio_fetch.request_id
                         && state.playback_source == PlaybackSource::Radio
                     {
-                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks);
+                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks, false);
                         if state.radio_waiting
                             && let Some(next_idx) = state.auto_queue.pop_front()
                             && let Some(track) = data.playback_tracks.get(next_idx).cloned()

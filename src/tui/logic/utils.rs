@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use rand::Rng;
 use rand::seq::SliceRandom;
 
 use crate::api::{Album, Artist, Playlist, Track};
@@ -264,19 +265,36 @@ pub fn build_queue(
 }
 
 /// Extend the playing list with `incoming`, queueing each new playable track after what is
-/// already queued. Tracks already present (by urn) or unplayable are dropped.
+/// already queued, or somewhere at random among it when `shuffle` is set. Tracks already
+/// present (by urn) or unplayable are dropped.
 pub(crate) fn append_feed_tracks(
     playback_tracks: &mut Vec<Track>,
     auto_queue: &mut VecDeque<usize>,
-    incoming: Vec<Track>,
+    incoming: impl IntoIterator<Item = Track>,
+    shuffle: bool,
 ) {
     for track in incoming {
         let seen = playback_tracks.iter().any(|t| t.track_urn == track.track_urn);
         if seen || !track.is_playable() {
             continue;
         }
-        auto_queue.push_back(playback_tracks.len());
+        let at = if shuffle { rand::thread_rng().gen_range(0..=auto_queue.len()) } else { auto_queue.len() };
+        auto_queue.insert(at, playback_tracks.len());
         playback_tracks.push(track);
+    }
+}
+
+/// A page of Likes arrived. Likes load in the background, so a queue started from them
+/// early only covers the pages loaded by then: while Likes are what is playing, the new
+/// page joins the playing list and its queue.
+pub(crate) fn extend_likes_playback(state: &mut AppState, data: &mut AppData, page: &[Track]) {
+    if state.playback_source == PlaybackSource::Likes && state.current_playing_index.is_some() {
+        append_feed_tracks(
+            &mut data.playback_tracks,
+            &mut state.auto_queue,
+            page.iter().cloned(),
+            state.shuffle_enabled,
+        );
     }
 }
 
@@ -305,7 +323,8 @@ pub fn play_queued_track(
             data.playback_playlist_uri = None;
             data.playback_album_uri = None;
             data.playback_following_user_urn = None;
-            state.auto_queue = build_queue(queued.index, &data.likes, state.shuffle_enabled);
+            data.playback_tracks = data.likes.clone();
+            state.auto_queue = build_queue(queued.index, &data.playback_tracks, state.shuffle_enabled);
             if state.selected_tab == 0 && state.selected_subtab == 0 {
                 state.selected_row = queued.index;
                 data.likes_state.select(Some(queued.index));
@@ -375,16 +394,11 @@ pub fn play_queued_track(
     }
 }
 
-pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Track] {
-    match state.playback_source {
-        PlaybackSource::Likes => &data.likes,
-        PlaybackSource::Playlist
-        | PlaybackSource::Album
-        | PlaybackSource::FollowingPublished
-        | PlaybackSource::FollowingLikes
-        | PlaybackSource::Feed
-        | PlaybackSource::Radio => &data.playback_tracks,
-    }
+/// The list `current_playing_index` and `auto_queue` index: always the copy taken when
+/// playback started, never a library list, whose rows move as tracks are liked, unliked,
+/// paged in or hidden.
+pub(crate) fn active_tracks<'a>(_state: &AppState, data: &'a AppData) -> &'a [Track] {
+    &data.playback_tracks
 }
 
 /// Hand playback over to related tracks, seeded by `seeds` (index 0 is playing now). A single
@@ -411,7 +425,6 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
     let source = state.playback_source;
     let track = active_tracks(state, data).get(idx)?;
     let (tracks_snapshot, playlist_uri, album_uri, following_user_urn) = match source {
-        PlaybackSource::Likes => (None, None, None, None),
         PlaybackSource::Playlist => (
             Some(&data.playback_tracks),
             data.playback_playlist_uri.clone(),
@@ -430,7 +443,7 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
             None,
             data.playback_following_user_urn.clone(),
         ),
-        PlaybackSource::Feed | PlaybackSource::Radio => (Some(&data.playback_tracks), None, None, None),
+        PlaybackSource::Likes | PlaybackSource::Feed | PlaybackSource::Radio => (Some(&data.playback_tracks), None, None, None),
     };
     Some(QueuedTrack::new(
         source, idx, track, tracks_snapshot, playlist_uri, album_uri, following_user_urn, false,
@@ -489,9 +502,85 @@ mod tests {
                 track("e", ""),
                 track("d", "playable"), // duplicate within the batch: dropped
             ],
+            false,
         );
         let urns: Vec<&str> = playing.iter().map(|t| t.track_urn.as_str()).collect();
         assert_eq!(urns, ["a", "b", "d", "e"]);
         assert_eq!(queue, VecDeque::from([1, 2, 3]));
+    }
+
+    fn tracks(urns: &[&str]) -> Vec<Track> {
+        urns.iter().map(|urn| track(urn, "playable")).collect()
+    }
+
+    /// Likes playing from `playing`, at index `at`, with the rest queued in order.
+    fn likes_playing(playing: &[&str], at: usize) -> (AppState, AppData) {
+        let data = AppData { likes: tracks(playing), playback_tracks: tracks(playing), ..Default::default() };
+        let state = AppState {
+            current_playing_index: Some(at),
+            auto_queue: build_queue(at, &data.playback_tracks, false),
+            ..Default::default()
+        };
+        (state, data)
+    }
+
+    fn queued_urns(state: &AppState, data: &AppData) -> Vec<String> {
+        let list = active_tracks(state, data);
+        state.auto_queue.iter().map(|&i| list[i].track_urn.clone()).collect()
+    }
+
+    /// T2: the Likes queue indexes its own copy, so the library list changing under it
+    /// (a like inserted at the top, an unlike, the hide-unplayable filter) moves nothing.
+    #[test]
+    fn likes_playback_is_not_disturbed_by_the_library_list_changing() {
+        use crate::tui::logic::state::Engagement;
+        let (mut state, mut data) = likes_playing(&["a", "b", "c", "d"], 1);
+        let playing = |state: &AppState, data: &AppData| queued_from_current(state, data).unwrap().track.track_urn;
+
+        // Like a track from somewhere else: it lands at the top of the library.
+        data.liked_track_urns.insert("new".into());
+        Engagement::LikeTrack { track: track("new", "playable"), track_id: 1 }.apply(&mut state, &mut data);
+        assert_eq!(data.likes[0].track_urn, "new");
+        assert_eq!(playing(&state, &data), "b");
+        assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+
+        // Unlike the playing track: the next one is still next.
+        Engagement::UnlikeTrack { track_urn: "b".into(), track_id: 2 }.apply(&mut state, &mut data);
+        assert!(!data.likes.iter().any(|t| t.track_urn == "b"));
+        assert_eq!(playing(&state, &data), "b");
+        assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+
+        // Rows hidden from the library list stay where they were in the queue.
+        data.likes[0].access = "blocked".into();
+        state.settings.hide_unplayable = true;
+        crate::tui::logic::filtering::apply_unplayable_filter(&mut state, &mut data);
+        assert_eq!(playing(&state, &data), "b");
+        assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+    }
+
+    /// T14: Likes pages that load after playback started join the queue.
+    #[test]
+    fn likes_pages_arriving_during_likes_playback_extend_the_queue() {
+        let (mut state, mut data) = likes_playing(&["a", "b"], 0);
+        let page = [track("b", "playable"), track("c", "playable"), track("x", "blocked"), track("d", "playable")];
+        extend_likes_playback(&mut state, &mut data, &page);
+        assert_eq!(queued_urns(&state, &data), ["b", "c", "d"], "new playable tracks, once each, in order");
+        assert_eq!(queued_from_current(&state, &data).unwrap().track.track_urn, "a");
+
+        // Shuffle on: the new tracks are mixed in, each still queued exactly once.
+        state.shuffle_enabled = true;
+        extend_likes_playback(&mut state, &mut data, &tracks(&["e", "f", "g"]));
+        let mut queued = queued_urns(&state, &data);
+        queued.sort();
+        assert_eq!(queued, ["b", "c", "d", "e", "f", "g"]);
+
+        // Anything else playing, or nothing at all, is left alone.
+        let before = data.playback_tracks.len();
+        state.playback_source = PlaybackSource::Playlist;
+        extend_likes_playback(&mut state, &mut data, &tracks(&["h"]));
+        state.playback_source = PlaybackSource::Likes;
+        state.current_playing_index = None;
+        extend_likes_playback(&mut state, &mut data, &tracks(&["h"]));
+        assert_eq!(data.playback_tracks.len(), before);
     }
 }

@@ -81,6 +81,7 @@ fn handle_feed_enter(state: &mut AppState, data: &mut AppData, player: &Player) 
 
 /// Shared Enter core. Returns `false` (without side effects) when `tracks(data)[idx]` is missing or
 /// unplayable. `tracks` is a field selector rather than a slice so `data` can still be mutated here.
+#[allow(clippy::too_many_arguments)]
 fn start_playback(
     state: &mut AppState,
     data: &mut AppData,
@@ -92,12 +93,29 @@ fn start_playback(
     album_uri: Option<String>,
     following_user_urn: Option<String>,
 ) -> bool {
-    let Some(track) = tracks(data).get(idx) else {
+    let Some(track) = begin_playback(state, data, source, tracks, idx, playlist_uri, album_uri, following_user_urn) else {
         return false;
     };
-    if !track.is_playable() {
-        return false;
-    }
+    player.play(track, TrackChange::UserSkip);
+    // Choosing something to play means play it, paused or not. Next/previous keep the pause.
+    player.resume();
+    true
+}
+
+/// Everything `start_playback` does short of touching the player: the queue state for
+/// playing `tracks(data)[idx]`, and that track to play.
+#[allow(clippy::too_many_arguments)]
+fn begin_playback(
+    state: &mut AppState,
+    data: &mut AppData,
+    source: PlaybackSource,
+    tracks: fn(&AppData) -> &Vec<Track>,
+    idx: usize,
+    playlist_uri: Option<String>,
+    album_uri: Option<String>,
+    following_user_urn: Option<String>,
+) -> Option<Track> {
+    let track = tracks(data).get(idx).filter(|t| t.is_playable())?.clone();
 
     if state.playback_source != source {
         state.playback_history.clear();
@@ -107,20 +125,15 @@ fn start_playback(
             state.push_history(queued);
         }
 
-    player.play(track.clone(), TrackChange::UserSkip);
-    // Choosing something to play means play it, paused or not. Next/previous keep the pause.
-    player.resume();
     state.playback_source = source;
     state.override_playing = None;
     state.current_playing_index = Some(idx);
-    if source != PlaybackSource::Likes {
-        data.playback_tracks = tracks(data).clone();
-    }
+    data.playback_tracks = tracks(data).clone();
     data.playback_playlist_uri = playlist_uri;
     data.playback_album_uri = album_uri;
     data.playback_following_user_urn = following_user_urn;
-    state.auto_queue = build_queue(idx, tracks(data), state.shuffle_enabled);
-    true
+    state.auto_queue = build_queue(idx, &data.playback_tracks, state.shuffle_enabled);
+    Some(track)
 }
 
 fn handle_search_enter(state: &mut AppState, data: &mut AppData, player: &Player) {

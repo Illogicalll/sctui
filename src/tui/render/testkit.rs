@@ -208,6 +208,8 @@ pub fn fixture() -> (AppState, AppData, FilteredViews, NowPlaying) {
         search_people_likes_tracks: tracks(580, "Found like", 18),
         feed,
         feed_tracks: tracks(700, "Posted", 3),
+        // Likes are playing: the queue indexes the copy taken when they started.
+        playback_tracks: likes.clone(),
         likes,
         ..Default::default()
     };
