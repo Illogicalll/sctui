@@ -3,7 +3,7 @@ use ratatui::{
     layout::Alignment,
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 use crate::theme;
 
@@ -14,7 +14,7 @@ use super::utils::centered_rect_fixed;
 pub fn render_confirm(frame: &mut Frame, message: &str, selected: usize) {
     let width = (message.chars().count() as u16 + 6).max(40).min(frame.area().width.max(1));
     let popup_area = centered_rect_fixed(width, 5, frame.area());
-    frame.render_widget(Clear, popup_area);
+    crate::tui::render::widgets::clear(frame, popup_area);
 
     let highlight = Style::default()
         .fg(theme::current().selection_fg)

@@ -42,6 +42,7 @@ pub const LAYOUTS: &[(&str, Setup)] = &[
     ("sidebar: nav focused", |s| layout(s, Layout::Sidebar, true, false)),
     ("sidebar: docked queue", |s| layout(s, Layout::Sidebar, false, true)),
     ("columns", |s| layout(s, Layout::Columns, false, false)),
+    ("columns: nav focused", |s| layout(s, Layout::Columns, true, false)),
     ("player-panel", |s| layout(s, Layout::PlayerPanel, false, false)),
 ];
 

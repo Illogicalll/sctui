@@ -6,7 +6,7 @@ mod playlist_picker;
 mod theme_picker;
 pub mod queue;
 mod quit;
-mod utils;
+pub mod utils;
 
 use ratatui::Frame;
 

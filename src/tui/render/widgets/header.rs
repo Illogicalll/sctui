@@ -62,6 +62,22 @@ pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &App
     2
 }
 
+/// The Search query or the Library filter as a header shows it at its right end
+/// (`/ found`, `/ song▏` while typing), and its style. Empty when there is neither.
+pub fn find_text(state: &AppState) -> (String, Style) {
+    let t = theme::current();
+    let cursor = if state.search_typing { "▏" } else { "" };
+    match state.selected_tab {
+        1 if state.query.is_empty() && !state.search_typing => ("/ search".to_string(), Style::new().fg(t.dim)),
+        1 => (format!("/ {}{cursor}", state.query), Style::new().fg(t.fg)),
+        0 if state.search_popup_visible => (
+            format!("/ {}{cursor}", state.search_query),
+            Style::new().fg(if state.search_typing { t.fg } else { t.warning }),
+        ),
+        _ => (String::new(), Style::new()),
+    }
+}
+
 /// The header's second row on its own, in the one-row `area`: the sub-tabs (search
 /// types on Search) as pills and the filter or search query right-aligned. Sidebar
 /// draws it above the panes on Search.
@@ -72,16 +88,7 @@ pub fn draw_subtabs(frame: &mut Frame, area: Rect, state: &AppState) {
         1 => (&SEARCHFILTERS, state.selected_searchfilter),
         _ => (&[], 0),
     };
-    let cursor = if state.search_typing { "▏" } else { "" };
-    let (find, find_style) = match state.selected_tab {
-        1 if state.query.is_empty() && !state.search_typing => ("/ search".to_string(), Style::new().fg(t.dim)),
-        1 => (format!("/ {}{cursor}", state.query), Style::new().fg(t.fg)),
-        0 if state.search_popup_visible => (
-            format!("/ {}{cursor}", state.search_query),
-            Style::new().fg(if state.search_typing { t.fg } else { t.warning }),
-        ),
-        _ => (String::new(), Style::new()),
-    };
+    let (find, find_style) = find_text(state);
     // The query keeps at most half the row; the sub-tabs get what is left of it.
     let find = fit(&find, area.width as usize / 2);
     let room = (area.width as usize).saturating_sub(text_width(&find) + 2);

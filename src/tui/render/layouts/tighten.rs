@@ -72,7 +72,7 @@ mod tests {
         go(&mut state, &mut data, 0, 1, 1);
         tighten(&mut state);
         let want = render_text(100, 30, &mut state, &mut data, &views, &np);
-        for layout in [Layout::Columns, Layout::PlayerPanel] {
+        for layout in [Layout::PlayerPanel] {
             state.settings.layout = layout;
             assert_eq!(render_text(100, 30, &mut state, &mut data, &views, &np), want, "{layout:?}");
         }

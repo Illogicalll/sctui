@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders, Clear},
+    widgets::{Block, BorderType, Borders},
 };
 
 use crate::theme;
@@ -28,7 +28,7 @@ pub fn render_palette(frame: &mut Frame, state: &AppState, palette: &PaletteStat
         width,
         height,
     };
-    frame.render_widget(Clear, area);
+    crate::tui::render::widgets::clear(frame, area);
     let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(t.dim);
     let block = Block::default()

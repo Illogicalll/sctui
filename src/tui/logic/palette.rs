@@ -53,8 +53,7 @@ pub fn items(state: &AppState) -> Vec<(String, String, Command)> {
         .into_iter()
         .filter(|a| listed(*a))
         .map(|a| {
-            let keys = if state.keymap.seqs(a).is_empty() { String::new() } else { state.keymap.labels(a) };
-            (a.description().to_string(), keys, Command::Action(a))
+            (a.description().to_string(), state.keymap.hint_labels(a), Command::Action(a))
         })
         .collect();
     out.extend(Layout::ALL.map(|l| {
@@ -140,6 +139,9 @@ mod tests {
         assert_eq!((right("Layout: classic"), right("Layout: sidebar")), ("current".to_string(), String::new()));
         assert_eq!(right("Hint line: toggle"), "on");
         assert_eq!(right("Quit"), "q");
+        // The hint line's notation, not `Shift+A, Ctrl+P`.
+        assert_eq!(right("Play the selected track next"), "A");
+        assert_eq!(right("Start a station from the selected track (or artist)"), "S, shift+enter");
     }
 
     #[test]
@@ -157,7 +159,7 @@ mod tests {
             assert_eq!(row.is_some(), !hidden.contains(&action), "{}", action.name());
             if let Some((label, keys, _)) = row {
                 assert_eq!(label, action.description());
-                let want = if action == Action::ToggleRepeat { String::new() } else { state.keymap.labels(action) };
+                let want = if action == Action::ToggleRepeat { String::new() } else { state.keymap.hint_labels(action) };
                 assert_eq!(*keys, want, "{}: unbound shows no keys", action.name());
             }
         }

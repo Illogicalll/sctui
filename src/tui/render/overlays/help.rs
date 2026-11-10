@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState, Tabs, Wrap},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState, Tabs, Wrap},
 };
 use crate::theme;
 
@@ -227,7 +227,7 @@ const MAX_HINT_LINES: u16 = 3;
 /// Returns the area left over for the page's own body.
 fn render_shell(frame: &mut Frame, state: &AppState, hint: &str) -> Rect {
     let popup_area = centered_rect(76, 80, frame.area());
-    frame.render_widget(Clear, popup_area);
+    crate::tui::render::widgets::clear(frame, popup_area);
 
     // No title: the tab bar below names the page, and a heading over it said nothing
     // the tabs do not.

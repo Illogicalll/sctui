@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Clear, Row, Table, TableState},
+    widgets::{Block, Borders, Row, Table, TableState},
 };
 use crate::theme;
 
@@ -15,7 +15,7 @@ use super::utils::centered_rect;
 /// displayed (newest-first) order.
 pub fn render_history(frame: &mut Frame, history: &[QueuedTrack], selected: usize) {
     let popup_area = centered_rect(70, 60, frame.area());
-    frame.render_widget(Clear, popup_area);
+    crate::tui::render::widgets::clear(frame, popup_area);
 
     let total_width = popup_area.width as usize;
     let title_width = (total_width * 65) / 100;

@@ -1,6 +1,7 @@
 //! One pure function per layout, each built from the shared widgets.
 
 pub mod classic;
+pub mod columns;
 pub mod sidebar;
 pub mod tighten;
 
@@ -26,8 +27,9 @@ pub fn draw(
         Layout::Classic => classic::draw(frame, state, data, views, np, cover),
         Layout::Tighten => tighten::draw(frame, state, data, views, np, cover),
         Layout::Sidebar => sidebar::draw(frame, state, data, views, np, cover),
+        Layout::Columns => columns::draw(frame, state, data, views, np, cover),
         // Not built yet: Tighten stands in.
-        Layout::Columns | Layout::PlayerPanel => tighten::draw(frame, state, data, views, np, cover),
+        Layout::PlayerPanel => tighten::draw(frame, state, data, views, np, cover),
     }
 }
 

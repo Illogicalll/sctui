@@ -596,6 +596,11 @@ impl Keymap {
         self.seqs(action).first().map(Seq::hint_label).unwrap_or_default()
     }
 
+    /// Every binding in the short form, for a key column (`g g, home`); empty when unbound.
+    pub fn hint_labels(&self, action: Action) -> String {
+        self.seqs(action).iter().map(Seq::hint_label).collect::<Vec<_>>().join(", ")
+    }
+
     /// Rebuild binding → action. Shorter bindings go in first, then `Action::ALL`
     /// order; one that repeats or continues a binding already in is left out and
     /// reported, so a single key is never shadowed by a sequence.
@@ -845,6 +850,7 @@ mod tests {
         assert_eq!(Action::from_name("secondary_up"), None);
         assert_eq!(km.labels(Action::Top), "g g, Home");
         assert_eq!(km.first_label(Action::Top), "g g");
+        assert_eq!((km.hint_labels(Action::Top), km.hint_labels(Action::Bottom)), ("g g, home".to_string(), "G, end".to_string()));
     }
 
     fn feed(km: &Keymap, pending: &mut Vec<Chord>, c: char) -> KeyResult {
@@ -973,6 +979,7 @@ mod tests {
         assert!(km.unbind_one(Action::Top).unwrap_err().contains("no key"));
         assert_eq!(km.labels(Action::Top), "unbound");
         assert_eq!(km.first_label(Action::Top), "");
+        assert_eq!(km.hint_labels(Action::Top), "");
     }
 
     #[test]

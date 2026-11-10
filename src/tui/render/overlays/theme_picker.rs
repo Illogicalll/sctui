@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::theme::{self, Theme};
@@ -16,7 +16,7 @@ pub fn render_theme_picker(frame: &mut Frame, selected: usize, active_name: &str
     let t = theme::current();
     let height = Theme::BUILTIN.len() as u16 + 5;
     let popup_area = centered_rect_fixed(52, height, frame.area());
-    frame.render_widget(Clear, popup_area);
+    crate::tui::render::widgets::clear(frame, popup_area);
 
     let block = Block::default()
         .title(" Theme ")

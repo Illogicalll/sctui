@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Rect},
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Clear, Row, Table},
+    widgets::{Block, Borders, Row, Table},
 };
 
 use crate::api::Track;
@@ -80,7 +80,7 @@ pub fn render_queue(
     scroll: usize,
 ) {
     let popup_area = centered_rect(70, 60, frame.area());
-    frame.render_widget(Clear, popup_area);
+    crate::tui::render::widgets::clear(frame, popup_area);
 
     let total_width = popup_area.width as usize;
     let title_width = (total_width * 65) / 100;

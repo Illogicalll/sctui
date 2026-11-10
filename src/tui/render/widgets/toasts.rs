@@ -6,13 +6,13 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::Line,
-    widgets::{Block, BorderType, Clear},
+    widgets::{Block, BorderType},
 };
 
 use crate::theme;
 use crate::tui::logic::toast::{Toast, ToastKind};
 
-use super::{fit, put, text_width};
+use super::{clear, fit, put, text_width};
 
 /// Draw `toasts` from row 1 down, oldest first. A box is as wide as its text, up to
 /// the terminal less a cell either side; ones that do not fit below are left out.
@@ -32,7 +32,7 @@ pub fn draw(frame: &mut Frame, toasts: &[Toast]) {
         }
         let rect = Rect::new(area.right() - width - 1, y, width, 3);
         let style = Style::new().fg(colour);
-        frame.render_widget(Clear, rect);
+        clear(frame, rect);
         frame.render_widget(Block::bordered().border_type(BorderType::Rounded).border_style(style), rect);
         put(frame, Rect::new(rect.x + 2, y + 1, width - 4, 1), Line::styled(fit(&text, width as usize - 4), style));
         y += 3;
