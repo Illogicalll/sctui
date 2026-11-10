@@ -27,13 +27,22 @@ pub const HEIGHTS: [u16; 14] = [6, 8, 13, 14, 19, 20, 23, 24, 29, 30, 33, 34, 45
 /// Puts a fixture's state into one named configuration.
 pub type Setup = fn(&mut AppState);
 
-/// Every layout, as a function that switches a fixture to it.
+/// Switch to `layout`, with or without its navigation column focused and the queue
+/// docked. Every entry of [`LAYOUTS`] sets all three, so they can be applied in turn.
+fn layout(state: &mut AppState, layout: Layout, nav_focused: bool, dock_queue: bool) {
+    (state.settings.layout, state.nav_focused, state.settings.dock_queue) = (layout, nav_focused, dock_queue);
+}
+
+/// Every layout (and each of its variants), as a function that switches a fixture to
+/// it. The plain variant of a layout is named by its label.
 pub const LAYOUTS: &[(&str, Setup)] = &[
-    ("classic", |s| s.settings.layout = Layout::Classic),
-    ("tighten", |s| s.settings.layout = Layout::Tighten),
-    ("sidebar", |s| s.settings.layout = Layout::Sidebar),
-    ("columns", |s| s.settings.layout = Layout::Columns),
-    ("player-panel", |s| s.settings.layout = Layout::PlayerPanel),
+    ("classic", |s| layout(s, Layout::Classic, false, false)),
+    ("tighten", |s| layout(s, Layout::Tighten, false, false)),
+    ("sidebar", |s| layout(s, Layout::Sidebar, false, false)),
+    ("sidebar: nav focused", |s| layout(s, Layout::Sidebar, true, false)),
+    ("sidebar: docked queue", |s| layout(s, Layout::Sidebar, false, true)),
+    ("columns", |s| layout(s, Layout::Columns, false, false)),
+    ("player-panel", |s| layout(s, Layout::PlayerPanel, false, false)),
 ];
 
 /// Every overlay (and each of its pages / modes), as a function that opens it.
@@ -249,7 +258,12 @@ pub fn go(state: &mut AppState, data: &mut AppData, tab: usize, sub: usize, focu
 }
 
 /// The title / name of the focused pane's selected row; `None` when the pane is empty.
+/// While the navigation column has focus, its current entry.
 pub fn selected_label(state: &AppState, data: &AppData, views: &FilteredViews) -> Option<String> {
+    if nav::in_nav(state) {
+        let items = nav::nav_items(state, data, state.settings.layout == Layout::Sidebar);
+        return Some(items[nav::nav_index(state, data, &items)].label.clone());
+    }
     let id = nav::focused(state);
     pane_view(id, state, data, views).1.label(nav::cursor(state, id)).map(str::to_string)
 }

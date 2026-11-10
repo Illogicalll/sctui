@@ -4,7 +4,7 @@ use crate::keymap::Keymap;
 use super::nav::PaneId;
 use crate::theme::{Overrides, Theme};
 use ratatui::widgets::TableState;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -270,6 +270,8 @@ impl Engagement {
 pub struct FetchTask {
     pub request_id: u64,
     pub task: Option<tokio::task::JoinHandle<()>>,
+    /// Cursor to put back once the rows being fetched arrive (see `refetch`).
+    pub restore: Option<usize>,
 }
 
 impl FetchTask {
@@ -298,9 +300,14 @@ impl FetchTask {
     /// Fetch-on-select for one tracks pane. `selected` is the key (tracks_uri or user urn)
     /// of the highlighted parent row, `None` when there is none. Refetches when the key
     /// changed, clears the pane when nothing is selected, then clamps `row`.
+    /// The pane's cursor is remembered per parent: leaving a key files `row` under
+    /// (`pane`, key) in `cursors`, and coming back restores it once the rows are in.
     /// Returns true when the pane was reset (refetched or cleared).
+    #[allow(clippy::too_many_arguments)]
     pub fn refetch(
         &mut self,
+        pane: PaneId,
+        cursors: &mut HashMap<(PaneId, String), usize>,
         tracks: &mut Vec<Track>,
         table: &mut TableState,
         key: &mut Option<String>,
@@ -308,10 +315,16 @@ impl FetchTask {
         selected: Option<String>,
         spawn: impl FnOnce(u64, String) -> tokio::task::JoinHandle<()>,
     ) -> bool {
+        let same = selected.is_some() && selected == *key;
+        if !same && let Some(old_key) = key.take() {
+            // Rows that never arrived leave the cursor they were waiting for on file.
+            cursors.insert((pane, old_key), self.restore.take().unwrap_or(*row));
+        }
         let reset = match selected {
-            Some(new_key) if key.as_deref() == Some(new_key.as_str()) => false,
+            Some(_) if same => false,
             Some(new_key) => {
                 self.cancel();
+                self.restore = cursors.get(&(pane, new_key.clone())).copied();
                 *key = Some(new_key.clone());
                 tracks.clear();
                 table.select(Some(0));
@@ -327,6 +340,12 @@ impl FetchTask {
                 true
             }
         };
+        if !tracks.is_empty()
+            && let Some(saved) = self.restore.take()
+        {
+            *row = saved;
+            table.select(Some(*row));
+        }
         if !tracks.is_empty() && *row >= tracks.len() {
             *row = tracks.len() - 1;
             table.select(Some(*row));
@@ -416,6 +435,15 @@ pub struct AppState {
     pub selected_row: usize,
     /// Focused pane index per location, `[main tab][sub-tab]`. Read through `nav::focus`.
     pub focus: [[usize; 4]; 3],
+    /// The navigation column (Sidebar, Columns) has focus instead of a pane. Read it
+    /// through `nav::in_nav`, which also checks the layout has one.
+    pub nav_focused: bool,
+    /// On Library › Playlists, the navigation column's cursor is on the `Playlists`
+    /// entry itself rather than on the selected playlist beneath it.
+    pub nav_on_header: bool,
+    /// Where each child pane's cursor was for each parent item it has shown (playlist
+    /// or album `tracks_uri`, user urn, feed key). Written by `FetchTask::refetch`.
+    pub child_cursors: HashMap<(PaneId, String), usize>,
     /// `selected_row` of each location that is not on screen, `[main tab][sub-tab]`.
     pub primary_rows: [[usize; 4]; 3],
     /// Visible rows of the focused pane, written by the renderer; 0 until it has drawn
@@ -725,6 +753,90 @@ mod tests {
         Engagement::UnlikeTrack { track_urn: "soundcloud:tracks:1".into(), track_id: 1 }.failed("offline", &mut state, &mut data);
         assert!(data.liked_track_urns.contains("soundcloud:tracks:1"));
         assert_eq!(state.toasts.last().unwrap().msg, "Unlike failed: offline");
+    }
+
+    /// Identity, not position: each parent item has its own cursor in the child pane.
+    #[test]
+    fn child_cursor_is_remembered_per_parent() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        let rows = |n: usize| -> Vec<Track> {
+            let track = |i| Track {
+                title: format!("t{i}"),
+                artists: String::new(),
+                duration: String::new(),
+                duration_ms: 0,
+                playback_count: String::new(),
+                artwork_url: String::new(),
+                access: String::new(),
+                track_urn: format!("soundcloud:tracks:{i}"),
+            };
+            (0..n).map(track).collect()
+        };
+        // One pass of the loop over Library › Playlists with playlist `uri` selected.
+        let pass = |state: &mut AppState, data: &mut AppData, uri: Option<&str>| {
+            state.playlist_tracks_fetch.refetch(
+                PaneId::PlaylistTracks,
+                &mut state.child_cursors,
+                &mut data.playlist_tracks,
+                &mut data.playlist_tracks_state,
+                &mut data.playlist_tracks_uri,
+                &mut state.selected_playlist_track_row,
+                uri.map(str::to_string),
+                |_, _| rt.spawn(async {}),
+            )
+        };
+
+        // Playlist A: its rows arrive, the cursor goes to row 5.
+        assert!(pass(&mut state, &mut data, Some("a")));
+        data.playlist_tracks = rows(10);
+        assert!(!pass(&mut state, &mut data, Some("a")));
+        state.selected_playlist_track_row = 5;
+        // Playlist B starts at the top, and gets its own cursor.
+        assert!(pass(&mut state, &mut data, Some("b")));
+        assert_eq!((state.selected_playlist_track_row, data.playlist_tracks.len()), (0, 0));
+        data.playlist_tracks = rows(4);
+        pass(&mut state, &mut data, Some("b"));
+        assert_eq!(state.selected_playlist_track_row, 0);
+        state.selected_playlist_track_row = 2;
+        // Back to A: row 0 while loading, row 5 once its rows are in.
+        assert!(pass(&mut state, &mut data, Some("a")));
+        assert_eq!(state.selected_playlist_track_row, 0);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 0, "nothing to restore onto yet");
+        data.playlist_tracks = rows(10);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 5);
+        assert_eq!(data.playlist_tracks_state.selected(), Some(5));
+        // Restored once: the cursor is the user's again afterwards.
+        state.selected_playlist_track_row = 7;
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 7);
+
+        // Leaving before the rows arrive does not forget where the cursor was.
+        pass(&mut state, &mut data, Some("b"));
+        pass(&mut state, &mut data, Some("a"));
+        pass(&mut state, &mut data, Some("b"));
+        data.playlist_tracks = rows(4);
+        pass(&mut state, &mut data, Some("b"));
+        assert_eq!(state.selected_playlist_track_row, 2);
+        pass(&mut state, &mut data, Some("a"));
+        data.playlist_tracks = rows(10);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 7);
+        // A list that came back shorter clamps the remembered row.
+        pass(&mut state, &mut data, Some("b"));
+        pass(&mut state, &mut data, Some("a"));
+        data.playlist_tracks = rows(3);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 2);
+        // Nothing selected clears the pane; the cursor is still on file for later.
+        assert!(pass(&mut state, &mut data, None));
+        assert_eq!((state.selected_playlist_track_row, data.playlist_tracks_uri.clone()), (0, None));
+        assert_eq!(state.child_cursors.get(&(PaneId::PlaylistTracks, "a".to_string())), Some(&2));
+        // Another pane's cursor for the same key is its own.
+        assert_eq!(state.child_cursors.get(&(PaneId::SearchPlaylistTracks, "a".to_string())), None);
     }
 
     #[test]

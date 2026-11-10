@@ -3,16 +3,72 @@ use crate::theme;
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint},
-    style::{Style},
+    layout::{Alignment, Constraint, Rect},
+    style::{Modifier, Style},
+    text::Line,
     widgets::{Block, Borders, Clear, Row, Table},
 };
 
 use crate::api::Track;
-use crate::tui::logic::state::QueuedTrack;
+use crate::tui::logic::state::{AppData, AppState, PlaybackSource, QueuedTrack};
+use crate::tui::logic::utils::active_tracks;
 use crate::tui::render::utils::{styled_header, truncate_with_ellipsis};
+use crate::tui::render::widgets::{fit, put};
 
 use super::utils::centered_rect;
+
+/// The tracks still to play, in order: the manual queue, then the rest of what is
+/// playing. `true` marks a track the user queued.
+pub fn up_next<'a>(
+    queue_tracks: &'a [Track],
+    manual_queue: &'a VecDeque<QueuedTrack>,
+    auto_queue: &'a VecDeque<usize>,
+) -> impl Iterator<Item = (&'a Track, bool)> {
+    manual_queue
+        .iter()
+        .map(|queued| (&queued.track, queued.user_added))
+        .chain(auto_queue.iter().filter_map(|idx| queue_tracks.get(*idx)).map(|track| (track, false)))
+}
+
+/// The queue as a plain numbered list filling `area`, for a layout that shows it
+/// beside the panes (Sidebar's dock, the Player panel): the user's own tracks under
+/// `QUEUED BY YOU`, the rest under what they come from. Display only.
+pub fn draw_up_next(frame: &mut Frame, area: Rect, state: &AppState, data: &AppData) {
+    let t = theme::current();
+    let area = area.intersection(frame.area());
+    let mut y = area.y;
+    let mut line = |frame: &mut Frame, text: String, style: Style| {
+        if y < area.bottom() {
+            put(frame, Rect { y, height: 1, ..area }, Line::styled(fit(&text, area.width as usize), style));
+            y += 1;
+        }
+    };
+    let heading = Style::new().fg(t.secondary).add_modifier(Modifier::BOLD);
+    let source = match state.playback_source {
+        PlaybackSource::Likes | PlaybackSource::FollowingLikes => "LIKES",
+        PlaybackSource::Playlist => "PLAYLIST",
+        PlaybackSource::Album => "ALBUM",
+        PlaybackSource::FollowingPublished => "UPLOADS",
+        PlaybackSource::Feed => "FEED",
+        PlaybackSource::Radio => "STATION",
+    };
+    let mut section = None;
+    let mut n = 0;
+    let upcoming = up_next(active_tracks(state, data), &state.manual_queue, &state.auto_queue);
+    for (track, by_user) in upcoming.take(area.height as usize) {
+        if section != Some(by_user) {
+            section = Some(by_user);
+            let shuffled = if state.shuffle_enabled && !by_user { " · SHUFFLED" } else { "" };
+            line(frame, if by_user { "QUEUED BY YOU".into() } else { format!("FROM {source}{shuffled}") }, heading);
+        }
+        n += 1;
+        let color = if !track.is_playable() { t.dim } else if by_user { t.fg } else { t.muted };
+        line(frame, format!("{n:<3}{}", track.title), Style::new().fg(color));
+    }
+    if n == 0 {
+        line(frame, "queue is empty".into(), Style::new().fg(t.dim));
+    }
+}
 
 pub fn render_queue(
     frame: &mut Frame,
@@ -62,10 +118,7 @@ pub fn render_queue(
 
     // Upcoming tracks, manual queue first; `scroll` of them are off the top.
     let max_rows = popup_area.height.saturating_sub(3) as usize;
-    let upcoming = manual_queue
-        .iter()
-        .map(|queued| &queued.track)
-        .chain(auto_queue.iter().filter_map(|idx| queue_tracks.get(*idx)));
+    let upcoming = up_next(queue_tracks, manual_queue, auto_queue).map(|(track, _)| track);
     let scroll = scroll.min((manual_queue.len() + auto_queue.len()).saturating_sub(1));
     for track in upcoming.skip(scroll).take(max_rows.saturating_sub(rows.len())) {
         let mut row = Row::new(vec![

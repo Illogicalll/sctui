@@ -1,6 +1,7 @@
 //! One pure function per layout, each built from the shared widgets.
 
 pub mod classic;
+pub mod sidebar;
 pub mod tighten;
 
 use ratatui::{Frame, layout::Rect};
@@ -24,8 +25,9 @@ pub fn draw(
     match state.settings.layout {
         Layout::Classic => classic::draw(frame, state, data, views, np, cover),
         Layout::Tighten => tighten::draw(frame, state, data, views, np, cover),
+        Layout::Sidebar => sidebar::draw(frame, state, data, views, np, cover),
         // Not built yet: Tighten stands in.
-        Layout::Sidebar | Layout::Columns | Layout::PlayerPanel => tighten::draw(frame, state, data, views, np, cover),
+        Layout::Columns | Layout::PlayerPanel => tighten::draw(frame, state, data, views, np, cover),
     }
 }
 

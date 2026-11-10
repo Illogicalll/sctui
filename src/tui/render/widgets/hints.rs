@@ -10,6 +10,7 @@ use ratatui::{
     widgets::Clear,
 };
 
+use crate::config::Layout;
 use crate::keymap::{Action, Seq};
 use crate::theme;
 use crate::tui::logic::nav::{self, PaneId, PaneKind};
@@ -70,10 +71,13 @@ pub fn pairs(state: &AppState, data: &AppData) -> Vec<(String, &'static str)> {
         vec![enter(keep), esc("cancel"), fixed("ctrl+w", "delete word")]
     } else if state.visualizer_mode {
         vec![fixed("tab", "mode"), k(Action::ToggleVisualizer, "back"), k(Action::PlayPause, "pause"), k(Action::NextTrack, "next")]
+    } else if nav::in_nav(state) {
+        vec![rows("move"), two(Action::PaneRight, Action::PlaySelected, "open"), k(Action::Palette, "commands"), k(Action::Help, "keys")]
     } else {
         let id = nav::focused(state);
         let mut out = Vec::new();
-        if nav::panes(state).len() > 1 {
+        // `[` also reaches the navigation column where there is one.
+        if nav::panes(state).len() - nav::first_pane(state) > 1 || nav::has_nav(state.settings.layout) {
             out.push(two(Action::PaneLeft, Action::PaneRight, "pane"));
         }
         match id.kind() {
@@ -108,6 +112,8 @@ pub fn pairs(state: &AppState, data: &AppData) -> Vec<(String, &'static str)> {
             }
         }
         match state.selected_tab {
+            // Sidebar's column is how its Library sections are reached.
+            0 if state.settings.layout == Layout::Sidebar => out.push(k(Action::Search, "filter")),
             0 => out.extend([sides("sub-tab"), k(Action::Search, "filter")]),
             1 => out.extend([sides("sub-tab"), k(Action::Search, "search")]),
             _ => {}
@@ -194,6 +200,20 @@ mod tests {
         assert_eq!(described(&state, &data), ["pane", "open", "new", "like", "sub-tab", "search", "commands", "keys"]);
         go(&mut state, &mut data, 2, 0, 0);
         assert_eq!(described(&state, &data), ["pane", "open", "commands", "keys"]);
+
+        // A navigation column is one more thing `[` reaches, so the pane keys show even
+        // with one pane; Sidebar's Library has no sub-tab row to step through.
+        go(&mut state, &mut data, 0, 0, 0);
+        state.settings.layout = Layout::Sidebar;
+        assert_eq!(described(&state, &data), ["pane", "play", "queue", "next", "like", "playlist", "station", "filter", "commands", "keys"]);
+        go(&mut state, &mut data, 1, 0, 0);
+        assert_eq!(described(&state, &data)[6..], ["station", "sub-tab", "search", "commands", "keys"]);
+        // The column itself: move, open, and the two ways to everything else.
+        state.nav_focused = true;
+        assert_eq!(described(&state, &data), ["move", "open", "commands", "keys"]);
+        state.settings.layout = Layout::Classic;
+        assert_eq!(described(&state, &data)[0], "play", "no column, no column hints");
+        go(&mut state, &mut data, 2, 0, 0);
 
         // Modes come before the pane: insert, visualiser, then each overlay.
         state.search_typing = true;

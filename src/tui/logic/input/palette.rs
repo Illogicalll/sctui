@@ -2,6 +2,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::helpers::edit_text;
 use crate::theme::{self, Theme};
+use crate::tui::logic::nav;
 use crate::tui::logic::palette::{Command, matches};
 use crate::tui::logic::state::AppState;
 
@@ -44,6 +45,7 @@ pub(crate) fn run(command: Command, state: &mut AppState) {
         Command::Action(_) => return,
         Command::Layout(layout) => {
             state.settings.layout = layout;
+            state.nav_focused &= nav::has_nav(layout);
             format!("Layout: {}", layout.label())
         }
         Command::Theme(name) => {

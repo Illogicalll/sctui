@@ -59,7 +59,10 @@ pub fn draw_pane_row(
     }
     let panes = nav::panes(state);
     let focus = nav::focus(state);
-    let (a, b) = visible_window(panes.len(), focus, 0, max_panes(area.width));
+    // Sidebar lists the playlists itself, and no pane is lit while its column has focus.
+    let first = nav::first_pane(state);
+    let lit = !nav::in_nav(state);
+    let (a, b) = visible_window(panes.len(), focus, first, max_panes(area.width));
     let weight = |i: usize| {
         weights.and_then(|w| w.get(i).copied()).unwrap_or(match panes[i].kind() {
             PaneKind::Tracks => 23,
@@ -74,12 +77,12 @@ pub fn draw_pane_row(
     for i in a..b {
         let width = if i + 1 == b { area.right() - x } else { (area.width as u32 * weight(i) / total) as u16 };
         let rect = Rect::new(x, area.y, width, area.height);
-        draw_pane(frame, rect, panes[i], i == focus, style, state, data, views, np);
+        draw_pane(frame, rect, panes[i], lit && i == focus, style, state, data, views, np);
 
         // Name what is off-screen on the bottom border, clear of the counter.
         let bottom = area.bottom() - 1;
         let mut left_end = rect.x + 1;
-        if i == a && a > 0 && rect.height >= 3 {
+        if i == a && a > first && rect.height >= 3 {
             let label = format!("‹ {}", fit(&pane_view(panes[a - 1], state, data, views).0, 10));
             let w = (text_width(&label) as u16).min(rect.width.saturating_sub(4));
             put(frame, Rect::new(rect.x + 2, bottom, w, 1), Line::styled(label, dim));

@@ -203,6 +203,9 @@ pub(crate) fn run_action(
         // Only seeks wait for an in-flight seek; every other key stays live.
         (player.is_playing() || state.current_playing_index.is_some()) && !player.is_seeking()
     };
+    if nav::in_nav(state) && commands::run_nav_command(action, state, data) {
+        return InputOutcome::Continue;
+    }
     match action {
         Action::Quit => {
             state.quit_confirm_visible = true;
@@ -215,9 +218,7 @@ pub(crate) fn run_action(
         Action::TabFeed => return navigation::go_to_tab(state, 2),
         Action::SubTabLeft => return navigation::sub_tab(state, 3),
         Action::SubTabRight => return navigation::sub_tab(state, 1),
-        Action::PaneLeft => {
-            nav::focus_left(state);
-        }
+        Action::PaneLeft => nav::pane_left(state),
         Action::PaneRight => {
             nav::focus_right(state);
         }

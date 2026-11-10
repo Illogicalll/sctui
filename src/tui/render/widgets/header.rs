@@ -58,7 +58,15 @@ pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &App
     if area.height < 2 {
         return 1;
     }
+    draw_subtabs(frame, row(1), state);
+    2
+}
 
+/// The header's second row on its own, in the one-row `area`: the sub-tabs (search
+/// types on Search) as pills and the filter or search query right-aligned. Sidebar
+/// draws it above the panes on Search.
+pub fn draw_subtabs(frame: &mut Frame, area: Rect, state: &AppState) {
+    let t = theme::current();
     let (titles, selected): (&[&str], usize) = match state.selected_tab {
         0 => (&SUBTAB_TITLES, state.selected_subtab),
         1 => (&SEARCHFILTERS, state.selected_searchfilter),
@@ -89,9 +97,8 @@ pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &App
         let pill = Style::new().fg(t.accent).add_modifier(Modifier::BOLD | Modifier::REVERSED);
         spans.push(Span::styled(format!(" {title} "), if i == selected { pill } else { Style::new().fg(t.muted) }));
     }
-    put(frame, row(1), Line::from(spans));
-    put_right(frame, Rect { width: area.width.saturating_sub(1), ..row(1) }, &find, find_style);
-    2
+    put(frame, area, Line::from(spans));
+    put_right(frame, Rect { width: area.width.saturating_sub(1), ..area }, &find, find_style);
 }
 
 #[cfg(test)]

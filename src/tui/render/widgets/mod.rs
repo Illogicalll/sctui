@@ -1,8 +1,9 @@
-//! Drawing shared by every layout: panes, the pane row, the player readouts, the hint
-//! line and toasts.
+//! Drawing shared by every layout: panes, the pane row, the navigation column, the
+//! player readouts, the hint line and toasts.
 
 pub mod header;
 pub mod hints;
+pub mod nav_column;
 pub mod pane;
 pub mod pane_row;
 pub mod player;

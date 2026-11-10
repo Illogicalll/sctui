@@ -147,6 +147,9 @@ fn invalidate_screen(terminal: &mut DefaultTerminal) {
 /// Bring filter matches, cursors and table states in line with the lists as they are
 /// now. Run before every draw.
 fn settle(state: &mut AppState, data: &mut AppData) -> FilteredViews {
+    if !nav::has_nav(state.settings.layout) {
+        state.nav_focused = false;
+    }
     rebuild_matches_if_active(state, data);
     let views = build_filtered_views(state, data);
     nav::clamp(state, data, &views);
@@ -596,6 +599,8 @@ fn start(
         if state.selected_tab == 0 && state.selected_subtab == 1 {
             let selected = nav::selected_index(&state, PaneId::Playlists).and_then(|i| data.playlists.get(i)).map(|p| p.tracks_uri.clone());
             state.playlist_tracks_fetch.refetch(
+                PaneId::PlaylistTracks,
+                &mut state.child_cursors,
                 &mut data.playlist_tracks,
                 &mut data.playlist_tracks_state,
                 &mut data.playlist_tracks_uri,
@@ -612,6 +617,8 @@ fn start(
         if state.selected_tab == 0 && state.selected_subtab == 2 {
             let selected = nav::selected_index(&state, PaneId::Albums).and_then(|i| data.albums.get(i)).map(|a| a.tracks_uri.clone());
             state.album_tracks_fetch.refetch(
+                PaneId::AlbumTracks,
+                &mut state.child_cursors,
                 &mut data.album_tracks,
                 &mut data.album_tracks_state,
                 &mut data.album_tracks_uri,
@@ -628,6 +635,8 @@ fn start(
         if state.selected_tab == 0 && state.selected_subtab == 3 {
             let selected = nav::selected_index(&state, PaneId::Following).and_then(|i| data.following.get(i)).map(|a| a.urn.clone());
             state.following_tracks_fetch.refetch(
+                PaneId::FollowingTracks,
+                &mut state.child_cursors,
                 &mut data.following_tracks,
                 &mut data.following_tracks_state,
                 &mut data.following_tracks_user_urn,
@@ -640,6 +649,8 @@ fn start(
                 ),
             );
             state.following_likes_fetch.refetch(
+                PaneId::FollowingLikes,
+                &mut state.child_cursors,
                 &mut data.following_likes_tracks,
                 &mut data.following_likes_state,
                 &mut data.following_likes_user_urn,
@@ -658,6 +669,8 @@ fn start(
             let single = selected.and_then(|a| a.track.clone());
             let key = selected.map(|a| a.key.clone());
             state.feed_tracks_fetch.refetch(
+                PaneId::FeedTracks,
+                &mut state.child_cursors,
                 &mut data.feed_tracks,
                 &mut data.feed_tracks_state,
                 &mut data.feed_tracks_key,
@@ -797,6 +810,8 @@ fn start(
         if state.selected_tab == 1 && state.selected_searchfilter == 2 {
             let selected = nav::selected_index(&state, PaneId::SearchPlaylists).and_then(|i| data.search_playlists.get(i)).map(|p| p.tracks_uri.clone());
             state.search_playlist_tracks_fetch.refetch(
+                PaneId::SearchPlaylistTracks,
+                &mut state.child_cursors,
                 &mut data.search_playlist_tracks,
                 &mut data.search_playlist_tracks_state,
                 &mut data.search_playlist_tracks_uri,
@@ -813,6 +828,8 @@ fn start(
         if state.selected_tab == 1 && state.selected_searchfilter == 1 {
             let selected = nav::selected_index(&state, PaneId::SearchAlbums).and_then(|i| data.search_albums.get(i)).map(|a| a.tracks_uri.clone());
             state.search_album_tracks_fetch.refetch(
+                PaneId::SearchAlbumTracks,
+                &mut state.child_cursors,
                 &mut data.search_album_tracks,
                 &mut data.search_album_tracks_state,
                 &mut data.search_album_tracks_uri,
@@ -829,6 +846,8 @@ fn start(
         if state.selected_tab == 1 && state.selected_searchfilter == 3 {
             let selected = nav::selected_index(&state, PaneId::SearchPeople).and_then(|i| data.search_people.get(i)).map(|a| a.urn.clone());
             state.search_people_tracks_fetch.refetch(
+                PaneId::SearchPeopleTracks,
+                &mut state.child_cursors,
                 &mut data.search_people_tracks,
                 &mut data.search_people_tracks_state,
                 &mut data.search_people_tracks_user_urn,
@@ -841,6 +860,8 @@ fn start(
                 ),
             );
             state.search_people_likes_fetch.refetch(
+                PaneId::SearchPeopleLikes,
+                &mut state.child_cursors,
                 &mut data.search_people_likes_tracks,
                 &mut data.search_people_likes_state,
                 &mut data.search_people_likes_user_urn,

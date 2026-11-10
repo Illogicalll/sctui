@@ -4,7 +4,7 @@ mod history;
 mod palette;
 mod playlist_picker;
 mod theme_picker;
-mod queue;
+pub mod queue;
 mod quit;
 mod utils;
 

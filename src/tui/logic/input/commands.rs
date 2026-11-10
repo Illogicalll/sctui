@@ -1,3 +1,6 @@
+use ratatui::crossterm::event::KeyCode;
+
+use crate::config::Layout;
 use crate::keymap::Action;
 
 use super::InputOutcome;
@@ -9,6 +12,7 @@ use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::queued_from_current;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
+use super::helpers::list_step;
 use super::queue::{handle_add_to_queue, handle_add_next_to_queue, selected_or_toast};
 
 /// Commands that are plain state changes; movement, playback and tab actions
@@ -130,6 +134,60 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
         _ => {}
     }
     InputOutcome::Continue
+}
+
+/// An action while the navigation column has focus. Movement walks its entries and
+/// changes location as it goes; `]` or Enter steps into the panes; delete and like act
+/// on the playlist entry under the cursor; the actions that need a track do nothing.
+/// Returns false for everything else (tabs, sub-tabs, playback, popups), which works
+/// as it does anywhere.
+pub(crate) fn run_nav_command(action: Action, state: &mut AppState, data: &mut AppData) -> bool {
+    match action {
+        Action::PaneLeft
+        | Action::StartStation
+        | Action::AddToQueue
+        | Action::PlayNext
+        | Action::AddToPlaylist
+        | Action::RemoveFromPlaylist => {}
+        Action::PaneRight | Action::PlaySelected => nav::leave_nav(state),
+        Action::Up
+        | Action::Down
+        | Action::PageUp
+        | Action::PageDown
+        | Action::HalfPageUp
+        | Action::HalfPageDown
+        | Action::Top
+        | Action::Bottom => {
+            let items = nav::nav_items(state, data, state.settings.layout == Layout::Sidebar);
+            let at = nav::nav_index(state, data, &items);
+            // `list_step` only looks at the key when there is no action.
+            let key = KeyCode::Null.into();
+            if let Some(to) = list_step(&key, Some(action), at, items.len() - 1) {
+                nav::nav_go(state, data, &items[to]);
+                // Two rows can share a uri (a playlist both owned and liked): the row
+                // moved onto is the one selected, whichever `nav_go` found.
+                if let Some(first) = items.iter().position(|i| i.playlist_uri.is_some())
+                    && items[to].playlist_uri.is_some()
+                {
+                    *nav::cursor_mut(state, PaneId::Playlists) = to - first;
+                }
+            }
+        }
+        Action::DeletePlaylist => {
+            if let Some(playlist) = nav::nav_playlist(state, data).filter(|p| p.is_owned) {
+                state.confirm = Some(ConfirmAction::DeletePlaylist { tracks_uri: playlist.tracks_uri.clone() });
+                state.confirm_selected = 1;
+            }
+        }
+        Action::ToggleLike => toggle_playlist_like(nav::nav_playlist(state, data).cloned(), state, data),
+        // The filter belongs to a pane, which takes the focus.
+        Action::Search => {
+            state.nav_focused = false;
+            return false;
+        }
+        _ => return false,
+    }
+    true
 }
 
 /// Like/unlike or follow/unfollow the focused pane's selected row: the track in a

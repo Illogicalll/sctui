@@ -5,10 +5,11 @@
 
 use ratatui::widgets::TableState;
 
-use crate::api::Track;
+use crate::api::{Playlist, Track};
+use crate::config::Layout;
 
 use super::filtering::{FilteredViews, clear_filter, is_filter_active};
-use super::state::{AppData, AppState, FollowingTracksFocus};
+use super::state::{AppData, AppState, FollowingTracksFocus, SUBTAB_TITLES, TAB_TITLES};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaneKind {
@@ -19,7 +20,7 @@ pub enum PaneKind {
     Feed,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PaneId {
     Likes,
     Playlists,
@@ -110,10 +111,16 @@ pub fn panes(state: &AppState) -> &'static [PaneId] {
     panes_at(tab, sub)
 }
 
-/// Index into [`panes`] of the focused pane.
+/// Index into [`panes`] of the focused pane; never a pane the layout does not draw.
 pub fn focus(state: &AppState) -> usize {
     let (tab, sub) = location(state);
-    state.focus[tab][sub].min(panes_at(tab, sub).len() - 1)
+    state.focus[tab][sub].min(panes_at(tab, sub).len() - 1).max(first_pane(state))
+}
+
+/// The first pane the layout draws: 1 on Library › Playlists in Sidebar, whose
+/// navigation column lists the playlists itself, otherwise 0.
+pub fn first_pane(state: &AppState) -> usize {
+    (state.settings.layout == Layout::Sidebar && location(state) == (0, 1)) as usize
 }
 
 pub fn focused(state: &AppState) -> PaneId {
@@ -129,7 +136,7 @@ pub fn set_focus(state: &mut AppState, idx: usize) {
 /// Focus the pane to the left; `false` at the edge.
 pub fn focus_left(state: &mut AppState) -> bool {
     let at = focus(state);
-    if at == 0 {
+    if at <= first_pane(state) {
         return false;
     }
     set_focus(state, at - 1);
@@ -144,6 +151,108 @@ pub fn focus_right(state: &mut AppState) -> bool {
     }
     set_focus(state, at + 1);
     true
+}
+
+/// Layouts with a navigation column to the left of the panes.
+pub fn has_nav(layout: Layout) -> bool {
+    matches!(layout, Layout::Sidebar | Layout::Columns)
+}
+
+/// The navigation column has focus. Only ever true in a layout that has one,
+/// whatever `nav_focused` was left at.
+pub fn in_nav(state: &AppState) -> bool {
+    state.nav_focused && has_nav(state.settings.layout)
+}
+
+/// `[`: focus the pane to the left, or the navigation column from the leftmost pane
+/// of a layout that has one.
+pub fn pane_left(state: &mut AppState) {
+    if !in_nav(state) && !focus_left(state) && has_nav(state.settings.layout) {
+        state.nav_focused = true;
+    }
+}
+
+/// `]` or Enter in the navigation column: focus goes to the first pane drawn.
+pub fn leave_nav(state: &mut AppState) {
+    state.nav_focused = false;
+    let first = first_pane(state);
+    set_focus(state, first);
+}
+
+/// One entry of the navigation column: a Library section, Search, the Feed, or (in
+/// Sidebar) one of the user's playlists, which sits on Library › Playlists.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct NavItem {
+    pub label: String,
+    pub tab: usize,
+    /// `None` keeps the sub-tab the main tab was last on.
+    pub sub: Option<usize>,
+    /// `tracks_uri` of the playlist a playlist entry stands for.
+    pub playlist_uri: Option<String>,
+}
+
+/// The navigation column, top to bottom: Likes, Playlists (with the playlists listed
+/// beneath it when `with_playlists`), Albums, Following, Search, and the Feed unless
+/// it is hidden.
+pub fn nav_items(state: &AppState, data: &AppData, with_playlists: bool) -> Vec<NavItem> {
+    let section = |label: &str, tab, sub| NavItem { label: label.to_string(), tab, sub, playlist_uri: None };
+    let mut out = vec![section(SUBTAB_TITLES[0], 0, Some(0)), section(SUBTAB_TITLES[1], 0, Some(1))];
+    if with_playlists {
+        out.extend(data.playlists.iter().map(|p| NavItem {
+            label: p.title.clone(),
+            tab: 0,
+            sub: Some(1),
+            playlist_uri: Some(p.tracks_uri.clone()),
+        }));
+    }
+    out.extend([section(SUBTAB_TITLES[2], 0, Some(2)), section(SUBTAB_TITLES[3], 0, Some(3)), section(TAB_TITLES[1], 1, None)]);
+    if !state.settings.hide_feed_tab {
+        out.push(section(TAB_TITLES[2], 2, None));
+    }
+    out
+}
+
+/// Which of `items` is the current one: the entry for the location, or, on Library ›
+/// Playlists when the column lists playlists and was last on one, the selected playlist.
+pub fn nav_index(state: &AppState, data: &AppData, items: &[NavItem]) -> usize {
+    let (tab, sub) = location(state);
+    if (tab, sub) == (0, 1)
+        && !state.nav_on_header
+        && let Some(first) = items.iter().position(|i| i.playlist_uri.is_some())
+    {
+        // By position, not uri: a playlist the user both owns and likes is listed twice.
+        let at = first + cursor(state, Playlists).min(data.playlists.len().saturating_sub(1));
+        if items.get(at).is_some_and(|i| i.playlist_uri.is_some()) {
+            return at;
+        }
+    }
+    items
+        .iter()
+        .position(|i| i.playlist_uri.is_none() && i.tab == tab && i.sub.is_none_or(|s| s == sub))
+        .unwrap_or(0)
+}
+
+/// Go where a navigation entry points. A playlist entry also selects its playlist in
+/// the Playlists pane, by identity, and drops any filter on the tracks it had open.
+pub fn nav_go(state: &mut AppState, data: &AppData, item: &NavItem) {
+    set_location(state, item.tab, item.sub);
+    state.nav_on_header = item.playlist_uri.is_none();
+    if let Some(uri) = &item.playlist_uri
+        && let Some(at) = data.playlists.iter().position(|p| p.tracks_uri == *uri)
+    {
+        clear_filter(state);
+        *cursor_mut(state, Playlists) = at;
+    }
+}
+
+/// The playlist under the navigation column's cursor while the column has focus: the
+/// row container actions (delete, like) act on there.
+pub fn nav_playlist<'a>(state: &AppState, data: &'a AppData) -> Option<&'a Playlist> {
+    if in_nav(state) && first_pane(state) == 1 && !state.nav_on_header {
+        data.playlists.get(cursor(state, Playlists))
+    } else {
+        None
+    }
 }
 
 /// Keep the flags the older handlers and renderers read in step with `focus`.
@@ -383,7 +492,7 @@ mod tests {
     use crate::api::{Artist, Playlist};
     use crate::keymap::Action;
     use crate::tui::logic::filtering::{build_filtered_views, rebuild_matches_if_active};
-    use crate::tui::logic::input::commands::run_command;
+    use crate::tui::logic::input::commands::{run_command, run_nav_command};
     use crate::tui::logic::input::playback::focused_artist;
     use crate::tui::logic::state::{ConfirmAction, Engagement};
 
@@ -704,6 +813,221 @@ mod tests {
                     assert!(focused_artist(&state, &data).is_none());
                 }
             }
+        }
+        assert!(state.confirm.is_none() && state.engagement_queue.is_empty());
+    }
+
+    fn in_layout(layout: Layout, tab: usize, sub: usize) -> AppState {
+        let mut state = at(tab, sub);
+        state.settings.layout = layout;
+        state
+    }
+
+    #[test]
+    fn bracket_left_from_first_pane_focuses_nav_only_in_nav_layouts() {
+        for layout in Layout::ALL {
+            let mut state = in_layout(layout, 0, 3);
+            set_focus(&mut state, 1);
+            pane_left(&mut state);
+            assert_eq!((focus(&state), in_nav(&state)), (0, false), "{layout:?}: one pane left first");
+            pane_left(&mut state);
+            assert_eq!(in_nav(&state), has_nav(layout), "{layout:?}");
+            assert_eq!(state.nav_focused, has_nav(layout), "{layout:?}: no flag left behind");
+            pane_left(&mut state);
+            assert_eq!((focus(&state), in_nav(&state)), (0, has_nav(layout)), "{layout:?}: nothing further left");
+        }
+        assert_eq!(Layout::ALL.map(has_nav), [false, false, true, true, false]);
+
+        // `]` and Enter leave it for the first pane drawn, wherever focus was before.
+        let mut data = AppData::default();
+        for leave in [Action::PaneRight, Action::PlaySelected] {
+            let mut state = in_layout(Layout::Sidebar, 0, 3);
+            set_focus(&mut state, 2);
+            state.nav_focused = true;
+            assert!(run_nav_command(Action::PaneLeft, &mut state, &mut data), "[ is swallowed, not passed on");
+            assert!(run_nav_command(leave, &mut state, &mut data));
+            assert_eq!((in_nav(&state), focus(&state)), (false, 0), "{leave:?}");
+        }
+        // Library › Playlists in Sidebar: the list pane is the column, so focus starts
+        // on the tracks and `[` from there is already the column.
+        let mut state = in_layout(Layout::Sidebar, 0, 1);
+        assert_eq!((first_pane(&state), focus(&state), focused(&state)), (1, 1, PlaylistTracks));
+        assert!(!focus_left(&mut state));
+        pane_left(&mut state);
+        assert!(in_nav(&state));
+        run_nav_command(Action::PlaySelected, &mut state, &mut data);
+        assert_eq!((in_nav(&state), focused(&state)), (false, PlaylistTracks));
+        // The same location anywhere else keeps its Playlists pane.
+        state.settings.layout = Layout::Columns;
+        assert_eq!((first_pane(&state), focus_left(&mut state), focused(&state)), (0, true, Playlists));
+        // A flag left set means nothing in a layout without the column.
+        state.nav_focused = true;
+        state.settings.layout = Layout::Tighten;
+        assert!(!in_nav(&state));
+    }
+
+    #[test]
+    fn nav_move_changes_location() {
+        let mut data = AppData::default();
+        data.playlists = vec![playlist(1), playlist(2)];
+        data.likes = tracks_named(&["a", "b", "c"]);
+        let mut state = in_layout(Layout::Sidebar, 1, 2);
+        state.search_needs_fetch = false;
+        set_location(&mut state, 0, Some(0));
+        *cursor_mut(&mut state, Likes) = 2;
+        state.nav_focused = true;
+        let labels: Vec<String> = nav_items(&state, &data, true).into_iter().map(|i| i.label).collect();
+        assert_eq!(labels, ["Likes", "Playlists", "playlist 1", "playlist 2", "Albums", "Following", "Search", "Feed"]);
+
+        let mut step = |state: &mut AppState, action: Action| {
+            assert!(run_nav_command(action, state, &mut data), "{action:?}");
+            let items = nav_items(state, &data, state.settings.layout == Layout::Sidebar);
+            (nav_index(state, &data, &items), location(state))
+        };
+        // Down the column: each step is a change of location, at once.
+        assert_eq!(step(&mut state, Action::Down), (1, (0, 1)));
+        assert!(state.nav_on_header, "the Playlists entry itself");
+        assert_eq!(step(&mut state, Action::Down), (2, (0, 1)));
+        assert_eq!(step(&mut state, Action::Down), (3, (0, 1)));
+        assert_eq!(cursor(&state, Playlists), 1);
+        assert_eq!(step(&mut state, Action::Down), (4, (0, 2)));
+        assert_eq!(step(&mut state, Action::Down), (5, (0, 3)));
+        assert_eq!(step(&mut state, Action::Down), (6, (1, 2)), "Search keeps its own type");
+        assert!(!state.search_needs_fetch);
+        assert_eq!(step(&mut state, Action::Down), (7, (2, 0)));
+        assert_eq!(step(&mut state, Action::Down), (7, (2, 0)), "stops at the end");
+        // Back up through the playlists and past the Playlists entry.
+        for want in [(6, (1, 2)), (5, (0, 3)), (4, (0, 2)), (3, (0, 1)), (2, (0, 1)), (1, (0, 1)), (0, (0, 0)), (0, (0, 0))] {
+            assert_eq!(step(&mut state, Action::Up), want);
+        }
+        assert_eq!(cursor(&state, Likes), 2, "the panes' own cursors are left alone");
+        assert_eq!(step(&mut state, Action::Bottom), (7, (2, 0)));
+        assert_eq!(step(&mut state, Action::HalfPageUp), (2, (0, 1)));
+        assert_eq!(step(&mut state, Action::Top), (0, (0, 0)));
+        assert_eq!(step(&mut state, Action::PageDown), (7, (2, 0)));
+        assert_eq!(step(&mut state, Action::PageUp), (0, (0, 0)));
+        // A hidden Feed is not an entry.
+        state.settings.hide_feed_tab = true;
+        assert_eq!(step(&mut state, Action::Bottom), (6, (1, 2)));
+        // Columns lists the sections only.
+        state.settings.layout = Layout::Columns;
+        assert_eq!(step(&mut state, Action::Top), (0, (0, 0)));
+        assert_eq!(step(&mut state, Action::Down), (1, (0, 1)));
+        assert_eq!(step(&mut state, Action::Down), (2, (0, 2)));
+        drop(step);
+
+        // Sub-tab, tab and playback keys are not the column's: they work as anywhere.
+        for action in [Action::SubTabRight, Action::NextTab, Action::TabSearch, Action::PlayPause, Action::ToggleQueue, Action::Help] {
+            assert!(!run_nav_command(action, &mut state, &mut data), "{action:?}");
+        }
+        assert!(state.nav_focused);
+        // The filter prompt belongs to a pane: it takes the focus from the column.
+        assert!(!run_nav_command(Action::Search, &mut state, &mut data));
+        assert!(!state.nav_focused);
+        // An empty library still has its sections.
+        let mut state = in_layout(Layout::Sidebar, 0, 1);
+        state.nav_focused = true;
+        let mut data = AppData::default();
+        assert!(run_nav_command(Action::Down, &mut state, &mut data));
+        assert_eq!(location(&state), (0, 2));
+        assert!(run_nav_command(Action::Up, &mut state, &mut data));
+        assert_eq!((location(&state), state.nav_on_header), ((0, 1), true));
+    }
+
+    #[test]
+    fn selecting_playlist_entry_sets_playlists_location_and_hides_list_pane() {
+        let mut data = AppData::default();
+        data.playlists = vec![playlist(1), playlist(2), playlist(3)];
+        data.likes = tracks_named(&["rave", "ambient"]);
+        let mut state = in_layout(Layout::Sidebar, 0, 0);
+        filter(&mut state, &data, "amb");
+        let items = nav_items(&state, &data, true);
+        let entry = items[3].clone();
+        assert_eq!((entry.label.as_str(), entry.playlist_uri.as_deref()), ("playlist 2", Some(data.playlists[1].tracks_uri.as_str())));
+
+        nav_go(&mut state, &data, &entry);
+        assert_eq!((location(&state), cursor(&state, Playlists)), ((0, 1), 1));
+        assert!(!state.search_popup_visible && state.search_query.is_empty(), "the Likes filter is closed");
+        assert_eq!(nav_index(&state, &data, &items), 3);
+        // The column is the playlists pane: the first pane drawn, and focused, is the tracks.
+        assert_eq!((first_pane(&state), focus(&state), focused(&state)), (1, 1, PlaylistTracks));
+        set_focus(&mut state, 0);
+        assert_eq!(focused(&state), PlaylistTracks, "focus cannot land on the hidden pane");
+
+        // By identity: the list shifts, the entry still means the same playlist.
+        data.playlists.insert(0, playlist(9));
+        nav_go(&mut state, &data, &items[2]);
+        assert_eq!(data.playlists[cursor(&state, Playlists)].title, "playlist 1");
+        // A filter on the open playlist's tracks does not follow to the next playlist.
+        data.playlist_tracks = tracks_named(&["one", "two"]);
+        filter(&mut state, &data, "two");
+        nav_go(&mut state, &data, &entry);
+        assert!(!state.search_popup_visible);
+        assert_eq!(data.playlists[cursor(&state, Playlists)].title, "playlist 2");
+        // A playlist that has gone leaves the selection where it was.
+        let gone = NavItem { playlist_uri: Some("nope".into()), ..entry.clone() };
+        nav_go(&mut state, &data, &gone);
+        assert_eq!((location(&state), data.playlists[cursor(&state, Playlists)].title.as_str()), ((0, 1), "playlist 2"));
+        // The Playlists entry itself keeps the selected playlist and marks the header.
+        nav_go(&mut state, &data, &items[1]);
+        let items = nav_items(&state, &data, true);
+        assert_eq!((nav_index(&state, &data, &items), cursor(&state, Playlists)), (1, 2));
+        // Other layouts draw the Playlists pane as ever.
+        state.settings.layout = Layout::Tighten;
+        assert_eq!((first_pane(&state), focus(&state)), (0, 0));
+    }
+
+    #[test]
+    fn delete_and_like_act_on_nav_playlist_entry() {
+        let mut data = AppData::default();
+        let liked = Playlist { is_owned: false, ..playlist(2) };
+        data.liked_playlist_uris.insert(liked.tracks_uri.clone());
+        data.playlists = vec![playlist(1), liked.clone()];
+        data.playlist_tracks = vec![track(7, "song")];
+        data.playlist_tracks_uri = Some(data.playlists[0].tracks_uri.clone());
+        let mut state = in_layout(Layout::Sidebar, 0, 1);
+
+        // With the tracks focused the playlist keys do nothing: there is no playlist row.
+        run_command(Action::DeletePlaylist, &mut state, &mut data);
+        assert!(state.confirm.is_none());
+
+        // On the entry of a playlist of the user's own, delete asks, naming it by identity.
+        state.nav_focused = true;
+        assert_eq!(nav_playlist(&state, &data).map(|p| p.title.as_str()), Some("playlist 1"));
+        assert!(run_nav_command(Action::DeletePlaylist, &mut state, &mut data));
+        match state.confirm.take() {
+            Some(ConfirmAction::DeletePlaylist { tracks_uri }) => assert_eq!(tracks_uri, data.playlists[0].tracks_uri),
+            _ => panic!("no confirm for the nav entry's playlist"),
+        }
+        // Nothing that needs a track fires from the column, even with tracks beside it.
+        for action in [Action::AddToQueue, Action::PlayNext, Action::AddToPlaylist, Action::RemoveFromPlaylist, Action::StartStation] {
+            assert!(run_nav_command(action, &mut state, &mut data), "{action:?} fell through");
+        }
+        assert!(state.manual_queue.is_empty() && !state.playlist_picker_visible && state.confirm.is_none());
+        assert!(state.toasts.is_empty() && state.artist_station_request.is_none());
+
+        // A liked playlist cannot be deleted, and like toggles it.
+        *cursor_mut(&mut state, Playlists) = 1;
+        run_nav_command(Action::DeletePlaylist, &mut state, &mut data);
+        assert!(state.confirm.is_none());
+        assert!(run_nav_command(Action::ToggleLike, &mut state, &mut data));
+        assert!(matches!(
+            state.engagement_queue.pop_front(),
+            Some(Engagement::UnlikePlaylist { tracks_uri, playlist_id: 2 }) if tracks_uri == liked.tracks_uri
+        ));
+        assert!(!data.liked_playlist_uris.contains(&liked.tracks_uri));
+
+        // On the Playlists entry itself, on another section, or in Columns (no playlist
+        // entries) there is no playlist under the cursor.
+        state.nav_on_header = true;
+        assert!(nav_playlist(&state, &data).is_none());
+        state.nav_on_header = false;
+        state.settings.layout = Layout::Columns;
+        assert!(nav_playlist(&state, &data).is_none());
+        state.settings.layout = Layout::Sidebar;
+        set_location(&mut state, 0, Some(2));
+        for action in [Action::DeletePlaylist, Action::ToggleLike] {
+            assert!(run_nav_command(action, &mut state, &mut data));
         }
         assert!(state.confirm.is_none() && state.engagement_queue.is_empty());
     }
