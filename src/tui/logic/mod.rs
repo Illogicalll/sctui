@@ -49,7 +49,7 @@ use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
-    active_tracks, append_feed_tracks, extend_likes_playback, next_track_trigger_ms, play_queued_track, queued_from_current,
+    advance, append_feed_tracks, end_of_track, extend_likes_playback, next_track_trigger_ms, peek_next,
     start_station,
 };
 
@@ -465,16 +465,8 @@ fn start(
                         && state.playback_source == PlaybackSource::Radio
                     {
                         append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks, false);
-                        if state.radio_waiting
-                            && let Some(next_idx) = state.auto_queue.pop_front()
-                            && let Some(track) = data.playback_tracks.get(next_idx).cloned()
-                        {
-                            if let Some(current) = queued_from_current(&state, &data) {
-                                state.push_history(current);
-                            }
+                        if state.radio_waiting && let Some(track) = advance(&mut state, &data) {
                             player.play(track, TrackChange::Natural);
-                            state.override_playing = None;
-                            state.current_playing_index = Some(next_idx);
                             state.radio_waiting = false;
                         }
                     }
@@ -1085,21 +1077,8 @@ fn start(
                     && state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str());
                 
                 if should_preload
-                    && let Some(current_idx) = state.current_playing_index {
-                        let next_track = {
-                            let tracks = active_tracks(&state, &data);
-                            if state.repeat_enabled {
-                                tracks.get(current_idx).cloned()
-                            } else if let Some(queued) = state.manual_queue.front() {
-                                Some(queued.track.clone())
-                            } else if let Some(&next_idx) = state.auto_queue.front() {
-                                tracks.get(next_idx).cloned()
-                            } else {
-                                None
-                            }
-                        };
-
-                        match next_track {
+                    && state.current_playing_index.is_some() {
+                        match peek_next(&state, &data) {
                             Some(track) => {
                                 if track.track_urn != current_track.track_urn && track.is_playable() {
                                     player.preload_next(track);
@@ -1129,33 +1108,9 @@ fn start(
                 } else if state.end_handled_track_urn.as_deref() != Some(current_track.track_urn.as_str()) {
                     state.end_handled_track_urn = Some(current_track.track_urn.clone());
 
-                    if let Some(current_idx) = state.current_playing_index {
-                        if state.repeat_enabled {
-                        if let Some(track) = active_tracks(&state, &data).get(current_idx) {
-                            player.play(track.clone(), TrackChange::Natural);
-                            state.override_playing = None;
-                        }
-                        } else if let Some(queued) = state.manual_queue.pop_front() {
-                        if let Some(current) = queued_from_current(&state, &data) {
-                            state.push_history(current);
-                        }
-                            play_queued_track(
-                                queued,
-                                &mut state,
-                                &mut data,
-                                &player,
-                                true,
-                                TrackChange::Natural,
-                            );
-                        } else if let Some(next_idx) = state.auto_queue.pop_front() {
-                            if let Some(track) = active_tracks(&state, &data).get(next_idx) {
-                                if let Some(current) = queued_from_current(&state, &data) {
-                                    state.push_history(current);
-                                }
-                                player.play(track.clone(), TrackChange::Natural);
-                                state.override_playing = None;
-                                state.current_playing_index = Some(next_idx);
-                            }
+                    if state.current_playing_index.is_some() {
+                        if let Some(track) = end_of_track(&mut state, &data) {
+                            player.play(track, TrackChange::Natural);
                         } else {
                             // Nothing queued: related tracks are (or are about to be) on
                             // their way; Msg::Related starts the next one.

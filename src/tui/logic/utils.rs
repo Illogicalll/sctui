@@ -461,6 +461,56 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
     ))
 }
 
+/// Move the queue on from the track that is playing and return the one to play instead:
+/// the first track queued by hand (it plays outside the list, as `override_playing`),
+/// else the next of the list. `None`, with nothing changed, when nothing is queued.
+pub(crate) fn advance(state: &mut AppState, data: &AppData) -> Option<Track> {
+    let current = queued_from_current(state, data);
+    let track = if let Some(queued) = state.manual_queue.pop_front() {
+        let track = queued.track.clone();
+        state.override_playing = Some(queued);
+        track
+    } else {
+        let next_idx = state.auto_queue.pop_front()?;
+        let track = active_tracks(state, data).get(next_idx)?.clone();
+        state.override_playing = None;
+        state.current_playing_index = Some(next_idx);
+        track
+    };
+    if let Some(current) = current {
+        state.push_history(current);
+    }
+    Some(track)
+}
+
+/// The track that is playing: not the list's current row while a queued, previous or
+/// history track plays over it.
+fn playing_track<'a>(state: &'a AppState, data: &'a AppData) -> Option<&'a Track> {
+    match &state.override_playing {
+        Some(queued) => Some(&queued.track),
+        None => active_tracks(state, data).get(state.current_playing_index?),
+    }
+}
+
+/// The playing track ran out: what plays now. With repeat on that is the same track again.
+pub(crate) fn end_of_track(state: &mut AppState, data: &AppData) -> Option<Track> {
+    if state.repeat_enabled {
+        return playing_track(state, data).cloned();
+    }
+    advance(state, data)
+}
+
+/// What `end_of_track` would play, without moving anything; for preloading.
+pub(crate) fn peek_next(state: &AppState, data: &AppData) -> Option<Track> {
+    if state.repeat_enabled {
+        playing_track(state, data).cloned()
+    } else if let Some(queued) = state.manual_queue.front() {
+        Some(queued.track.clone())
+    } else {
+        state.auto_queue.front().and_then(|&i| active_tracks(state, data).get(i).cloned())
+    }
+}
+
 /// When to start the next track. Normally that is the moment this one runs out;
 /// with a crossfade the next one has to start `crossfade_ms` early so the two
 /// overlap. Never earlier than half way through, so a short track (or a long
@@ -567,6 +617,38 @@ mod tests {
         crate::tui::logic::filtering::apply_unplayable_filter(&mut state, &mut data);
         assert_eq!(playing(&state, &data), "b");
         assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+    }
+
+    /// T8: repeat replays the track that is playing, not the list row under it.
+    #[test]
+    fn repeat_replays_a_queued_track_rather_than_the_list_row_under_it() {
+        let (mut state, data) = likes_playing(&["a", "b", "c"], 0);
+        let extra = track("q", "playable");
+        state.manual_queue.push_back(QueuedTrack::new(PlaybackSource::Playlist, 5, &extra, None, None, None, None, true));
+
+        // "a" ends: the queued track plays over the list, which stays on "a".
+        assert_eq!(peek_next(&state, &data).unwrap().track_urn, "q");
+        assert_eq!(end_of_track(&mut state, &data).unwrap().track_urn, "q");
+        assert_eq!(state.current_playing_index, Some(0));
+
+        // Repeat on while it plays: it is preloaded and replayed, again and again.
+        state.repeat_enabled = true;
+        for _ in 0..2 {
+            assert_eq!(peek_next(&state, &data).unwrap().track_urn, "q");
+            assert_eq!(end_of_track(&mut state, &data).unwrap().track_urn, "q");
+        }
+        assert_eq!(state.playback_history.len(), 1, "a repeat is not a new history entry");
+        assert_eq!(queued_urns(&state, &data), ["b", "c"], "the list queue is untouched");
+
+        // Repeat off: the list carries on from where it was.
+        state.repeat_enabled = false;
+        assert_eq!(end_of_track(&mut state, &data).unwrap().track_urn, "b");
+        assert!(state.override_playing.is_none());
+        assert_eq!(state.playback_history.iter().map(|q| q.track.track_urn.as_str()).collect::<Vec<_>>(), ["a", "q"]);
+        // Nothing left to play: nothing changes.
+        state.auto_queue.clear();
+        assert!(end_of_track(&mut state, &data).is_none() && peek_next(&state, &data).is_none());
+        assert_eq!(state.playback_history.len(), 2);
     }
 
     /// T10: a track station started while an artist station is still loading wins.
