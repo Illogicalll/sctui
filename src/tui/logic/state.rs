@@ -524,6 +524,10 @@ pub struct AppState {
     /// Row in the history popup, 0 = newest.
     pub history_selected: usize,
     pub help_visible: bool,
+    /// The command palette, while it is open.
+    pub palette: Option<super::palette::PaletteState>,
+    /// The palette's `Setup wizard` command was run; the wizard picks this up.
+    pub wizard_requested: bool,
     pub quit_confirm_visible: bool,
     pub quit_confirm_selected: usize,
     /// A Library filter exists (being typed or kept); its box is drawn.

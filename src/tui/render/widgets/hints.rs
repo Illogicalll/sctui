@@ -40,7 +40,9 @@ pub fn pairs(state: &AppState, data: &AppData) -> Vec<(String, &'static str)> {
     let sides = |what| two(Action::SubTabLeft, Action::SubTabRight, what);
     let (enter, esc) = (|what| fixed("enter", what), |what| fixed("esc", what));
 
-    let mut out = if state.quit_confirm_visible {
+    let mut out = if state.palette.is_some() {
+        vec![enter("run"), fixed("↑ ↓", "move"), esc("close")]
+    } else if state.quit_confirm_visible {
         vec![sides("choose"), enter("confirm"), esc("cancel")]
     } else if state.help_visible {
         match state.help_page {
@@ -110,7 +112,7 @@ pub fn pairs(state: &AppState, data: &AppData) -> Vec<(String, &'static str)> {
             1 => out.extend([sides("sub-tab"), k(Action::Search, "search")]),
             _ => {}
         }
-        out.push(k(Action::Help, "keys"));
+        out.extend([k(Action::Palette, "commands"), k(Action::Help, "keys")]);
         out
     };
     out.retain(|(keys, _)| !keys.is_empty());
@@ -173,10 +175,10 @@ mod tests {
     fn hints_change_with_focus_kind() {
         let (mut state, mut data, ..) = fixture();
         // Library › Likes: one tracks pane, so no pane keys.
-        assert_eq!(described(&state, &data), ["play", "queue", "next", "like", "playlist", "station", "sub-tab", "filter", "keys"]);
+        assert_eq!(described(&state, &data), ["play", "queue", "next", "like", "playlist", "station", "sub-tab", "filter", "commands", "keys"]);
         // Library › Playlists, the list: container keys, and nothing that needs a track.
         go(&mut state, &mut data, 0, 1, 0);
-        assert_eq!(described(&state, &data), ["pane", "open", "new", "delete", "like", "sub-tab", "filter", "keys"]);
+        assert_eq!(described(&state, &data), ["pane", "open", "new", "delete", "like", "sub-tab", "filter", "commands", "keys"]);
         // Its tracks: remove only when the open playlist is the user's own.
         go(&mut state, &mut data, 0, 1, 1);
         assert!(!described(&state, &data).contains(&"remove"));
@@ -189,9 +191,9 @@ mod tests {
         go(&mut state, &mut data, 0, 3, 0);
         assert_eq!(described(&state, &data)[..4], ["pane", "open", "follow", "station"]);
         go(&mut state, &mut data, 1, 2, 0);
-        assert_eq!(described(&state, &data), ["pane", "open", "new", "like", "sub-tab", "search", "keys"]);
+        assert_eq!(described(&state, &data), ["pane", "open", "new", "like", "sub-tab", "search", "commands", "keys"]);
         go(&mut state, &mut data, 2, 0, 0);
-        assert_eq!(described(&state, &data), ["pane", "open", "keys"]);
+        assert_eq!(described(&state, &data), ["pane", "open", "commands", "keys"]);
 
         // Modes come before the pane: insert, visualiser, then each overlay.
         state.search_typing = true;
@@ -207,6 +209,8 @@ mod tests {
         assert_eq!(described(&state, &data)[..2], ["page", "move"]);
         state.quit_confirm_visible = true;
         assert_eq!(described(&state, &data), ["choose", "confirm", "cancel"]);
+        state.palette = Some(Default::default());
+        assert_eq!(pairs(&state, &data), [("enter".to_string(), "run"), ("↑ ↓".to_string(), "move"), ("esc".to_string(), "close")]);
     }
 
     #[test]
@@ -223,7 +227,7 @@ mod tests {
     fn hints_trim_to_width_without_splitting_a_pair() {
         let (state, data, ..) = fixture();
         let full = line(240, &state, &data).trim_end().to_string();
-        assert!(full.ends_with("? keys"), "{full:?}");
+        assert!(full.ends_with(": commands   ? keys"), "{full:?}");
         let all = pairs(&state, &data);
         for width in 1..=full.chars().count() as u16 + 4 {
             let shown = line(width, &state, &data);

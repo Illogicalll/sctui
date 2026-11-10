@@ -1,6 +1,7 @@
 mod confirm;
 mod help;
 mod history;
+mod palette;
 mod playlist_picker;
 mod theme_picker;
 mod queue;
@@ -66,6 +67,10 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
 
     if state.help_visible {
         help::render_help(frame, state);
+    }
+
+    if let Some(open) = &state.palette {
+        palette::render_palette(frame, state, open);
     }
 
     if state.quit_confirm_visible {

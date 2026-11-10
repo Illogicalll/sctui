@@ -5,6 +5,7 @@ use crate::player::Player;
 
 use crate::tui::logic::filtering::clear_filter;
 use crate::tui::logic::nav;
+use crate::tui::logic::palette::Command;
 use crate::tui::logic::state::{AppData, AppState};
 
 pub(crate) mod helpers;
@@ -18,6 +19,7 @@ mod help_editor;
 mod theme_picker;
 mod confirm;
 mod playlist_picker;
+mod palette;
 mod queue;
 pub(crate) mod commands;
 
@@ -67,8 +69,9 @@ pub fn handle_key_event(
 
 /// Which mode owns the keyboard: each overlay, and each place that takes typed text.
 /// A new overlay adds its flag here.
-fn mode(state: &AppState) -> [bool; 10] {
+fn mode(state: &AppState) -> [bool; 11] {
     [
+        state.palette.is_some(),
         state.quit_confirm_visible,
         state.help_visible,
         state.help_capture.is_some(),
@@ -112,6 +115,19 @@ fn route(key: KeyEvent, state: &mut AppState, data: &mut AppData) -> Routed {
         // Windows emits both Press and Release events per keystroke; Unix
         // ttys only ever emit Press, so this is a no-op there.
         return done;
+    }
+    if state.palette.is_some() {
+        // Insert mode: the keymap is never consulted, so nothing can be left pending.
+        helpers::clear_pending(state);
+        return match palette::handle_palette_input(key, state) {
+            Some(Command::Action(action)) if state.visualizer_mode && needs_lists(action) => done,
+            Some(Command::Action(action)) => Routed::Action(action),
+            Some(command) => {
+                palette::run(command, state);
+                done
+            }
+            None => done,
+        };
     }
     if state.quit_confirm_visible {
         return Routed::Done(quit::handle_quit_confirm(key, state));
@@ -452,6 +468,121 @@ mod tests {
         assert_eq!(state.playlist_picker_selected, 0, "only the New playlist row");
         ch(&mut state, &mut data, 'G');
         assert_eq!(state.playlist_picker_selected, 0);
+    }
+
+    fn type_into_palette(state: &mut AppState, data: &mut AppData, text: &str) {
+        for c in text.chars() {
+            assert!(matches!(ch(state, data, c), Routed::Done(_)), "{c} ran an action");
+        }
+    }
+
+    #[test]
+    fn palette_runs_selected_command_and_closes() {
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        // Both default keys open it.
+        assert!(matches!(press(&mut state, &mut data, KeyCode::Char('p'), KeyModifiers::CONTROL), Routed::Action(Action::Palette)));
+        assert!(matches!(ch(&mut state, &mut data, ':'), Routed::Action(Action::Palette)));
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        assert_eq!(state.palette, Some(Default::default()));
+
+        // A layout command is applied, toasted, and the palette is gone.
+        type_into_palette(&mut state, &mut data, "lay sb");
+        assert!(matches!(press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE), Routed::Done(_)));
+        assert!(state.palette.is_none());
+        assert_eq!(state.settings.layout, crate::config::Layout::Sidebar);
+        assert_eq!(state.toasts.last().unwrap().msg, "Layout: sidebar");
+
+        // An action comes back to be dispatched like its key press.
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "toggle shuffle");
+        assert!(matches!(press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE), Routed::Action(Action::ToggleShuffle)));
+        assert!(state.palette.is_none());
+
+        // Down / Up pick another row and stop at the ends; typing goes back to the first.
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "layout:");
+        let rows = crate::tui::logic::palette::matches(&state, "layout:").len();
+        assert_eq!(rows, 5);
+        for (code, mods, want) in [
+            (KeyCode::Down, KeyModifiers::NONE, 1),
+            (KeyCode::Tab, KeyModifiers::NONE, 2),
+            (KeyCode::Char('n'), KeyModifiers::CONTROL, 3),
+            (KeyCode::Char('j'), KeyModifiers::CONTROL, 4),
+            (KeyCode::Down, KeyModifiers::NONE, 4),
+            (KeyCode::Up, KeyModifiers::NONE, 3),
+            (KeyCode::BackTab, KeyModifiers::SHIFT, 2),
+            (KeyCode::Char('p'), KeyModifiers::CONTROL, 1),
+            (KeyCode::Char('k'), KeyModifiers::CONTROL, 0),
+            (KeyCode::Up, KeyModifiers::NONE, 0),
+            (KeyCode::Down, KeyModifiers::NONE, 1),
+        ] {
+            press(&mut state, &mut data, code, mods);
+            assert_eq!(state.palette.as_ref().unwrap().selected, want, "{code:?}");
+        }
+        assert_eq!(state.palette.as_ref().unwrap().query, "layout:", "moving types nothing");
+        press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(state.settings.layout, crate::config::Layout::Tighten, "the second layout row");
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        press(&mut state, &mut data, KeyCode::Down, KeyModifiers::NONE);
+        ch(&mut state, &mut data, 'x');
+        assert_eq!(state.palette.as_ref().unwrap().selected, 0);
+
+        // Nothing matches: Enter just closes. Esc closes without running anything.
+        type_into_palette(&mut state, &mut data, "zzzz");
+        assert!(matches!(press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE), Routed::Done(_)));
+        assert!(state.palette.is_none());
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "quit");
+        assert!(matches!(press(&mut state, &mut data, KeyCode::Esc, KeyModifiers::NONE), Routed::Done(_)));
+        assert!(state.palette.is_none() && !state.quit_confirm_visible);
+
+        // The other commands: the hint line flips, the wizard is asked for.
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "hint line");
+        press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!state.settings.hint_line);
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "setup wiz");
+        press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(state.wizard_requested && state.palette.is_none());
+
+        // Behind the visualiser a selection action is dropped, as its key would be.
+        state.visualizer_mode = true;
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "add the selected track to the queue");
+        assert!(matches!(press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE), Routed::Done(_)));
+        assert!(state.palette.is_none());
+    }
+
+    #[test]
+    fn palette_is_insert_mode() {
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        data.likes = vec![track(), track(), track()];
+        // A pending key does not survive into the query.
+        ch(&mut state, &mut data, 'g');
+        commands::run_command(Action::Palette, &mut state, &mut data);
+        type_into_palette(&mut state, &mut data, "Q");
+        assert_eq!(state.palette.as_ref().unwrap().query, "Q");
+        assert!(!state.queue_visible && state.pending_keys.is_empty());
+        type_into_palette(&mut state, &mut data, "gg q?/:jl S");
+        assert_eq!(state.palette.as_ref().unwrap().query, "Qgg q?/:jl S");
+        assert!(!state.help_visible && !state.quit_confirm_visible && !state.shuffle_enabled);
+        assert_eq!((nav::location(&state), nav::cursor(&state, nav::PaneId::Likes)), ((0, 0), 0));
+        assert!(state.pending_keys.is_empty());
+        // The editing keys every text field has.
+        press(&mut state, &mut data, KeyCode::Char('w'), KeyModifiers::CONTROL);
+        assert_eq!(state.palette.as_ref().unwrap().query, "Qgg q?/:jl ");
+        press(&mut state, &mut data, KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(state.palette.as_ref().unwrap().query, "Qgg q?/:jl");
+        press(&mut state, &mut data, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(state.palette.as_ref().unwrap().query, "");
+        // Unbound and function keys are dropped; the palette stays open.
+        for code in [KeyCode::F(5), KeyCode::Left, KeyCode::Home] {
+            assert!(matches!(press(&mut state, &mut data, code, KeyModifiers::NONE), Routed::Done(_)));
+        }
+        assert!(state.palette.is_some());
     }
 
     #[test]

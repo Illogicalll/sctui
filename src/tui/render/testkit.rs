@@ -12,6 +12,7 @@ use crate::api::{Activity, Album, Artist, Playlist, Track};
 use crate::config::Layout;
 use crate::tui::logic::filtering::{FilteredViews, build_filtered_views};
 use crate::tui::logic::nav;
+use crate::tui::logic::palette::PaletteState;
 use crate::tui::logic::state::{AppData, AppState, ConfirmAction, HelpPage, PlaybackSource, QueuedTrack};
 
 use super::widgets::pane::pane_view;
@@ -53,6 +54,8 @@ pub const OVERLAYS: &[(&str, Setup)] = &[
     }),
     ("queue", |s| s.queue_visible = true),
     ("history", |s| s.history_visible = true),
+    ("palette", |s| s.palette = Some(PaletteState { query: "lay".into(), selected: 1 })),
+    ("palette: no match", |s| s.palette = Some(PaletteState { query: WIDE_TITLES[0].into(), selected: 9 })),
 ];
 
 /// Things drawn over every layout that are not overlays: rendered at every size
@@ -388,7 +391,7 @@ mod tests {
     fn every_overlay_is_drawn() {
         let wants = [
             "Want to Quit", "Delete playlist", "Go to Search", "Setting", "Equaliser", " Theme ", "+ New playlist",
-            "Visibility:", "Queue", "History",
+            "Visibility:", "Queue", "History", "› lay▏", "no matching command",
         ];
         assert_eq!(wants.len(), OVERLAYS.len());
         for ((name, open), want) in OVERLAYS.iter().zip(wants) {

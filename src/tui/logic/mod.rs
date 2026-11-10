@@ -1,6 +1,7 @@
 pub(crate) mod filtering;
 mod input;
 pub(crate) mod nav;
+pub(crate) mod palette;
 pub(crate) mod state;
 pub(crate) mod toast;
 pub(crate) mod utils;

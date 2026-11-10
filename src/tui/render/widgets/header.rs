@@ -18,11 +18,12 @@ use super::{fit, put, put_right, text_width};
 pub const ROWS: u16 = 2;
 /// Columns from which each main tab is prefixed with its key.
 pub const COLS_TAB_KEYS: u16 = 70;
-/// Columns from which the top row ends with the help key.
+/// Columns from which the top row ends with the palette and help keys.
 pub const COLS_HINTS: u16 = 90;
 
 /// Draw the header in the top rows of `area` and return how many it used. Row 0:
-/// `sctui │ 1 Library  2 Search  3 Feed`, with the help key at the right when wide.
+/// `sctui │ 1 Library  2 Search  3 Feed`, with the palette and help keys at the right
+/// when wide.
 /// Row 1: the sub-tabs as pills, the selected one filled, and the filter or search
 /// query right-aligned.
 pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &AppData) -> u16 {
@@ -45,9 +46,14 @@ pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &App
         spans.push(Span::styled(*title, if i == state.selected_tab { accent } else { Style::new().fg(t.fg) }));
     }
     put(frame, row(0), Line::from(spans));
-    let help = state.keymap.hint_label(Action::Help);
-    if area.width >= COLS_HINTS && !help.is_empty() {
-        put_right(frame, Rect { width: area.width - 1, ..row(0) }, &format!("{help} keys"), dim);
+    if area.width >= COLS_HINTS {
+        let hints: Vec<String> = [(Action::Palette, "commands"), (Action::Help, "keys")]
+            .into_iter()
+            .map(|(action, what)| (state.keymap.hint_label(action), what))
+            .filter(|(key, _)| !key.is_empty())
+            .map(|(key, what)| format!("{key} {what}"))
+            .collect();
+        put_right(frame, Rect { width: area.width - 1, ..row(0) }, &hints.join("   "), dim);
     }
     if area.height < 2 {
         return 1;
@@ -103,7 +109,7 @@ mod tests {
         let (mut state, mut data, ..) = fixture();
         go(&mut state, &mut data, 0, 1, 0);
         let (lines, buf) = header(120, &state, &data);
-        assert!(lines[0].starts_with(" sctui │  1 Library  2 Search  3 Feed") && lines[0].ends_with("? keys"), "{lines:?}");
+        assert!(lines[0].starts_with(" sctui │  1 Library  2 Search  3 Feed") && lines[0].ends_with(": commands   ? keys"), "{lines:?}");
         assert_eq!(lines[1], "  Likes   Playlists   Albums   Following");
         // The selected sub-tab is the filled pill; the selected main tab is accented.
         let x = lines[1].find("Playlists").unwrap() as u16;
@@ -114,7 +120,9 @@ mod tests {
         // Narrower: no help key, then no tab numbers. The keys are the live ones.
         assert_eq!(header(89, &state, &data).0[0], " sctui │  1 Library  2 Search  3 Feed");
         assert_eq!(header(69, &state, &data).0[0], " sctui │  Library  Search  Feed");
-        state.keymap.apply_toml("[keys]\ntab_search = \"F2\"\ntab_feed = []\n");
+        state.keymap.apply_toml("[keys]\ntab_search = \"F2\"\ntab_feed = []\npalette = []\n");
+        let wide = &header(120, &state, &data).0[0];
+        assert!(wide.ends_with("  ? keys") && !wide.contains("commands"), "an unbound key is not advertised: {wide:?}");
         assert_eq!(header(89, &state, &data).0[0], " sctui │  1 Library  f2 Search  Feed");
         state.settings.hide_feed_tab = true;
         assert_eq!(header(89, &state, &data).0[0], " sctui │  1 Library  f2 Search");
