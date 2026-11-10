@@ -38,7 +38,7 @@ use ratatui_image::{
 use reqwest::Method;
 use image::DynamicImage;
 
-use super::render::render;
+use super::render::{NowPlaying, render};
 use self::filtering::{FilteredViews, apply_unplayable_filter, build_filtered_views, rebuild_matches_if_active};
 use self::nav::PaneId;
 use self::input::{InputOutcome, expire_pending, handle_key_event, next_track, prev_track, toggle_play_pause};
@@ -959,14 +959,15 @@ fn start(
         }
         expire_pending(&mut state);
         nav::sync_tables(&state, &mut data);
+        let now_playing = NowPlaying::from_player(&player);
         terminal.draw(|frame| {
             render(
                 frame,
-                &state,
+                &mut state,
                 &mut data,
                 &filtered,
-                &player,
-                &mut cover_art_async,
+                &now_playing,
+                Some(&mut cover_art_async),
                 &wave_buffer,
             )
         })?;
@@ -1118,14 +1119,15 @@ fn start(
                 invalidate_screen(&mut terminal);
                 last_view = Some(view);
             }
+            let now_playing = NowPlaying::from_player(&player);
             terminal.draw(|frame| {
                 render(
                     frame,
-                    &state,
+                    &mut state,
                     &mut data,
                     &filtered,
-                    &player,
-                    &mut cover_art_async,
+                    &now_playing,
+                    Some(&mut cover_art_async),
                     &wave_buffer,
                 )
             })?;

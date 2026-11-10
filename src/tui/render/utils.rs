@@ -1,5 +1,4 @@
 use ratatui::{
-    layout::Constraint,
     style::{Modifier, Style},
     widgets::{Cell, Row},
 };
@@ -14,29 +13,6 @@ pub fn styled_header(cells: &[&str]) -> Row<'static> {
         .map(|&text| Cell::from(text.to_string()).style(style))
         .collect();
     Row::new(cells)
-}
-
-pub fn calculate_min_widths(column_widths: &[Constraint], total_width: usize) -> Vec<usize> {
-    let fixed_total: usize = column_widths
-        .iter()
-        .map(|c| match c {
-            Constraint::Length(l) => *l as usize,
-            _ => 0,
-        })
-        .sum();
-
-    let remaining = total_width.saturating_sub(fixed_total);
-
-    column_widths
-        .iter()
-        .map(|c| match c {
-            Constraint::Percentage(p) => (remaining * (*p as usize)) / 100,
-            Constraint::Length(l) => *l as usize,
-            Constraint::Min(m) => *m as usize,
-            Constraint::Max(m) => (*m as usize).min(total_width),
-            _ => 10,
-        })
-        .collect()
 }
 
 pub fn truncate_with_ellipsis(s: &str, min_width: usize) -> String {

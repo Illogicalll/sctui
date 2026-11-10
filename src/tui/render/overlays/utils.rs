@@ -1,23 +1,12 @@
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 
+/// A popup `percent_x` by `percent_y` of `r`, centred, but never smaller than 50x10
+/// while `r` has that much room: a percentage of a small terminal is too little to read.
 pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(vertical[1])[1]
+    let side = |len: u16, percent: u16, floor: u16| {
+        ((len as u32 * percent.min(100) as u32 / 100) as u16).max(floor.min(len))
+    };
+    centered_rect_fixed(side(r.width, percent_x, 50), side(r.height, percent_y, 10), r)
 }
 
 pub fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {

@@ -32,7 +32,7 @@ pub fn render_now_playing(
     area: Rect,
     track: &Track,
     progress_ms: u64,
-    cover_art: &mut ThreadProtocol,
+    cover_art: Option<&mut ThreadProtocol>,
 ) {
     let block = frame_block();
     let inner = block.inner(area);
@@ -57,7 +57,9 @@ pub fn render_now_playing(
         (None, body)
     };
 
-    if let Some(half) = art_half {
+    if let Some(half) = art_half
+        && let Some(cover_art) = cover_art
+    {
         // Art is a square: a cell is ~2:1, so width = 2 × height. Takes 50% of
         // the height so it sits inset rather than touching the frame.
         let art_w = ((half.height as f32 * ART_HEIGHT_FRACTION) as u16 * 2)
