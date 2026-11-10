@@ -48,6 +48,23 @@ pub const OVERLAYS: &[(&str, Setup)] = &[
     ("history", |s| s.history_visible = true),
 ];
 
+/// Things drawn over every layout that are not overlays: rendered at every size
+/// alongside [`OVERLAYS`].
+pub const EXTRAS: &[(&str, Setup)] = &[
+    ("three toasts", |s| {
+        s.toast("Added to queue · 3");
+        s.toast_err(format!("Adding to playlist failed: {}", WIDE_TITLES[0]));
+        s.toast(format!("Liked {}", WIDE_TITLES[2]));
+    }),
+    ("hint line off", |s| s.settings.hint_line = false),
+    ("toasts over a popup, keys pending", |s| {
+        s.toast_err(WIDE_TITLES[1]);
+        s.toast("Shuffle on");
+        s.help_visible = true;
+        s.pending_keys = vec![crate::keymap::Chord::parse("g").unwrap()];
+    }),
+];
+
 /// Titles that are hard to fit: double-width CJK, emoji, and 200 chars.
 pub const WIDE_TITLES: [&str; 3] = [
     "日本語のタイトルはとても長いですね、本当に長いです",
@@ -340,7 +357,7 @@ mod tests {
         for_all_sizes(|w, h| {
             for (_, set_layout) in LAYOUTS {
                 for (_, fixture) in FIXTURES {
-                    for (_, open) in OVERLAYS {
+                    for (_, open) in OVERLAYS.iter().chain(EXTRAS) {
                         let (mut state, mut data, views, np) = fixture();
                         set_layout(&mut state);
                         open(&mut state);

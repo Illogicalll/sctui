@@ -110,6 +110,7 @@ fn add_to_playlist(playlist_idx: usize, state: &mut AppState, data: &mut AppData
         data.playlist_tracks.push(track.clone());
     }
     bump_track_count(playlist, 1);
+    state.toast(format!("Added to {}", playlist.title));
     state.playlist_edit_queue.push_back(PlaylistEdit::Add {
         playlist_id,
         tracks_uri: playlist.tracks_uri.clone(),

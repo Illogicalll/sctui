@@ -1,8 +1,11 @@
-//! Drawing shared by every layout: panes, the pane row and the player readouts.
+//! Drawing shared by every layout: panes, the pane row, the player readouts, the hint
+//! line and toasts.
 
+pub mod hints;
 pub mod pane;
 pub mod pane_row;
 pub mod player;
+pub mod toasts;
 
 use ratatui::{Frame, layout::Rect, text::{Line, Span}};
 

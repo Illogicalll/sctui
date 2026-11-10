@@ -21,7 +21,7 @@ use crate::tui::render::NowPlaying;
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
 use crate::tui::render::widgets::player::{draw_player, player_size};
-use crate::tui::render::widgets::{fit, put, text_width};
+use crate::tui::render::widgets::{fit, hints, put, text_width};
 
 /// Terminal rows below which the boxed header gives way to two plain rows.
 pub const ROWS_BOXED: u16 = 24;
@@ -87,7 +87,9 @@ pub fn draw(
     cover: Option<&mut ThreadProtocol>,
 ) {
     let mut rest = frame.area();
-    let size = player_size(true, rest.height);
+    let hint_rows = hints::rows(state, rest.height);
+    take_bottom(&mut rest, hint_rows);
+    let size = player_size(true, frame.area().height);
     let player = take_bottom(&mut rest, size.height());
     draw_player(frame, player, size, state, data, np, cover);
 

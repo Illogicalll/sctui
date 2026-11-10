@@ -9,7 +9,7 @@ use crate::tui::logic::utils::{active_tracks, build_queue};
 use crate::tui::logic::utils::queued_from_current;
 use crate::tui::logic::utils::{soundcloud_id_from_urn, soundcloud_playlist_id_from_tracks_uri};
 
-use super::queue::{handle_add_to_queue, handle_add_next_to_queue, selected_queued};
+use super::queue::{handle_add_to_queue, handle_add_next_to_queue, selected_or_toast};
 
 /// Commands that are plain state changes; movement, playback and tab actions
 /// are dispatched in `input::run_action`.
@@ -21,9 +21,11 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
                 state.auto_queue =
                     build_queue(current_idx, active_tracks(state, data), state.shuffle_enabled);
             }
+            state.toast(format!("Shuffle {}", if state.shuffle_enabled { "on" } else { "off" }));
         }
         Action::ToggleRepeat => {
             state.repeat_enabled = !state.repeat_enabled;
+            state.toast(format!("Repeat {}", if state.repeat_enabled { "on" } else { "off" }));
         }
         Action::AddToQueue => {
             handle_add_to_queue(state, data);
@@ -65,7 +67,7 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
         }
         // Playlist management. Both destructive actions go through the confirm popup.
         Action::AddToPlaylist => {
-            if let Some(queued) = selected_queued(state, data) {
+            if let Some(queued) = selected_or_toast(state, data) {
                 super::playlist_picker::open_picker(state, queued.track);
             }
         }
@@ -155,12 +157,14 @@ fn toggle_playlist_like(playlist: Option<Playlist>, state: &mut AppState, data: 
     let Some(mut playlist) = playlist else { return };
     let Some(playlist_id) = soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri) else { return };
     if data.liked_playlist_uris.remove(&playlist.tracks_uri) {
+        state.toast(format!("Unliked {}", playlist.title));
         state.engagement_queue.push_back(Engagement::UnlikePlaylist {
             tracks_uri: playlist.tracks_uri,
             playlist_id,
         });
     } else {
         data.liked_playlist_uris.insert(playlist.tracks_uri.clone());
+        state.toast(format!("Liked {}", playlist.title));
         // The Library row this adds is the liked copy, never an owned playlist.
         playlist.is_owned = false;
         state.engagement_queue.push_back(Engagement::LikePlaylist { playlist, playlist_id });
@@ -171,12 +175,14 @@ fn toggle_album_like(album: Option<Album>, state: &mut AppState, data: &mut AppD
     let Some(album) = album else { return };
     let Some(playlist_id) = soundcloud_playlist_id_from_tracks_uri(&album.tracks_uri) else { return };
     if data.liked_album_uris.remove(&album.tracks_uri) {
+        state.toast(format!("Unliked {}", album.title));
         state.engagement_queue.push_back(Engagement::UnlikeAlbum {
             tracks_uri: album.tracks_uri,
             playlist_id,
         });
     } else {
         data.liked_album_uris.insert(album.tracks_uri.clone());
+        state.toast(format!("Liked {}", album.title));
         state.engagement_queue.push_back(Engagement::LikeAlbum { album, playlist_id });
     }
 }
@@ -185,9 +191,11 @@ fn toggle_follow(artist: Option<Artist>, state: &mut AppState, data: &mut AppDat
     let Some(artist) = artist else { return };
     let Some(user_id) = soundcloud_id_from_urn(&artist.urn) else { return };
     if data.followed_user_urns.remove(&artist.urn) {
+        state.toast(format!("Unfollowed {}", artist.name));
         state.engagement_queue.push_back(Engagement::UnfollowUser { urn: artist.urn, user_id });
     } else {
         data.followed_user_urns.insert(artist.urn.clone());
+        state.toast(format!("Followed {}", artist.name));
         state.engagement_queue.push_back(Engagement::FollowUser { artist, user_id });
     }
 }
@@ -197,12 +205,14 @@ fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppD
     let Some(track) = track else { return };
     let Some(track_id) = soundcloud_id_from_urn(&track.track_urn) else { return };
     if data.liked_track_urns.remove(&track.track_urn) {
+        state.toast(format!("Unliked {}", track.title));
         state.engagement_queue.push_back(Engagement::UnlikeTrack {
             track_urn: track.track_urn,
             track_id,
         });
     } else {
         data.liked_track_urns.insert(track.track_urn.clone());
+        state.toast(format!("Liked {}", track.title));
         state
             .engagement_queue
             .push_back(Engagement::LikeTrack { track, track_id });

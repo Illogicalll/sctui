@@ -48,15 +48,18 @@ pub(crate) fn handle_station(
     player: &Player,
 ) -> InputOutcome {
     if let Some(artist) = focused_artist(state, data) {
+        state.toast(format!("Starting station from {}", artist.name));
         state.artist_station_request = Some(artist);
         return InputOutcome::Continue;
     }
     let Some(queued) = selected_queued(state, data) else {
+        state.toast_err("Select a track or an artist first");
         return InputOutcome::Continue;
     };
     if !queued.track.is_playable() {
         return InputOutcome::Continue;
     }
+    state.toast(format!("Station started from {}", queued.track.title));
     if let Some(current) = queued_from_current(state, data) {
         state.playback_history.push(current);
     }

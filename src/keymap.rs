@@ -433,6 +433,15 @@ impl Chord {
         s
     }
 
+    /// Short form for the hint line: the config spelling, with Shift+letter as the
+    /// capital (`G`, `[`, `enter`, `ctrl+d`).
+    pub fn hint_label(&self) -> String {
+        match self.code {
+            KeyCode::Char(c) if c.is_alphabetic() && self.mods == KeyModifiers::SHIFT => c.to_uppercase().collect(),
+            _ => self.spec(),
+        }
+    }
+
     /// Config-file spelling, e.g. `shift+enter`, `alt+right`, `shift+k`, `?`.
     fn spec(&self) -> String {
         let mut s = String::new();
@@ -474,6 +483,11 @@ impl Seq {
     /// Human label, e.g. `g g`, `Shift+Enter`.
     pub fn label(&self) -> String {
         self.0.iter().map(Chord::label).collect::<Vec<_>>().join(" ")
+    }
+
+    /// Short form for the hint line, e.g. `g g`, `G`, `shift+enter`.
+    pub fn hint_label(&self) -> String {
+        self.0.iter().map(Chord::hint_label).collect::<Vec<_>>().join(" ")
     }
 
     /// Config-file spelling, e.g. `g g`, `shift+enter`.
@@ -570,6 +584,11 @@ impl Keymap {
     /// The first binding's label, for hints (`"g g"`); empty when unbound.
     pub fn first_label(&self, action: Action) -> String {
         self.seqs(action).first().map(Seq::label).unwrap_or_default()
+    }
+
+    /// The first binding in the hint line's short form (`G`, `g g`, `[`); empty when unbound.
+    pub fn hint_label(&self, action: Action) -> String {
+        self.seqs(action).first().map(Seq::hint_label).unwrap_or_default()
     }
 
     /// Rebuild binding → action. Shorter bindings go in first, then `Action::ALL`
@@ -760,6 +779,9 @@ mod tests {
         assert_eq!(Chord::parse("shift+k").unwrap().label(), "Shift+K");
         assert_eq!(Chord::parse("space").unwrap().label(), "Space");
         assert_eq!(Chord::parse("alt+right").unwrap().spec(), "alt+right");
+        let km = Keymap::default();
+        let hints = [Action::Bottom, Action::Top, Action::PaneLeft, Action::PlaySelected, Action::HalfPageDown, Action::PlayPause];
+        assert_eq!(hints.map(|a| km.hint_label(a)), ["G", "g g", "[", "enter", "ctrl+d", "space"]);
     }
 
     #[test]

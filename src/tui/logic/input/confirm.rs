@@ -54,6 +54,7 @@ fn perform(action: ConfirmAction, state: &mut AppState, data: &mut AppData) {
                 data.playlist_tracks.retain(|t| t.track_urn != track.track_urn);
             }
             bump_track_count(playlist, -1);
+            state.toast(format!("Removed from {}", playlist.title));
             state.playlist_edit_queue.push_back(PlaylistEdit::Remove {
                 playlist_id,
                 tracks_uri: playlist.tracks_uri.clone(),
@@ -74,6 +75,7 @@ fn perform(action: ConfirmAction, state: &mut AppState, data: &mut AppData) {
             if let Some(playlist_id) = soundcloud_playlist_id_from_tracks_uri(&playlist.tracks_uri) {
                 state.playlist_edit_queue.push_back(PlaylistEdit::Delete { playlist_id });
             }
+            state.toast(format!("Deleted {}", playlist.title));
         }
     }
 }

@@ -2,6 +2,7 @@ pub(crate) mod filtering;
 mod input;
 pub(crate) mod nav;
 pub(crate) mod state;
+pub(crate) mod toast;
 pub(crate) mod utils;
 
 use crate::api::{
@@ -102,8 +103,12 @@ enum Msg {
     /// Lyrics lookup result for a track URN (`None` = nothing found).
     Lyrics(String, Option<Lyrics>),
     Engagement(Engagement),
+    /// A like or follow the server refused, and why; the optimistic change is undone.
+    EngagementFailed(Engagement, String),
     /// A playlist write the server refused; the text is ready to show.
     PlaylistEditFailed(String),
+    /// A fetch that failed; the text is ready to show.
+    FetchFailed(String),
 }
 
 pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded) -> anyhow::Result<()> {
@@ -158,9 +163,7 @@ where
             fetch_fn(&mut api_guard)
         };
 
-        if let Ok(item) = result {
-            let _ = tx.send(item);
-        }
+        let _ = tx.send(result.unwrap_or_else(|e| Msg::FetchFailed(format!("Fetch failed: {e:#}"))));
     });
 }
 
@@ -174,9 +177,10 @@ fn spawn_tracks(
 ) -> tokio::task::JoinHandle<()> {
     let tx = tx.clone();
     rt.spawn(async move {
-        if let Ok(tracks) = fut.await {
-            let _ = tx.send(wrap(request_id, tracks));
-        }
+        let _ = tx.send(match fut.await {
+            Ok(tracks) => wrap(request_id, tracks),
+            Err(e) => Msg::FetchFailed(format!("Could not load tracks: {e:#}")),
+        });
     })
 }
 
@@ -460,15 +464,17 @@ fn start(
                     }
                 }
                 Msg::ArtistStation(id, tracks) => {
-                    if id == state.artist_station_fetch.request_id
-                        && let Some(seed) = tracks.first().cloned()
-                    {
+                    if id != state.artist_station_fetch.request_id {
+                        // Superseded by a later request.
+                    } else if let Some(seed) = tracks.first().cloned() {
                         if let Some(current) = queued_from_current(&state, &data) {
                             state.playback_history.push(current);
                         }
                         state.manual_queue.clear();
                         player.play(seed, TrackChange::UserSkip);
                         enter_radio(&mut state, &mut data, tracks);
+                    } else {
+                        state.toast_err("No tracks found for that station");
                     }
                 }
                 Msg::PlaylistCreated(playlist) => {
@@ -476,6 +482,7 @@ fn start(
                     if !data.playlists.is_empty() {
                         *nav::cursor_mut(&mut state, PaneId::Playlists) += 1;
                     }
+                    state.toast(format!("Created {}", playlist.title));
                     data.playlists.insert(0, playlist);
                 }
                 Msg::Lyrics(urn, found) => {
@@ -488,8 +495,8 @@ fn start(
                     }
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
-                // Only visible in the `?` popup until toasts exist.
-                Msg::PlaylistEditFailed(why) => state.help_message = Some(why),
+                Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
+                Msg::PlaylistEditFailed(why) | Msg::FetchFailed(why) => state.toast_err(why),
             }
         }
         if fetched {
@@ -522,9 +529,10 @@ fn start(
                 }
             };
             async_rt.spawn(async move {
-                if engage(token, method, path).await.is_ok() {
-                    let _ = tx.send(Msg::Engagement(action));
-                }
+                let _ = tx.send(match engage(token, method, path).await {
+                    Ok(()) => Msg::Engagement(action),
+                    Err(e) => Msg::EngagementFailed(action, format!("{e:#}")),
+                });
             });
         }
 
@@ -773,29 +781,14 @@ fn start(
             if !query.trim().is_empty() {
                 let tx = tx.clone();
                 state.search_results_fetch.task = Some(async_rt.spawn(async move {
-                    match filter {
-                        0 => {
-                            if let Ok(tracks) = fetch_search_tracks(token, query).await {
-                                let _ = tx.send(Msg::SearchTracks(request_id, tracks));
-                            }
-                        }
-                        1 => {
-                            if let Ok(albums) = fetch_search_albums(token, query).await {
-                                let _ = tx.send(Msg::SearchAlbums(request_id, albums));
-                            }
-                        }
-                        2 => {
-                            if let Ok(playlists) = fetch_search_playlists(token, query).await {
-                                let _ = tx.send(Msg::SearchPlaylists(request_id, playlists));
-                            }
-                        }
-                        3 => {
-                            if let Ok(people) = fetch_search_people(token, query).await {
-                                let _ = tx.send(Msg::SearchPeople(request_id, people));
-                            }
-                        }
-                        _ => {}
-                    }
+                    let found = match filter {
+                        0 => fetch_search_tracks(token, query).await.map(|t| Msg::SearchTracks(request_id, t)),
+                        1 => fetch_search_albums(token, query).await.map(|a| Msg::SearchAlbums(request_id, a)),
+                        2 => fetch_search_playlists(token, query).await.map(|p| Msg::SearchPlaylists(request_id, p)),
+                        3 => fetch_search_people(token, query).await.map(|p| Msg::SearchPeople(request_id, p)),
+                        _ => return,
+                    };
+                    let _ = tx.send(found.unwrap_or_else(|e| Msg::FetchFailed(format!("Search failed: {e:#}"))));
                 }));
             }
         }
@@ -958,6 +951,7 @@ fn start(
             last_view = Some(view);
         }
         expire_pending(&mut state);
+        toast::expire(&mut state.toasts, Instant::now());
         nav::sync_tables(&state, &mut data);
         let now_playing = NowPlaying::from_player(&player);
         terminal.draw(|frame| {

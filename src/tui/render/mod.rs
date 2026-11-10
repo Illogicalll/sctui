@@ -76,10 +76,12 @@ pub fn render(
         return;
     }
 
+    // Layouts leave the last row free for the hint line; so does the visualiser.
+    let hint_rows = widgets::hints::rows(state, area.height);
     if state.visualizer_mode {
         render_visualizer(
             frame,
-            area,
+            Rect { height: area.height - hint_rows, ..area },
             wave_buffer,
             state.visualizer_view,
             &np.track,
@@ -91,4 +93,8 @@ pub fn render(
         layouts::draw(frame, state, data, views, np, cover);
     }
     overlays::render_overlays(frame, state, data);
+    widgets::toasts::draw(frame, &state.toasts);
+    if hint_rows > 0 {
+        widgets::hints::draw(frame, Rect { y: area.bottom() - 1, height: 1, ..area }, state, data);
+    }
 }

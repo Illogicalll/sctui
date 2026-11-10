@@ -58,6 +58,8 @@ pub struct Settings {
     #[serde(deserialize_with = "de_secs")]
     pub crossfade_secs: f32,
     pub crossfade_user_skips: bool,
+    /// The row of applicable keys along the bottom.
+    pub hint_line: bool,
 }
 
 impl Default for Settings {
@@ -68,6 +70,7 @@ impl Default for Settings {
             crossfade: false,
             crossfade_secs: 5.0,
             crossfade_user_skips: true,
+            hint_line: true,
         }
     }
 }
@@ -102,7 +105,8 @@ pub enum SettingRow {
 
 impl Settings {
     /// The settings page, in display order.
-    pub const ROWS: [SettingRow; 5] = [
+    pub const ROWS: [SettingRow; 6] = [
+        SettingRow::Toggle("Hint line", |s| &mut s.hint_line),
         SettingRow::Toggle("Hide unplayable tracks", |s| &mut s.hide_unplayable),
         SettingRow::Toggle("Hide feed tab", |s| &mut s.hide_feed_tab),
         SettingRow::Toggle("Crossfade between tracks", |s| &mut s.crossfade),
@@ -341,6 +345,7 @@ mod tests {
         assert!(!file.settings.crossfade);
         assert_eq!(file.settings.crossfade_secs, Settings::default().crossfade_secs);
         assert!(file.settings.crossfade_user_skips);
+        assert!(file.settings.hint_line);
         assert_eq!(file.eq.gains, [0; 6]);
     }
 

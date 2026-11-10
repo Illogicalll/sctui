@@ -32,16 +32,17 @@ pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> 
             state.theme_name = chosen.name.to_string();
             state.theme_picker_previous = None;
             state.theme_picker_visible = false;
-            state.help_message = crate::config::save(
+            match crate::config::save(
                 state.config_load_failed,
                 &state.keymap,
                 &state.theme_name,
                 &state.theme_overrides,
                 &state.settings,
                 &state.eq,
-            )
-                .err()
-                .map(|e| format!("theme not saved: {e}"));
+            ) {
+                Ok(()) => state.toast(format!("Theme: {}", chosen.name)),
+                Err(e) => state.toast_err(format!("Theme not saved: {e}")),
+            }
         }
         _ => {
             if let Some(next) = list_step(&key, action, state.theme_picker_selected, last) {

@@ -10,8 +10,9 @@ pub(crate) fn handle_add_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
-    if let Some(queued) = selected_queued(state, data) {
+    if let Some(queued) = selected_or_toast(state, data) {
         insert_manual_queue(state, queued);
+        state.toast(format!("Added to queue · {}", state.manual_queue.len()));
     }
 }
 
@@ -19,9 +20,19 @@ pub(crate) fn handle_add_next_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
-    if let Some(queued) = selected_queued(state, data) {
+    if let Some(queued) = selected_or_toast(state, data) {
+        state.toast(format!("Playing next: {}", queued.track.title));
         state.manual_queue.push_front(queued);
     }
+}
+
+/// `selected_queued`, with a notice when there is nothing to act on.
+pub(crate) fn selected_or_toast(state: &mut AppState, data: &AppData) -> Option<QueuedTrack> {
+    let queued = selected_queued(state, data);
+    if queued.is_none() {
+        state.toast_err("No playable track selected");
+    }
+    queued
 }
 
 /// The queue popup is modal: movement scrolls the upcoming tracks, Esc or its own key

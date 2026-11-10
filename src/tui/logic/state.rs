@@ -160,6 +160,29 @@ pub(crate) fn clamp_row(row: &mut usize, table: &mut TableState, len: usize) {
 }
 
 impl Engagement {
+    /// The server refused this request: take the optimistic change back out of the
+    /// liked / followed set and say so. Nothing else was touched yet (`apply` only
+    /// runs on success), and if the user has since toggled the item back the set
+    /// already reads as it should.
+    pub fn failed(&self, why: &str, state: &mut AppState, data: &mut AppData) {
+        let (set, key, added, what) = match self {
+            Engagement::LikeTrack { track, .. } => (&mut data.liked_track_urns, &track.track_urn, true, "Like"),
+            Engagement::UnlikeTrack { track_urn, .. } => (&mut data.liked_track_urns, track_urn, false, "Unlike"),
+            Engagement::LikePlaylist { playlist, .. } => (&mut data.liked_playlist_uris, &playlist.tracks_uri, true, "Like"),
+            Engagement::UnlikePlaylist { tracks_uri, .. } => (&mut data.liked_playlist_uris, tracks_uri, false, "Unlike"),
+            Engagement::LikeAlbum { album, .. } => (&mut data.liked_album_uris, &album.tracks_uri, true, "Like"),
+            Engagement::UnlikeAlbum { tracks_uri, .. } => (&mut data.liked_album_uris, tracks_uri, false, "Unlike"),
+            Engagement::FollowUser { artist, .. } => (&mut data.followed_user_urns, &artist.urn, true, "Follow"),
+            Engagement::UnfollowUser { urn, .. } => (&mut data.followed_user_urns, urn, false, "Unfollow"),
+        };
+        if added {
+            set.remove(key);
+        } else {
+            set.insert(key.clone());
+        }
+        state.toast_err(format!("{what} failed: {why}"));
+    }
+
     /// Skips when the user has since toggled the same item back (its optimistic set no
     /// longer agrees with this result).
     pub fn apply(self, state: &mut AppState, data: &mut AppData) {
@@ -474,6 +497,9 @@ pub struct AppState {
     pub pending_keys: Vec<crate::keymap::Chord>,
     pub pending_since: Option<Instant>,
     pub help_message: Option<String>,
+    /// Notices on screen, oldest first. Added with `toast` / `toast_err`; the loop
+    /// drops each when its time is up.
+    pub toasts: Vec<super::toast::Toast>,
     /// `config::Loaded::load_failed`: saving the config is refused while set.
     pub config_load_failed: bool,
     /// Insert mode: keys type into the Search query (Search tab) or the Library
@@ -675,6 +701,27 @@ pub fn visible_tabs(state: &AppState) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T11: a refused like or follow is taken back and reported, not left looking done.
+    #[test]
+    fn engagement_failure_rolls_back_and_toasts() {
+        use crate::tui::logic::toast::ToastKind;
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        let artist = Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() };
+        // What the follow key does, then the server saying no.
+        data.followed_user_urns.insert(artist.urn.clone());
+        Engagement::FollowUser { artist: artist.clone(), user_id: 7 }.failed("403 Forbidden", &mut state, &mut data);
+        assert!(data.followed_user_urns.is_empty() && data.following.is_empty());
+        let toast = state.toasts.last().unwrap();
+        assert_eq!((toast.kind, toast.msg.as_str()), (ToastKind::Err, "Follow failed: 403 Forbidden"));
+        // A refused unfollow or unlike puts the item back.
+        Engagement::UnfollowUser { urn: artist.urn.clone(), user_id: 7 }.failed("offline", &mut state, &mut data);
+        assert!(data.followed_user_urns.contains(&artist.urn));
+        Engagement::UnlikeTrack { track_urn: "soundcloud:tracks:1".into(), track_id: 1 }.failed("offline", &mut state, &mut data);
+        assert!(data.liked_track_urns.contains("soundcloud:tracks:1"));
+        assert_eq!(state.toasts.last().unwrap().msg, "Unlike failed: offline");
+    }
 
     #[test]
     fn held_movement_key_ramps_then_resets() {
