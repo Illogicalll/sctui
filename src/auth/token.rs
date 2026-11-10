@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const REFRESH_TIME: u64 = 2700;
@@ -24,15 +25,48 @@ impl Token {
     }
 
     /// Stamp `obtained_at` with now and persist to disk.
-    pub(super) fn save(mut self) -> anyhow::Result<Self> {
+    pub(super) fn save(self) -> anyhow::Result<Self> {
+        self.save_to(&token_path())
+    }
+
+    fn save_to(mut self, path: &Path) -> anyhow::Result<Self> {
         self.obtained_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        let path = token_path();
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        fs::write(path, serde_json::to_string_pretty(&self)?)?;
+        write_private(path, serde_json::to_string_pretty(&self)?.as_bytes())?;
         Ok(self)
     }
+}
+
+/// Write `contents` to `path` so that only this user can read it and a crash never
+/// leaves half a file: a 0600 temp file in the same directory, renamed over the
+/// target (which also replaces a file an older version left world-readable).
+fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent().filter(|dir| !dir.exists()) {
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(dir)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(".tmp{}", std::process::id()));
+    let tmp = PathBuf::from(tmp);
+    // Left behind by a crashed run with the same pid; `create_new` must not follow it.
+    let _ = fs::remove_file(&tmp);
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options
+        .open(&tmp)
+        .and_then(|mut file| {
+            file.write_all(contents)?;
+            file.sync_all()
+        })
+        .and_then(|()| fs::rename(&tmp, path));
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// `$XDG_CONFIG_HOME/sctui`, else `~/.config/sctui` (`%USERPROFILE%\.config\sctui` on Windows).
@@ -56,4 +90,38 @@ fn token_path() -> PathBuf {
 pub fn load_token() -> Option<Token> {
     let data = fs::read_to_string(token_path()).ok()?;
     serde_json::from_str(&data).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #6: the token file is private to the user and replaced whole.
+    #[test]
+    fn saved_token_is_private_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("sctui-token-test-{}-{:x}", std::process::id(), rand::random::<u64>()));
+        let path = dir.join("nested").join("token.json");
+        let token = || Token { access_token: "access".into(), refresh_token: "refresh".into(), obtained_at: 0 };
+
+        let saved = token().save_to(&path).unwrap();
+        let read: Token = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!((read.access_token.as_str(), read.refresh_token.as_str()), ("access", "refresh"));
+        assert_eq!(read.obtained_at, saved.obtained_at);
+        assert!(saved.obtained_at > 0);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&path), 0o600);
+            assert_eq!(mode(path.parent().unwrap()), 0o700, "a config dir we create is private too");
+            // A file an older version wrote world-readable is tightened by the next save.
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            token().save_to(&path).unwrap();
+            assert_eq!(mode(&path), 0o600);
+        }
+        let left: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["token.json"], "no temp file is left behind");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
