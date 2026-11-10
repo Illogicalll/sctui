@@ -7,7 +7,7 @@ use crate::auth::{Token, try_refresh_token};
 /// Refreshes the token if needed and returns a clone of the current access token.
 pub(crate) fn access_token(token: &Arc<Mutex<Token>>) -> String {
     let _ = try_refresh_token(token);
-    token.lock().unwrap().access_token.clone()
+    token.lock().unwrap_or_else(|e| e.into_inner()).access_token.clone()
 }
 
 /// Largest whole unit of an elapsed time: "now", "5m", "3h", "2d", "1w", "1mo", "1y".

@@ -88,7 +88,7 @@ pub fn refresh_token(old_token: &Token) -> Result<Token> {
 /// a second until the relay hit Cloudflare's daily request cap.
 fn with_backoff(refresh_token: &str, refresh: impl FnOnce() -> Result<Token>) -> Result<Token> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    let mut last = LAST_FAILURE.lock().unwrap();
+    let mut last = LAST_FAILURE.lock().unwrap_or_else(|e| e.into_inner());
     // A different token (from a fresh login) starts with a clean slate.
     let (rejections, not_before) = if last.0 == refresh_token { (last.1, last.2) } else { (0, 0) };
     if now < not_before {
@@ -145,10 +145,12 @@ pub fn start_auto_refresh(token: Arc<Mutex<Token>>, reauth_tx: std::sync::mpsc::
 }
 
 pub fn try_refresh_token(token: &Arc<Mutex<Token>>) -> Result<()> {
-    let token_guard = token.lock().unwrap();
+    // Every page fetch comes through here; a panic elsewhere under this lock must not
+    // turn each of them into a panic of its own.
+    let token_guard = token.lock().unwrap_or_else(|e| e.into_inner());
     if token_guard.is_expired() {
         drop(token_guard);
-        let mut token_guard = token.lock().unwrap();
+        let mut token_guard = token.lock().unwrap_or_else(|e| e.into_inner());
         if !token_guard.is_expired() {
             // Another thread refreshed it while we waited for the lock.
             return Ok(());

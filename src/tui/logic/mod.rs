@@ -180,22 +180,31 @@ where
         return;
     }
     let (api, tx) = (Arc::clone(api), tx.clone());
-    std::thread::spawn(move || {
-        let (result, more) = {
-            let mut api_guard = api.lock().unwrap();
-            let result = fetch_fn(&mut api_guard);
-            (result, api_guard.has_more(list))
-        };
+    std::thread::spawn(move || fetch_and_settle(list, &api, &tx, fetch_fn));
+}
 
-        let settled = match result {
-            Ok(rows) => {
-                let _ = tx.send(rows);
-                Ok(more)
-            }
-            Err(e) => Err(format!("Fetch failed: {e:#}")),
-        };
-        let _ = tx.send(Msg::PageSettled(list, settled));
-    });
+/// Run one page fetch and always report how it went: `pagers` holds the list back
+/// until its `PageSettled` arrives, so a fetch that panics counts as one that failed.
+/// A panic poisons the `api` lock on its way out; the cursors in there only move once
+/// a page has been read, so the lock is taken regardless.
+fn fetch_and_settle<F>(list: List, api: &Mutex<API>, tx: &Sender<Msg>, fetch_fn: F)
+where
+    F: FnOnce(&mut API) -> anyhow::Result<Msg>,
+{
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut api_guard = api.lock().unwrap_or_else(|e| e.into_inner());
+        let result = fetch_fn(&mut api_guard);
+        (result, api_guard.has_more(list))
+    }));
+    let settled = match outcome {
+        Ok((Ok(rows), more)) => {
+            let _ = tx.send(rows);
+            Ok(more)
+        }
+        Ok((Err(e), _)) => Err(format!("Fetch failed: {e:#}")),
+        Err(_) => Err("Fetch failed: internal error".to_string()),
+    };
+    let _ = tx.send(Msg::PageSettled(list, settled));
 }
 
 /// Runs `fut` on the runtime and forwards its tracks tagged with `request_id`.
@@ -305,7 +314,7 @@ fn start(
     // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
     // take it. The token Arc is stable across re-auth (main.rs swaps the token inside
     // it), so clone it once here.
-    let token = api.lock().unwrap().token_clone();
+    let token = api.lock().unwrap_or_else(|e| e.into_inner()).token_clone();
     let auth = || Arc::clone(&token);
 
     let (tx, rx) = mpsc::channel::<Msg>();
@@ -1219,5 +1228,34 @@ fn start(
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// S5: a fetch that panics still settles its pager (as a failure, so it backs off
+    /// and retries), and the lock it poisoned does not take the next fetch down too.
+    #[test]
+    fn a_panicking_fetch_settles_as_failed_and_the_next_one_still_runs() {
+        let token = Token { access_token: String::new(), refresh_token: String::new(), obtained_at: 0 };
+        let api = Mutex::new(API::init(Arc::new(Mutex::new(token))));
+        let (tx, rx) = mpsc::channel();
+        let now = Instant::now();
+        let mut pagers = Pagers::default();
+
+        assert!(pagers.start(List::Likes, now));
+        fetch_and_settle(List::Likes, &api, &tx, |_| panic!("fetch blew up (expected by this test)"));
+        let Ok(Msg::PageSettled(List::Likes, Err(why))) = rx.try_recv() else { panic!("no failed settle") };
+        assert!(why.starts_with("Fetch failed"));
+        assert!(api.is_poisoned());
+        assert!(pagers.settled(List::Likes, None, now), "announced like any first failure");
+        assert!(!pagers.start(List::Likes, now), "backing off");
+        assert!(pagers.start(List::Likes, now + Duration::from_secs(2)), "then retried");
+
+        fetch_and_settle(List::Likes, &api, &tx, |_| Ok(Msg::Likes(Vec::new())));
+        assert!(matches!(rx.try_recv(), Ok(Msg::Likes(_))));
+        assert!(matches!(rx.try_recv(), Ok(Msg::PageSettled(List::Likes, Ok(true)))));
     }
 }
