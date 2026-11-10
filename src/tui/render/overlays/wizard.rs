@@ -80,7 +80,7 @@ fn boxed(frame: &mut Frame, area: Rect, title: &str) -> Rect {
 
 fn welcome(frame: &mut Frame) {
     let t = theme::current();
-    let inner = boxed(frame, centered_rect_fixed(58, 12, frame.area()), "Welcome to sctui");
+    let inner = boxed(frame, centered_rect_fixed(58, 11, frame.area()), "Welcome to sctui");
     let key = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(t.dim);
     let text = vec![
@@ -88,9 +88,8 @@ fn welcome(frame: &mut Frame) {
         Line::styled("Your SoundCloud library, played from the terminal.", Style::new().fg(t.fg)),
         Line::raw(""),
         Line::styled(
-            "Three quick steps: pick a layout, pick a theme, then a two-minute tour of the keys \
-             on your own library. The tour only moves, plays, queues and filters: nothing in it \
-             changes your account.",
+            "Let's get started: pick a layout, a theme and then take a quick tour of the \
+             keybinds (nothing will affect your actual SoundCloud library).",
             Style::new().fg(t.muted),
         ),
         Line::raw(""),
