@@ -107,30 +107,32 @@ pub enum Engagement {
     UnfollowUser { urn: String, user_id: u64 },
 }
 
-/// A destructive playlist action awaiting Yes/No in the confirm popup.
+/// A destructive playlist action awaiting Yes/No in the confirm popup. The playlist
+/// is named by its `tracks_uri`, not its row: the list can shift while the popup is open.
 #[derive(Clone)]
 pub enum ConfirmAction {
-    RemoveTrack { playlist_idx: usize, track: Track },
-    DeletePlaylist { playlist_idx: usize },
+    RemoveTrack { tracks_uri: String, track: Track },
+    DeletePlaylist { tracks_uri: String },
 }
 
 impl ConfirmAction {
     pub fn message(&self, data: &AppData) -> String {
-        let playlist_title = |idx: usize| {
+        let playlist_title = |tracks_uri: &str| {
             data.playlists
-                .get(idx)
+                .iter()
+                .find(|p| p.tracks_uri == tracks_uri)
                 .map(|p| p.title.as_str())
                 .unwrap_or("this playlist")
         };
         match self {
-            ConfirmAction::RemoveTrack { playlist_idx, track } => format!(
+            ConfirmAction::RemoveTrack { tracks_uri, track } => format!(
                 "Remove \"{}\" from \"{}\"?",
                 track.title,
-                playlist_title(*playlist_idx)
+                playlist_title(tracks_uri)
             ),
-            ConfirmAction::DeletePlaylist { playlist_idx } => format!(
+            ConfirmAction::DeletePlaylist { tracks_uri } => format!(
                 "Delete playlist \"{}\"? This cannot be undone.",
-                playlist_title(*playlist_idx)
+                playlist_title(tracks_uri)
             ),
         }
     }
@@ -467,6 +469,8 @@ pub struct AppState {
     pub eq: crate::config::Equalizer,
     pub help_capture: Option<crate::keymap::Action>,
     pub help_message: Option<String>,
+    /// `config::Loaded::load_failed`: saving the config is refused while set.
+    pub config_load_failed: bool,
     /// Search tab: printable keys go to the query until Enter/Esc.
     pub search_typing: bool,
     pub queue_visible: bool,
@@ -499,6 +503,7 @@ pub struct AppState {
     pub preload_triggered_for_track_urn: Option<String>,
 }
 
+#[derive(Default)]
 pub struct AppData {
     pub likes: Vec<Track>,
     pub likes_state: TableState,

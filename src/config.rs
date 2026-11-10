@@ -20,6 +20,10 @@ pub struct Loaded {
     pub settings: Settings,
     pub eq: Equalizer,
     pub warnings: Vec<String>,
+    /// The file exists but could not be read in full, so what is in memory is
+    /// partly defaults. `save` refuses while this is set, or it would overwrite
+    /// the user's file with them.
+    pub load_failed: bool,
 }
 
 /// Per-band equaliser gains in dB, edited from the EQ page of the `?` overlay.
@@ -187,14 +191,34 @@ struct ThemeSection {
 
 /// Defaults plus whatever the file overrides. Also installs the theme.
 pub fn load() -> Loaded {
-    let text = std::fs::read_to_string(path()).unwrap_or_default();
+    load_from(&std::fs::read_to_string(path()).unwrap_or_default())
+}
+
+fn load_from(text: &str) -> Loaded {
     let mut warnings = Vec::new();
 
     let mut keymap = Keymap::default();
-    warnings.extend(keymap.apply_toml(&text));
+    warnings.extend(keymap.apply_toml(text));
+    // ponytail: string match on apply_toml's own message; return a flag from it if this grows.
+    let mut load_failed = warnings.iter().any(|w| w.contains("could not be parsed"));
 
-    // A parse failure was already reported by the keymap parse.
-    let file: File = toml::from_str(&text).unwrap_or_default();
+    let file: File = match toml::from_str(text) {
+        Ok(file) => file,
+        Err(e) => {
+            // A syntax error was already reported by the keymap parse; a wrong type
+            // in one of these tables was not, and resets all three.
+            if !load_failed {
+                warnings.push(format!(
+                    "[theme], [settings] and [eq] could not be read, using defaults for all three: {e}"
+                ));
+            }
+            load_failed = true;
+            File::default()
+        }
+    };
+    if load_failed {
+        warnings.push("in-app changes will not be saved until config.toml is fixed and sctui restarted".to_string());
+    }
     let theme_name = file.theme.name.unwrap_or_else(|| Theme::DEFAULT.name.to_string());
     let base = Theme::by_name(&theme_name).unwrap_or_else(|| {
         warnings.push(format!(
@@ -214,18 +238,25 @@ pub fn load() -> Loaded {
         settings: file.settings,
         eq: file.eq.clamped(),
         warnings,
+        load_failed,
     }
 }
 
 /// Write the file: theme choice, any colour overrides, the settings toggles, the
 /// equaliser gains, and only the key bindings that differ from the defaults.
+/// Refused when the file failed to load (`Loaded::load_failed`): memory then holds
+/// defaults, not what the user wrote.
 pub fn save(
+    load_failed: bool,
     keymap: &Keymap,
     theme_name: &str,
     overrides: &Overrides,
     settings: &Settings,
     eq: &Equalizer,
 ) -> std::io::Result<()> {
+    if load_failed {
+        return Err(std::io::Error::other("config.toml has errors; fix it and restart sctui"));
+    }
     let path = path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -233,13 +264,7 @@ pub fn save(
     let mut out = String::from(
         "# sctui configuration. Edit here or from the app (? for keys, Shift+O for themes).\n\n[theme]\n",
     );
-    out.push_str(&format!("name = \"{theme_name}\"\n"));
-    if !overrides.0.is_empty() {
-        out.push_str("\n[theme.colors]\n");
-        for (role, value) in &overrides.0 {
-            out.push_str(&format!("{role} = \"{value}\"\n"));
-        }
-    }
+    out.push_str(&theme_section(theme_name, overrides));
     out.push_str("\n[settings]\n");
     out.push_str(&settings_section(settings));
     out.push_str("\n[eq]\n");
@@ -266,6 +291,22 @@ pub fn template() -> String {
     out.push_str(&eq_section(&Equalizer::default()));
     out.push('\n');
     out.push_str(&Keymap::default().keys_section(false));
+    out
+}
+
+/// The body of `[theme]` and, when there are overrides, `[theme.colors]`.
+fn theme_section(theme_name: &str, overrides: &Overrides) -> String {
+    let quoted = |s: &str| toml::Value::String(s.to_string()).to_string();
+    let mut out = format!("name = {}\n", quoted(theme_name));
+    if !overrides.0.is_empty() {
+        out.push_str("\n[theme.colors]\n");
+        for (role, value) in &overrides.0 {
+            let bare = !role.is_empty()
+                && role.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            let key = if bare { role.clone() } else { quoted(role) };
+            out.push_str(&format!("{key} = {}\n", quoted(value)));
+        }
+    }
     out
 }
 
@@ -391,6 +432,30 @@ mod tests {
         assert_eq!(row.display(settings), ("on".to_string(), true));
         settings.crossfade_user_skips = false;
         assert_eq!(row.display(settings), ("off".to_string(), false));
+    }
+
+    #[test]
+    fn bad_settings_type_is_reported_not_silently_defaulted() {
+        let loaded = load_from("[settings]\ncrossfade = \"yes\"\n");
+        assert!(loaded.load_failed);
+        assert!(loaded.warnings.iter().any(|w| w.contains("settings")), "{:?}", loaded.warnings);
+        assert!(!load_from("[settings]\ncrossfade = true\n").load_failed);
+        assert!(!load_from("").load_failed, "no file is not a failure");
+        assert!(load_from("[keys]\nquit = 5\n").load_failed, "nor may a bad [keys] be overwritten");
+        let err = save(true, &Keymap::default(), "default", &Overrides::default(), &Settings::default(), &Equalizer::default());
+        assert!(err.is_err(), "save is refused, and before it touches the disk");
+    }
+
+    #[test]
+    fn theme_section_round_trips_quote_and_backslash() {
+        let mut overrides = Overrides::default();
+        overrides.0.insert("accent".to_string(), "a\"b\\c".to_string());
+        overrides.0.insert("odd \"role\"".to_string(), "red".to_string());
+        let text = format!("[theme]\n{}", theme_section("na\"me", &overrides));
+        assert!(text.contains("\naccent = "), "plain role names stay bare: {text}");
+        let file: File = toml::from_str(&text).unwrap();
+        assert_eq!(file.theme.name.as_deref(), Some("na\"me"));
+        assert_eq!(file.theme.colors.0, overrides.0);
     }
 
     #[test]

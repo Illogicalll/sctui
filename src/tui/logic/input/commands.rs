@@ -113,7 +113,8 @@ pub(crate) fn run_command(
                 if let (Some(playlist_idx), Some(track)) = (open_playlist, track)
                     && data.playlists[playlist_idx].is_owned
                 {
-                    state.confirm = Some(ConfirmAction::RemoveTrack { playlist_idx, track });
+                    let tracks_uri = data.playlists[playlist_idx].tracks_uri.clone();
+                    state.confirm = Some(ConfirmAction::RemoveTrack { tracks_uri, track });
                     state.confirm_selected = 1;
                 }
             }
@@ -121,10 +122,10 @@ pub(crate) fn run_command(
         Action::DeletePlaylist => {
             if state.selected_tab == 0
                 && state.selected_subtab == 1
-                && data.playlists.get(state.selected_row).is_some_and(|p| p.is_owned)
+                && let Some(playlist) = data.playlists.get(state.selected_row).filter(|p| p.is_owned)
             {
                 state.confirm = Some(ConfirmAction::DeletePlaylist {
-                    playlist_idx: state.selected_row,
+                    tracks_uri: playlist.tracks_uri.clone(),
                 });
                 state.confirm_selected = 1;
             }

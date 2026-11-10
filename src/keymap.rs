@@ -590,7 +590,7 @@ impl Keymap {
             if only_overrides && km.chords(action) == defaults.chords(action) {
                 continue;
             }
-            let specs: Vec<String> = km.chords(action).iter().map(|c| format!("\"{}\"", c.spec())).collect();
+            let specs: Vec<String> = km.chords(action).iter().map(|c| toml::Value::String(c.spec()).to_string()).collect();
             let _ = writeln!(out, "# {}\n{} = [{}]\n", action.description(), action.name(), specs.join(", "));
         }
         out
@@ -697,6 +697,20 @@ mod tests {
         assert!(again.apply_toml(&text).is_empty());
         assert_eq!(again.chords(Action::Quit), km.chords(Action::Quit));
         assert!(again.chords(Action::Help).is_empty());
+    }
+
+    #[test]
+    fn keys_section_round_trips_quote_and_backslash() {
+        let mut km = Keymap::default();
+        km.clear(Action::PlayPause);
+        for spec in ["\"", "\\"] {
+            assert_eq!(km.add_chord(Action::PlayPause, Chord::parse(spec).unwrap()), Ok(()));
+        }
+        let mut again = Keymap::default();
+        let warnings = again.apply_toml(&km.keys_section(true));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(again.chords(Action::PlayPause), km.chords(Action::PlayPause));
+        assert_eq!(again.chords(Action::PlayPause).len(), 2);
     }
 
     #[test]

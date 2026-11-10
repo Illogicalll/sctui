@@ -12,7 +12,7 @@ use super::utils::centered_rect_fixed;
 /// Centred Yes / No box. `selected` 0 = Yes, 1 = No. Used for quitting and for
 /// every destructive playlist action.
 pub fn render_confirm(frame: &mut Frame, message: &str, selected: usize) {
-    let width = (message.chars().count() as u16 + 6).clamp(40, frame.area().width.max(1));
+    let width = (message.chars().count() as u16 + 6).max(40).min(frame.area().width.max(1));
     let popup_area = centered_rect_fixed(width, 5, frame.area());
     frame.render_widget(Clear, popup_area);
 
@@ -45,4 +45,19 @@ pub fn render_confirm(frame: &mut Frame, message: &str, selected: usize) {
         ),
         popup_area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn confirm_popup_does_not_panic_on_narrow_terminal() {
+        let message = "x".repeat(60);
+        for (w, h) in [(30, 8), (10, 4), (1, 1)] {
+            let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+            terminal.draw(|frame| render_confirm(frame, &message, 0)).unwrap();
+        }
+    }
 }

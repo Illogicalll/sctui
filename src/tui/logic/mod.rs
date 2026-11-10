@@ -101,6 +101,8 @@ enum Msg {
     /// Lyrics lookup result for a track URN (`None` = nothing found).
     Lyrics(String, Option<Lyrics>),
     Engagement(Engagement),
+    /// A playlist write the server refused; the text is ready to show.
+    PlaylistEditFailed(String),
 }
 
 pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded) -> anyhow::Result<()> {
@@ -240,6 +242,7 @@ fn start(
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
+    state.config_load_failed = config.load_failed;
     player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
     state.eq = config.eq;
     crate::player::eq::set(state.eq.gains);
@@ -251,12 +254,48 @@ fn start(
 
     let async_rt = tokio::runtime::Runtime::new().unwrap();
     // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
-    // take it. The token Arc is stable across re-auth (main.rs rebuilds the API around the
-    // same Arc), so clone it once here.
+    // take it. The token Arc is stable across re-auth (main.rs swaps the token inside
+    // it), so clone it once here.
     let token = api.lock().unwrap().token_clone();
     let auth = || Arc::clone(&token);
 
     let (tx, rx) = mpsc::channel::<Msg>();
+
+    // Playlist writes run one at a time, in the order they were made: add and remove
+    // each read the whole track list and write it back, so two at once on the same
+    // playlist would lose one of them.
+    let (edit_tx, mut edit_rx) = tokio::sync::mpsc::unbounded_channel::<PlaylistEdit>();
+    {
+        let token = auth();
+        let tx = tx.clone();
+        async_rt.spawn(async move {
+            while let Some(edit) = edit_rx.recv().await {
+                let token = Arc::clone(&token);
+                let (what, result) = match edit {
+                    PlaylistEdit::Add { playlist_id, tracks_uri, track_urn } => (
+                        "Adding to playlist",
+                        add_track_to_playlist(token, playlist_id, tracks_uri, track_urn).await,
+                    ),
+                    PlaylistEdit::Remove { playlist_id, tracks_uri, track_urn } => (
+                        "Removing from playlist",
+                        remove_track_from_playlist(token, playlist_id, tracks_uri, track_urn).await,
+                    ),
+                    PlaylistEdit::Create { title, track_urn, public } => (
+                        "Creating playlist",
+                        create_playlist(token, title, track_urn, public).await.map(|playlist| {
+                            let _ = tx.send(Msg::PlaylistCreated(playlist));
+                        }),
+                    ),
+                    PlaylistEdit::Delete { playlist_id } => {
+                        ("Deleting playlist", delete_playlist(token, playlist_id).await)
+                    }
+                };
+                if let Err(e) = result {
+                    let _ = tx.send(Msg::PlaylistEditFailed(format!("{what} failed: {e:#}")));
+                }
+            }
+        });
+    }
 
     spawn_fetch(Arc::clone(api), tx.clone(), |api| {
         api.get_playlists().map(Msg::Playlists)
@@ -439,6 +478,8 @@ fn start(
                     }
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
+                // Only visible in the `?` popup until toasts exist.
+                Msg::PlaylistEditFailed(why) => state.help_message = Some(why),
             }
         }
         if fetched {
@@ -478,26 +519,7 @@ fn start(
         }
 
         while let Some(edit) = state.playlist_edit_queue.pop_front() {
-            let token = auth();
-            let tx = tx.clone();
-            async_rt.spawn(async move {
-                match edit {
-                    PlaylistEdit::Add { playlist_id, tracks_uri, track_urn } => {
-                        let _ = add_track_to_playlist(token, playlist_id, tracks_uri, track_urn).await;
-                    }
-                    PlaylistEdit::Remove { playlist_id, tracks_uri, track_urn } => {
-                        let _ = remove_track_from_playlist(token, playlist_id, tracks_uri, track_urn).await;
-                    }
-                    PlaylistEdit::Create { title, track_urn, public } => {
-                        if let Ok(playlist) = create_playlist(token, title, track_urn, public).await {
-                            let _ = tx.send(Msg::PlaylistCreated(playlist));
-                        }
-                    }
-                    PlaylistEdit::Delete { playlist_id } => {
-                        let _ = delete_playlist(token, playlist_id).await;
-                    }
-                }
-            });
+            let _ = edit_tx.send(edit);
         }
 
         let current_artwork_url = player.current_track().artwork_url;

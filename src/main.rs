@@ -65,7 +65,6 @@ fn main() -> anyhow::Result<()> {
 
     // spawn a thread to handle re-authentication requests
     let token_clone = Arc::clone(&token);
-    let api_clone = Arc::clone(&api);
     std::thread::spawn(move || {
         for _ in reauth_rx.iter() {
             // re-authenticate (this will block waiting for user interaction)
@@ -74,9 +73,10 @@ fn main() -> anyhow::Result<()> {
             reauth_rx.try_iter().for_each(drop);
             match result {
                 Ok(new_token) => {
+                    // `API` and `Player` share this Arc, so this is all they need.
+                    // Rebuilding `API` here would reset its page cursors and every
+                    // library list would be fetched, and appended, a second time.
                     *token_clone.lock().unwrap() = new_token;
-                    // update API with new token
-                    *api_clone.lock().unwrap() = api::API::init(Arc::clone(&token_clone));
                 }
                 Err(_) => {
                     // re-authentication failed, will try again on next refresh failure

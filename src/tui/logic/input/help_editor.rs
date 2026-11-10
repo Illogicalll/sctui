@@ -195,6 +195,7 @@ fn apply_settings(state: &mut AppState, data: &mut AppData, player: &Player) {  
 /// Persist and decorate the message with the outcome.
 fn saved(state: &AppState, msg: String) -> String {
     match crate::config::save(
+        state.config_load_failed,
         &state.keymap,
         &state.theme_name,
         &state.theme_overrides,
