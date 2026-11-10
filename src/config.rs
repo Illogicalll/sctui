@@ -257,6 +257,10 @@ pub fn save(
     if load_failed {
         return Err(std::io::Error::other("config.toml has errors; fix it and restart sctui"));
     }
+    // Tests drive the real input handlers; none of them may write the user's config.
+    if cfg!(test) {
+        return Ok(());
+    }
     let path = path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
