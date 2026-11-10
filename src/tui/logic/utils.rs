@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -430,11 +431,93 @@ pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seeds: Vec<T
     state.current_playing_index = Some(0);
     state.radio_fetched_for = None;
     state.radio_waiting = false;
+    state.radio_misses = 0;
+    state.radio_seed_back = 0;
+    state.radio_retry_at = None;
+    // A fetch still out for the previous station is not this one's result.
+    state.radio_fetch.cancel();
     state.auto_queue = build_queue(0, &seeds, state.shuffle_enabled);
     data.playback_tracks = seeds;
     data.playback_playlist_uri = None;
     data.playback_album_uri = None;
     data.playback_following_user_urn = None;
+}
+
+/// Related-tracks fetches in a row that may fail or bring nothing new before the station
+/// stops asking.
+pub(crate) const RADIO_MAX_MISSES: u8 = 5;
+/// Wait this long after a failed related-tracks fetch before trying again.
+const RADIO_RETRY_DELAY: Duration = Duration::from_secs(3);
+
+/// The seed (track urn) to fetch related tracks for now, if a fetch is due: a station is
+/// playing with at most one track left queued, it has not given up, and no retry delay is
+/// running. The seed is the last track of the chain, or an earlier one once the later
+/// ones turned up nothing new, so each fetch drifts a little further from the start.
+pub(crate) fn radio_seed_due(state: &AppState, data: &AppData, now: Instant) -> Option<String> {
+    if state.playback_source != PlaybackSource::Radio
+        || !state.manual_queue.is_empty()
+        || state.auto_queue.len() > 1
+        || state.radio_misses >= RADIO_MAX_MISSES
+        || state.radio_retry_at.is_some_and(|at| now < at)
+    {
+        return None;
+    }
+    let seed = &data.playback_tracks.iter().rev().nth(state.radio_seed_back)?.track_urn;
+    (state.radio_fetched_for.as_ref() != Some(seed)).then(|| seed.clone())
+}
+
+/// A related-tracks fetch came back; `None` is a failed request. New tracks join the
+/// queue. A failure is retried with the same seed after `RADIO_RETRY_DELAY`; a result
+/// with nothing new moves the seed one track back up the chain. After
+/// `RADIO_MAX_MISSES` such results in a row (or with no seed left to try) the station
+/// stops asking, and says so if playback was waiting on it. Returns the track to start
+/// when playback was waiting and something arrived.
+pub(crate) fn radio_result(
+    state: &mut AppState,
+    data: &mut AppData,
+    tracks: Option<Vec<Track>>,
+    now: Instant,
+) -> Option<Track> {
+    let failed = tracks.is_none();
+    let before = data.playback_tracks.len();
+    append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks.unwrap_or_default(), false);
+    if data.playback_tracks.len() > before {
+        state.radio_misses = 0;
+        state.radio_seed_back = 0;
+        if !state.radio_waiting {
+            return None;
+        }
+        state.radio_waiting = false;
+        return advance(state, data);
+    }
+    state.radio_misses += 1;
+    if failed {
+        state.radio_fetched_for = None;
+        state.radio_retry_at = Some(now + RADIO_RETRY_DELAY);
+    } else {
+        state.radio_seed_back += 1;
+    }
+    if state.radio_misses >= RADIO_MAX_MISSES || state.radio_seed_back >= data.playback_tracks.len() {
+        state.radio_misses = RADIO_MAX_MISSES;
+        if state.radio_waiting {
+            state.radio_waiting = false;
+            state.toast("Nothing more to play");
+        }
+    }
+    None
+}
+
+/// A station's queue ran dry at the end of a track: play as soon as related tracks
+/// arrive. If the station had already stopped asking while that track played, it gets
+/// one more round of attempts (the network may be back).
+pub(crate) fn await_radio(state: &mut AppState) {
+    state.radio_waiting = true;
+    if state.radio_misses >= RADIO_MAX_MISSES {
+        state.radio_misses = 0;
+        state.radio_seed_back = 0;
+        state.radio_fetched_for = None;
+        state.radio_retry_at = None;
+    }
 }
 
 /// Start a station the user asked for, `seeds[0]` playing now. What was playing goes into
@@ -697,6 +780,91 @@ mod tests {
         state.playback_source = PlaybackSource::Playlist;
         rebuild_auto_queue(&mut state, &data);
         assert_eq!(state.auto_queue.len(), 5);
+    }
+
+    /// A station whose chain is `chain`, the last track playing and nothing queued, as the
+    /// loop leaves it once it has asked for the last track's related tracks.
+    fn station_out_of_tracks(chain: &[&str], now: Instant) -> (AppState, AppData) {
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        enter_radio(&mut state, &mut data, tracks(chain));
+        state.auto_queue.clear();
+        state.current_playing_index = Some(chain.len() - 1);
+        state.radio_fetched_for = radio_seed_due(&state, &data, now);
+        assert_eq!(state.radio_fetched_for.as_deref(), chain.last().copied());
+        (state, data)
+    }
+
+    /// T9: a failed related-tracks fetch is retried after a pause, and playback starts
+    /// when one finally succeeds.
+    #[test]
+    fn a_failed_radio_fetch_is_retried_after_a_delay() {
+        let now = Instant::now();
+        let (mut state, mut data) = station_out_of_tracks(&["a", "b"], now);
+        await_radio(&mut state);
+
+        assert!(radio_result(&mut state, &mut data, None, now).is_none());
+        assert!(state.radio_waiting, "still waiting, not stopped");
+        assert_eq!(radio_seed_due(&state, &data, now), None, "not straight away");
+        let later = now + RADIO_RETRY_DELAY;
+        assert_eq!(radio_seed_due(&state, &data, later).as_deref(), Some("b"), "same seed again");
+
+        let next = radio_result(&mut state, &mut data, Some(tracks(&["b", "c", "d"])), later);
+        assert_eq!(next.unwrap().track_urn, "c");
+        assert!(!state.radio_waiting && state.radio_misses == 0);
+        assert_eq!(queued_urns(&state, &data), ["d"]);
+        assert_eq!(state.playback_history.last().unwrap().track.track_urn, "b");
+    }
+
+    /// T9: when a seed's related tracks are all in the chain already, earlier tracks are
+    /// tried as the seed, and the station stops cleanly once none is left.
+    #[test]
+    fn a_radio_fetch_with_nothing_new_tries_earlier_seeds_then_stops_with_a_notice() {
+        let now = Instant::now();
+        let (mut state, mut data) = station_out_of_tracks(&["a", "b", "c"], now);
+        await_radio(&mut state);
+
+        for seed in ["b", "a"] {
+            assert!(radio_result(&mut state, &mut data, Some(tracks(&["a", "c"])), now).is_none());
+            assert!(state.radio_waiting && state.toasts.is_empty());
+            let due = radio_seed_due(&state, &data, now);
+            assert_eq!(due.as_deref(), Some(seed));
+            state.radio_fetched_for = due;
+        }
+        // The last seed has nothing new either.
+        assert!(radio_result(&mut state, &mut data, Some(Vec::new()), now).is_none());
+        assert!(!state.radio_waiting, "stopped, not waiting for ever");
+        assert_eq!(state.toasts.last().unwrap().msg, "Nothing more to play");
+        assert_eq!(radio_seed_due(&state, &data, now + RADIO_RETRY_DELAY * 10), None);
+    }
+
+    /// T9: failures are bounded, quiet while a track is still playing, and the end of
+    /// that track gets one more round before giving up for good.
+    #[test]
+    fn radio_fetch_failures_are_bounded() {
+        let mut now = Instant::now();
+        let (mut state, mut data) = station_out_of_tracks(&["a"], now);
+        fn fail_until_it_stops(state: &mut AppState, data: &mut AppData, now: &mut Instant) -> u8 {
+            let mut attempts = 0;
+            while let Some(seed) = radio_seed_due(state, data, *now) {
+                state.radio_fetched_for = Some(seed);
+                radio_result(state, data, None, *now);
+                *now += RADIO_RETRY_DELAY;
+                attempts += 1;
+                assert!(attempts <= RADIO_MAX_MISSES, "kept retrying");
+            }
+            attempts
+        }
+        // The fetch made ahead of the track's end has failed once already here.
+        radio_result(&mut state, &mut data, None, now);
+        now += RADIO_RETRY_DELAY;
+        assert_eq!(fail_until_it_stops(&mut state, &mut data, &mut now), RADIO_MAX_MISSES - 1);
+        assert!(state.toasts.is_empty(), "nothing was waiting on it yet");
+
+        await_radio(&mut state);
+        assert_eq!(fail_until_it_stops(&mut state, &mut data, &mut now), RADIO_MAX_MISSES);
+        assert!(!state.radio_waiting);
+        assert_eq!(state.toasts.last().unwrap().msg, "Nothing more to play");
     }
 
     /// T10: a track station started while an artist station is still loading wins.

@@ -49,8 +49,8 @@ use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
-    advance, append_feed_tracks, end_of_track, extend_likes_playback, next_track_trigger_ms, peek_next,
-    start_station,
+    append_feed_tracks, await_radio, end_of_track, extend_likes_playback, next_track_trigger_ms, peek_next,
+    radio_result, radio_seed_due, start_station,
 };
 
 /// How long a track must have been playing before its lyrics are looked up.
@@ -98,8 +98,9 @@ enum Msg {
     FeedTracks(u64, Vec<Track>),
     /// Tracks of one later feed item, to append to the queue while the feed plays.
     FeedQueue(u64, Vec<Track>),
-    /// Related tracks for the radio seed, to append to the queue.
-    Related(u64, Vec<Track>),
+    /// Related tracks for the radio seed, to append to the queue; `None` when the
+    /// request failed.
+    Related(u64, Option<Vec<Track>>),
     /// A mix built for an artist station: the seed artist plus a few related artists,
     /// one playable track apiece.
     ArtistStation(u64, Vec<Track>),
@@ -463,12 +464,9 @@ fn start(
                 Msg::Related(id, tracks) => {
                     if id == state.radio_fetch.request_id
                         && state.playback_source == PlaybackSource::Radio
+                        && let Some(track) = radio_result(&mut state, &mut data, tracks, Instant::now())
                     {
-                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks, false);
-                        if state.radio_waiting && let Some(track) = advance(&mut state, &data) {
-                            player.play(track, TrackChange::Natural);
-                            state.radio_waiting = false;
-                        }
+                        player.play(track, TrackChange::Natural);
                     }
                 }
                 Msg::ArtistStation(id, tracks) => {
@@ -722,22 +720,17 @@ fn start(
             );
         }
 
-        // Radio: keep related tracks queued behind whatever is playing. Seeded by the last
-        // track in the chain so each fetch drifts a little further from the start.
-        if state.playback_source == PlaybackSource::Radio
-            && state.manual_queue.is_empty()
-            && state.auto_queue.len() <= 1
-            && let Some(seed) = data.playback_tracks.last().map(|t| t.track_urn.clone())
-                && state.radio_fetched_for.as_deref() != Some(seed.as_str()) {
-                    state.radio_fetched_for = Some(seed.clone());
-                    state.radio_fetch.cancel();
-                    let id = state.radio_fetch.request_id;
-                    state.radio_fetch.task = Some(spawn_tracks(
-                        &async_rt, &tx, id,
-                        fetch_related_tracks(auth(), seed),
-                        Msg::Related,
-                    ));
-                }
+        // Radio: keep related tracks queued behind whatever is playing. A failure comes
+        // back as `None` (not a toast) so `radio_result` can retry it.
+        if let Some(seed) = radio_seed_due(&state, &data, Instant::now()) {
+            state.radio_fetched_for = Some(seed.clone());
+            state.radio_fetch.cancel();
+            let id = state.radio_fetch.request_id;
+            let (token, tx) = (auth(), tx.clone());
+            state.radio_fetch.task = Some(async_rt.spawn(async move {
+                let _ = tx.send(Msg::Related(id, fetch_related_tracks(token, seed).await.ok()));
+            }));
+        }
 
         // Shift+Enter on a focused artist row: fetch its station mix in the background, then
         // Msg::ArtistStation starts playback once it lands.
@@ -1117,7 +1110,7 @@ fn start(
                             if state.playback_source != PlaybackSource::Radio {
                                 enter_radio(&mut state, &mut data, vec![current_track.clone()]);
                             }
-                            state.radio_waiting = true;
+                            await_radio(&mut state);
                         }
                     }
                 }

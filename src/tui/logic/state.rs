@@ -511,6 +511,14 @@ pub struct AppState {
     pub radio_fetched_for: Option<String>,
     /// The radio queue ran dry before related tracks arrived; play as soon as they do.
     pub radio_waiting: bool,
+    /// Related-tracks fetches in a row that failed or brought nothing new. Fetching stops
+    /// at `utils::RADIO_MAX_MISSES`.
+    pub radio_misses: u8,
+    /// How far back from the end of the chain the next seed is taken; steps back each
+    /// time a seed's related tracks were all in the chain already.
+    pub radio_seed_back: usize,
+    /// Earliest time for the next fetch, after one failed.
+    pub radio_retry_at: Option<Instant>,
     /// Set by Shift+Enter on a focused artist row; the loop fetches its station tracks from here.
     pub artist_station_request: Option<Artist>,
     pub artist_station_fetch: FetchTask,
