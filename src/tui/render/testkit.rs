@@ -125,7 +125,7 @@ pub fn track(i: usize, title: &str) -> Track {
 }
 
 /// `n` tracks named `{prefix} 00`, `{prefix} 01`, …, with urns starting at `base`.
-fn tracks(base: usize, prefix: &str, n: usize) -> Vec<Track> {
+pub fn tracks(base: usize, prefix: &str, n: usize) -> Vec<Track> {
     (0..n).map(|i| track(base + i, &format!("{prefix} {i:02}"))).collect()
 }
 
@@ -133,7 +133,7 @@ fn playlist_uri(i: usize) -> String {
     format!("https://api.soundcloud.com/playlists/{i}/tracks")
 }
 
-fn playlists(prefix: &str, n: usize) -> Vec<Playlist> {
+pub fn playlists(prefix: &str, n: usize) -> Vec<Playlist> {
     (0..n)
         .map(|i| Playlist {
             title: format!("{prefix} {i}"),
@@ -146,7 +146,7 @@ fn playlists(prefix: &str, n: usize) -> Vec<Playlist> {
         .collect()
 }
 
-fn albums(prefix: &str, n: usize) -> Vec<Album> {
+pub fn albums(prefix: &str, n: usize) -> Vec<Album> {
     (0..n)
         .map(|i| Album {
             title: format!("{prefix} {i}"),
@@ -159,7 +159,7 @@ fn albums(prefix: &str, n: usize) -> Vec<Album> {
         .collect()
 }
 
-fn people(prefix: &str, n: usize) -> Vec<Artist> {
+pub fn people(prefix: &str, n: usize) -> Vec<Artist> {
     (0..n).map(|i| Artist { name: format!("{prefix} {i}"), urn: format!("soundcloud:users:{i}") }).collect()
 }
 

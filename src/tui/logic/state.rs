@@ -1,4 +1,4 @@
-use crate::api::{API, Activity, Album, Artist, Playlist, Track};
+use crate::api::{Activity, Album, Artist, Playlist, Track};
 use crate::api::Lyrics;
 use crate::keymap::Keymap;
 use super::nav::PaneId;
@@ -726,87 +726,37 @@ pub struct AppData {
     pub hidden_feed: Vec<(usize, Activity)>,
     /// Playlists and albums with nothing playable in them (see `filtering::apply_container_filter`).
     pub containers: Containers,
+    /// Lists whose first page has not arrived yet, by `api::List`: an empty one of
+    /// these is not known to be empty.
+    pub loading: [bool; 5],
 }
 
 impl AppData {
-    pub fn new(api: &mut API, selected_row: usize) -> anyhow::Result<Self> {
-        let likes: Vec<Track> = api.get_liked_tracks()?.into_iter().collect();
-        let liked_track_urns: HashSet<String> =
-            likes.iter().map(|t| t.track_urn.clone()).collect();
+    /// What the app starts with: nothing, and every list still to be fetched. Launch
+    /// makes no request; first pages arrive like any other page.
+    pub fn loading() -> Self {
+        Self { loading: [true; 5], ..Self::default() }
+    }
 
-        let playlists: Vec<Playlist> = api.get_playlists()?.into_iter().collect();
-        let liked_playlist_uris: HashSet<String> = playlists
-            .iter()
-            .filter(|p| !p.is_owned)
-            .map(|p| p.tracks_uri.clone())
-            .collect();
+    /// A page of each library list: its rows, and what marks them liked or followed.
+    pub fn add_likes(&mut self, page: Vec<Track>) {
+        self.liked_track_urns.extend(page.iter().map(|t| t.track_urn.clone()));
+        self.likes.extend(page);
+    }
 
-        let albums: Vec<Album> = api.get_albums()?.into_iter().collect();
-        let liked_album_uris: HashSet<String> =
-            albums.iter().map(|a| a.tracks_uri.clone()).collect();
+    pub fn add_playlists(&mut self, page: Vec<Playlist>) {
+        self.liked_playlist_uris.extend(page.iter().filter(|p| !p.is_owned).map(|p| p.tracks_uri.clone()));
+        self.playlists.extend(page);
+    }
 
-        let following: Vec<Artist> = api.get_following()?.into_iter().collect();
-        let followed_user_urns: HashSet<String> =
-            following.iter().map(|a| a.urn.clone()).collect();
+    pub fn add_albums(&mut self, page: Vec<Album>) {
+        self.liked_album_uris.extend(page.iter().map(|a| a.tracks_uri.clone()));
+        self.albums.extend(page);
+    }
 
-        Ok(Self {
-            likes,
-            likes_state: TableState::default().with_selected(selected_row),
-            liked_track_urns,
-            playlists,
-            playlists_state: TableState::default().with_selected(selected_row),
-            liked_playlist_uris,
-            playlist_tracks: Vec::new(),
-            playlist_tracks_state: TableState::default().with_selected(0),
-            playlist_tracks_uri: None,
-            album_tracks: Vec::new(),
-            album_tracks_state: TableState::default().with_selected(0),
-            album_tracks_uri: None,
-            following_tracks: Vec::new(),
-            following_tracks_state: TableState::default().with_selected(0),
-            following_tracks_user_urn: None,
-            following_likes_tracks: Vec::new(),
-            following_likes_state: TableState::default().with_selected(0),
-            following_likes_user_urn: None,
-            playback_tracks: Vec::new(),
-            playback_playlist_uri: None,
-            playback_album_uri: None,
-            playback_following_user_urn: None,
-            albums,
-            albums_state: TableState::default().with_selected(selected_row),
-            liked_album_uris,
-            following,
-            following_state: TableState::default().with_selected(selected_row),
-            followed_user_urns,
-            search_tracks: Vec::new(),
-            search_tracks_state: TableState::default().with_selected(0),
-            search_playlists: Vec::new(),
-            search_playlists_state: TableState::default().with_selected(0),
-            search_playlist_tracks: Vec::new(),
-            search_playlist_tracks_state: TableState::default().with_selected(0),
-            search_playlist_tracks_uri: None,
-            search_albums: Vec::new(),
-            search_albums_state: TableState::default().with_selected(0),
-            search_album_tracks: Vec::new(),
-            search_album_tracks_state: TableState::default().with_selected(0),
-            search_album_tracks_uri: None,
-            search_people: Vec::new(),
-            search_people_state: TableState::default().with_selected(0),
-            search_people_tracks: Vec::new(),
-            search_people_tracks_state: TableState::default().with_selected(0),
-            search_people_tracks_user_urn: None,
-            search_people_likes_tracks: Vec::new(),
-            search_people_likes_state: TableState::default().with_selected(0),
-            search_people_likes_user_urn: None,
-            feed: Vec::new(),
-            feed_state: TableState::default().with_selected(0),
-            feed_tracks: Vec::new(),
-            feed_tracks_state: TableState::default().with_selected(0),
-            feed_tracks_key: None,
-            hidden_tracks: Vec::new(),
-            hidden_feed: Vec::new(),
-            containers: Containers::default(),
-        })
+    pub fn add_following(&mut self, page: Vec<Artist>) {
+        self.followed_user_urns.extend(page.iter().map(|a| a.urn.clone()));
+        self.following.extend(page);
     }
 }
 
@@ -846,6 +796,34 @@ mod tests {
         Engagement::UnlikeTrack { track_urn: "soundcloud:tracks:1".into(), track_id: 1 }.failed("offline", &mut state, &mut data);
         assert!(data.liked_track_urns.contains("soundcloud:tracks:1"));
         assert_eq!(state.toasts.last().unwrap().msg, "Unlike failed: offline");
+    }
+
+    /// S2: first pages arrive like any other page, and mark what is liked and followed
+    /// just as the lists fetched before launch used to.
+    #[test]
+    fn pages_build_the_liked_and_followed_sets() {
+        use crate::tui::render::testkit::{albums, people, playlists, tracks};
+        let mut data = AppData::loading();
+        assert!(data.likes.is_empty() && data.loading.iter().all(|&l| l));
+
+        let (likes, mut lists, records, friends) = (tracks(0, "Song", 3), playlists("List", 3), albums("Album", 2), people("Friend", 2));
+        lists[0].is_owned = true;
+        lists[1].is_owned = false;
+        lists[2].is_owned = false;
+        // Two pages of likes, one of everything else.
+        data.add_likes(likes[..2].to_vec());
+        data.add_likes(likes[2..].to_vec());
+        data.add_playlists(lists.clone());
+        data.add_albums(records.clone());
+        data.add_following(friends.clone());
+
+        let set = |it: Vec<String>| it.into_iter().collect::<HashSet<_>>();
+        assert_eq!(data.likes.len(), 3);
+        assert_eq!(data.liked_track_urns, set(likes.iter().map(|t| t.track_urn.clone()).collect()));
+        assert_eq!(data.playlists.len(), 3);
+        assert_eq!(data.liked_playlist_uris, set(lists[1..].iter().map(|p| p.tracks_uri.clone()).collect()), "not the user's own");
+        assert_eq!(data.liked_album_uris, set(records.iter().map(|a| a.tracks_uri.clone()).collect()));
+        assert_eq!(data.followed_user_urns, set(friends.iter().map(|a| a.urn.clone()).collect()));
     }
 
     /// T19: history is capped and its entries do not each carry the whole playing list.

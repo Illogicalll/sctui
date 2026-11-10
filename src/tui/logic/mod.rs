@@ -183,6 +183,20 @@ where
     std::thread::spawn(move || fetch_and_settle(list, &api, &tx, fetch_fn));
 }
 
+/// The library's lists, in sub-tab order.
+const LIBRARY: [List; 4] = [List::Likes, List::Playlists, List::Albums, List::Following];
+
+/// `spawn_fetch` for `list`'s next page.
+fn fetch_next_page(pagers: &mut Pagers, list: List, api: &Arc<Mutex<API>>, tx: &Sender<Msg>) {
+    match list {
+        List::Likes => spawn_fetch(pagers, list, api, tx, |api| api.get_liked_tracks().map(Msg::Likes)),
+        List::Playlists => spawn_fetch(pagers, list, api, tx, |api| api.get_playlists().map(Msg::Playlists)),
+        List::Albums => spawn_fetch(pagers, list, api, tx, |api| api.get_albums().map(Msg::Albums)),
+        List::Following => spawn_fetch(pagers, list, api, tx, |api| api.get_following().map(Msg::Following)),
+        List::Feed => spawn_fetch(pagers, list, api, tx, |api| api.get_activities().map(Msg::Feed)),
+    }
+}
+
 /// Run one page fetch and always report how it went: `pagers` holds the list back
 /// until its `PageSettled` arrives, so a fetch that panics counts as one that failed.
 /// A panic poisons the `api` lock on its way out; the cursors in there only move once
@@ -305,10 +319,7 @@ fn start(
     state.eq = config.eq;
     crate::player::eq::set(state.eq.gains);
 
-    let mut api_guard = api.lock().unwrap();
-    let mut data = AppData::new(&mut api_guard, state.selected_row)?;
-    drop(api_guard);
-    apply_unplayable_filter(&mut state, &mut data);
+    let mut data = AppData::loading();
 
     let async_rt = tokio::runtime::Runtime::new().unwrap();
     // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
@@ -355,16 +366,15 @@ fn start(
         });
     }
 
+    // Launch waits for none of these: the lists start empty and fill in as pages land.
     let mut pagers = Pagers::default();
-    spawn_fetch(&mut pagers, List::Playlists, api, &tx, |api| {
-        api.get_playlists().map(Msg::Playlists)
-    });
+    for list in LIBRARY {
+        fetch_next_page(&mut pagers, list, api, &tx);
+    }
     // Later feed pages are only fetched while the feed tab is on screen, so a hidden
     // feed tab costs nothing beyond this first page - skip that too.
     if !state.settings.hide_feed_tab {
-        spawn_fetch(&mut pagers, List::Feed, api, &tx, |api| {
-            api.get_activities().map(Msg::Feed)
-        });
+        fetch_next_page(&mut pagers, List::Feed, api, &tx);
     }
 
     // A terminal that does not answer the query gets half-block cover art at a guessed
@@ -419,32 +429,12 @@ fn start(
             fetched = true;
             match msg {
                 Msg::Likes(new) => {
-                    for t in &new {
-                        data.liked_track_urns.insert(t.track_urn.clone());
-                    }
                     extend_likes_playback(&mut state, &mut data, &new);
-                    data.likes.extend(new);
+                    data.add_likes(new);
                 }
-                Msg::Playlists(new) => {
-                    for p in &new {
-                        if !p.is_owned {
-                            data.liked_playlist_uris.insert(p.tracks_uri.clone());
-                        }
-                    }
-                    data.playlists.extend(new);
-                }
-                Msg::Albums(new) => {
-                    for a in &new {
-                        data.liked_album_uris.insert(a.tracks_uri.clone());
-                    }
-                    data.albums.extend(new);
-                }
-                Msg::Following(new) => {
-                    for a in &new {
-                        data.followed_user_urns.insert(a.urn.clone());
-                    }
-                    data.following.extend(new);
-                }
+                Msg::Playlists(new) => data.add_playlists(new),
+                Msg::Albums(new) => data.add_albums(new),
+                Msg::Following(new) => data.add_following(new),
                 Msg::PlaylistTracks(id, t) => state.playlist_tracks_fetch.accept(
                     id, t, &mut data.playlist_tracks, &mut data.playlist_tracks_state,
                 ),
@@ -536,12 +526,17 @@ fn start(
                 Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
                 Msg::PlaylistEditFailed(why) | Msg::FetchFailed(why) => state.toast_err(why),
                 Msg::PageSettled(list, outcome) => {
+                    let first_page = outcome.is_ok() && std::mem::take(&mut data.loading[list as usize]);
                     // One notice per run of failures; the retries after it are silent.
                     let why = outcome.as_ref().err().cloned();
                     if pagers.settled(list, outcome.ok(), Instant::now())
                         && let Some(why) = why
                     {
                         state.toast_err(why);
+                    }
+                    // Playlists have always had two pages in before their tab is opened.
+                    if first_page && list == List::Playlists {
+                        fetch_next_page(&mut pagers, list, api, &tx);
                     }
                 }
                 Msg::ContainerProbed(uri, playable) => {
@@ -1209,23 +1204,15 @@ fn start(
 
             // Feed is unbounded: only page when the cursor nears the end of what is loaded.
             if state.selected_tab == 2 && nav::cursor(&state, PaneId::Feed) + 10 >= data.feed.len() {
-                spawn_fetch(&mut pagers, List::Feed, api, &tx, |api| {
-                    api.get_activities().map(Msg::Feed)
-                });
+                fetch_next_page(&mut pagers, List::Feed, api, &tx);
             }
 
-            match state.selected_subtab {
-                0 => spawn_fetch(&mut pagers, List::Likes, api, &tx, |api| {
-                    api.get_liked_tracks().map(Msg::Likes)
-                }),
-                1 => spawn_fetch(&mut pagers, List::Playlists, api, &tx, |api| {
-                    api.get_playlists().map(Msg::Playlists)
-                }),
-                2 => spawn_fetch(&mut pagers, List::Albums, api, &tx, |api| api.get_albums().map(Msg::Albums)),
-                3 => spawn_fetch(&mut pagers, List::Following, api, &tx, |api| {
-                    api.get_following().map(Msg::Following)
-                }),
-                _ => {}
+            // The sub-tab on screen keeps paging to its end; the others only until
+            // their first page is in (retried here, with backoff, if launch was offline).
+            for (subtab, list) in LIBRARY.into_iter().enumerate() {
+                if subtab == state.selected_subtab || data.loading[list as usize] {
+                    fetch_next_page(&mut pagers, list, api, &tx);
+                }
             }
         }
     }

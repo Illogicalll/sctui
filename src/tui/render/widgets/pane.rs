@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Cell, Row, Table},
 };
 
-use crate::api::{Activity, Album, Artist, Playlist, Track};
+use crate::api::{Activity, Album, Artist, List, Playlist, Track};
 use crate::theme;
 use crate::tui::logic::filtering::{FilteredViews, is_filter_active};
 use crate::tui::logic::nav::{self, PaneId, PaneKind};
@@ -231,6 +231,16 @@ pub fn draw_pane(
 
     let shared: &AppData = data;
     let (title, rows) = pane_view(id, state, shared, views);
+    // A library list (or the feed) whose first page is still on its way.
+    let loading = match id {
+        PaneId::Likes => Some(List::Likes),
+        PaneId::Playlists => Some(List::Playlists),
+        PaneId::Albums => Some(List::Albums),
+        PaneId::Following => Some(List::Following),
+        PaneId::Feed => Some(List::Feed),
+        _ => None,
+    }
+    .is_some_and(|list| shared.loading[list as usize]);
     let len = rows.len();
     let cursor = nav::cursor(state, id).min(len.saturating_sub(1));
     // Keep the scroll where it was unless the cursor left the window.
@@ -340,7 +350,7 @@ pub fn draw_pane(
     frame.render_widget(table, area);
     if len == 0 {
         let y = area.y + 1 + has_header as u16;
-        let text = if filtering { "no matches" } else { "empty" };
+        let text = if filtering { "no matches" } else if loading { "loading…" } else { "empty" };
         put(frame, Rect::new(area.x + 2, y, inner_w.saturating_sub(2), 1), Line::styled(text, Style::new().fg(t.dim)));
     }
 
@@ -374,6 +384,32 @@ mod tests {
         assert!(four.contains("Artist(s)"), "{four}");
         let three = likes_at(TRACK_COLS_4 + 1);
         assert!(!three.contains("Artist(s)") && three.contains("Title") && three.contains("Time"), "{three}");
+    }
+
+    /// S2: the app starts before any list is in; until a list's first page lands its
+    /// pane says so rather than claiming to be empty.
+    #[test]
+    fn an_unfetched_list_reads_loading_not_empty() {
+        use crate::tui::render::testkit::{fixture_empty, locations, render_text};
+        let (mut state, _, views, np) = fixture_empty();
+        let mut data = AppData::loading();
+        let mut likes = |data: &mut AppData| {
+            text(&draw_buffer(40, 8, |f| {
+                draw_pane(f, f.area(), PaneId::Likes, true, PaneStyle { boxed_title: false }, &mut state, data, &views, &np)
+            }))
+        };
+        let before = likes(&mut data);
+        assert!(before.contains("loading…") && !before.contains("empty"), "{before}");
+        data.loading[List::Likes as usize] = false;
+        let after = likes(&mut data);
+        assert!(after.contains("empty") && !after.contains("loading…"), "{after}");
+
+        // The whole app draws at every location with nothing fetched yet.
+        let mut data = AppData::loading();
+        for (tab, sub, focus) in locations() {
+            go(&mut state, &mut data, tab, sub, focus);
+            assert!(!render_text(120, 40, &mut state, &mut data, &views, &np).trim().is_empty());
+        }
     }
 
     #[test]

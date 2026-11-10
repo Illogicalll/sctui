@@ -332,6 +332,19 @@ mod tests {
         assert_eq!(wizard.step, 7);
     }
 
+    /// S2: likes now arrive after the app has started. Whether there is a track to
+    /// practise on is asked when a track lesson comes up, not when practice begins.
+    #[test]
+    fn likes_that_arrive_during_practice_keep_the_track_lessons() {
+        let (mut state, ..) = fixture_empty();
+        let mut data = AppData::loading();
+        wizard::start_practice(&mut state, &data);
+        type_keys(&mut state, &mut data, "jjj");
+        data.add_likes(fixture().1.likes);
+        type_keys(&mut state, &mut data, "Gggl][");
+        assert_eq!(at(&state), (Stage::Practice, 4), "play a track is not skipped");
+    }
+
     #[test]
     fn lesson_steps_never_enqueue_engagement_or_playlist_edit() {
         let (mut state, mut data, ..) = fixture();
