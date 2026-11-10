@@ -314,6 +314,11 @@ impl PlaybackEngine {
 
     pub(crate) fn resume(&mut self) {
         self.paused = false;
+        // A track is on its way in: it starts playing when it lands. The sink still
+        // here belongs to the one being replaced and must stay quiet.
+        if self.pending.is_some() {
+            return;
+        }
         if let Some(ref s) = *self.shared.sink.lock().unwrap() {
             s.play();
             self.shared.is_playing.store(true, Ordering::SeqCst);
@@ -1009,6 +1014,25 @@ mod tests {
         assert!(engine.shared.is_playing.load(Ordering::SeqCst));
         assert!(!sink_paused(&engine));
         assert!(engine.shared.position.lock().unwrap().last_start.is_some());
+    }
+
+    /// Enter on a row while paused: the play is followed by a resume, so the chosen
+    /// track starts playing, and the paused one is not heard in the meantime.
+    #[test]
+    fn choosing_a_track_while_paused_plays_it_once_resumed() {
+        let (mut engine, _output, _rx) = engine();
+        play(&mut engine, "a", 0, TrackChange::UserSkip);
+        engine.pause();
+
+        let seq = engine.begin(track("b"), 0, TrackChange::UserSkip);
+        engine.resume();
+        let old_audible = engine.shared.sink.lock().unwrap().as_ref().is_some_and(|s| !s.is_paused() && !s.empty());
+        assert!(!old_audible, "the paused track must not start up again while the new one loads");
+        engine.settle(seq, Ok(loaded("b", 0, wav())));
+
+        assert_eq!(playing_urn(&engine).as_deref(), Some("b"));
+        assert!(engine.shared.is_playing.load(Ordering::SeqCst));
+        assert!(!sink_paused(&engine));
     }
 
     #[test]

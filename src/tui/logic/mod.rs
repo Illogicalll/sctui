@@ -486,6 +486,7 @@ fn start(
                         }
                         state.manual_queue.clear();
                         player.play(seed, TrackChange::UserSkip);
+                        player.resume();
                         enter_radio(&mut state, &mut data, tracks);
                     } else {
                         state.toast_err("No tracks found for that station");

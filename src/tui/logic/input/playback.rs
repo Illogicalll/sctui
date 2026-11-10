@@ -65,6 +65,8 @@ pub(crate) fn handle_station(
     }
     state.manual_queue.clear();
     player.play(queued.track.clone(), TrackChange::UserSkip);
+    // Choosing something to play means play it, paused or not.
+    player.resume();
     enter_radio(state, data, vec![queued.track]);
     InputOutcome::Continue
 }
@@ -106,6 +108,8 @@ fn start_playback(
         }
 
     player.play(track.clone(), TrackChange::UserSkip);
+    // Choosing something to play means play it, paused or not. Next/previous keep the pause.
+    player.resume();
     state.playback_source = source;
     state.override_playing = None;
     state.current_playing_index = Some(idx);

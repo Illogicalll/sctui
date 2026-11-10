@@ -29,6 +29,7 @@ pub(crate) fn handle_history_input(
                     state.playback_history.push(current);
                 }
                 play_queued_track(entry, state, data, player, true, TrackChange::UserSkip);
+                player.resume();
                 state.history_visible = false;
             }
         }
