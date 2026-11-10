@@ -120,7 +120,8 @@ fn install(tag: &str) -> anyhow::Result<PathBuf> {
     let name = format!("sctui-{target}");
     let base = format!("https://github.com/{REPO}/releases/download/{tag}");
 
-    let tmp = make_staging_dir(&std::env::temp_dir()).context("creating a staging directory")?;
+    let staging = StagingDir(make_staging_dir(&std::env::temp_dir()).context("creating a staging directory")?);
+    let tmp = &staging.0;
     let archive = tmp.join(format!("{name}.{ext}"));
 
     eprintln!("downloading {name}.{ext}...");
@@ -134,7 +135,7 @@ fn install(tag: &str) -> anyhow::Result<PathBuf> {
         .arg("-xf")
         .arg(&archive)
         .arg("-C")
-        .arg(&tmp)
+        .arg(tmp)
         .status()
         .context("running tar")?;
     if !status.success() {
@@ -147,9 +148,18 @@ fn install(tag: &str) -> anyhow::Result<PathBuf> {
     replace_binary(&new_bin, &exe)
         .with_context(|| format!("replacing {}", exe.display()))?;
 
-    let _ = fs::remove_dir_all(&tmp);
     eprintln!("updated to {tag}");
     Ok(exe)
+}
+
+/// Owns the staging directory: it is removed, with whatever is in it, however
+/// `install` returns.
+struct StagingDir(PathBuf);
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// A fresh directory under `base` that only this user can enter. The temp dir is
@@ -257,6 +267,21 @@ mod tests {
         assert_ne!(other, dir, "each call gets its own name");
         let _ = fs::remove_dir(&other);
         let _ = fs::remove_dir(&dir);
+    }
+
+    /// S6: a step that fails after the staging directory was made does not leave it behind.
+    #[test]
+    fn staging_dir_is_removed_when_a_step_fails() {
+        let mut made = None;
+        let failed = (|| -> anyhow::Result<()> {
+            let staging = StagingDir(make_staging_dir(&std::env::temp_dir())?);
+            fs::write(staging.0.join("archive"), b"partial")?;
+            made = Some(staging.0.clone());
+            verify_sha256(b"abc", "not the checksum")?;
+            Ok(())
+        })();
+        assert!(failed.is_err());
+        assert!(!made.unwrap().exists());
     }
 
     #[test]
