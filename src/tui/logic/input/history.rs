@@ -28,6 +28,7 @@ pub(crate) fn handle_history_input(
                 if let Some(current) = queued_from_current(state, data) {
                     state.push_history(current);
                 }
+                state.cancel_artist_station();
                 play_queued_track(entry, state, data, player, true, TrackChange::UserSkip);
                 player.resume();
                 state.history_visible = false;

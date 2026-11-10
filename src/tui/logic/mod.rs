@@ -50,6 +50,7 @@ use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, P
 use self::utils::{
     enter_radio,
     active_tracks, append_feed_tracks, extend_likes_playback, next_track_trigger_ms, play_queued_track, queued_from_current,
+    start_station,
 };
 
 /// How long a track must have been playing before its lyrics are looked up.
@@ -482,13 +483,9 @@ fn start(
                     if id != state.artist_station_fetch.request_id {
                         // Superseded by a later request.
                     } else if let Some(seed) = tracks.first().cloned() {
-                        if let Some(current) = queued_from_current(&state, &data) {
-                            state.push_history(current);
-                        }
-                        state.manual_queue.clear();
                         player.play(seed, TrackChange::UserSkip);
                         player.resume();
-                        enter_radio(&mut state, &mut data, tracks);
+                        start_station(&mut state, &mut data, tracks);
                     } else {
                         state.toast_err("No tracks found for that station");
                     }

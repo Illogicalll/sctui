@@ -417,6 +417,17 @@ pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seeds: Vec<T
     data.playback_following_user_urn = None;
 }
 
+/// Start a station the user asked for, `seeds[0]` playing now. What was playing goes into
+/// the history; the hand-built queue is replaced by the station.
+pub(crate) fn start_station(state: &mut AppState, data: &mut AppData, seeds: Vec<Track>) {
+    if let Some(current) = queued_from_current(state, data) {
+        state.push_history(current);
+    }
+    state.cancel_artist_station();
+    state.manual_queue.clear();
+    enter_radio(state, data, seeds);
+}
+
 pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if let Some(override_track) = state.override_playing.as_ref() {
         return Some(override_track.clone());
@@ -556,6 +567,21 @@ mod tests {
         crate::tui::logic::filtering::apply_unplayable_filter(&mut state, &mut data);
         assert_eq!(playing(&state, &data), "b");
         assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+    }
+
+    /// T10: a track station started while an artist station is still loading wins.
+    #[test]
+    fn starting_a_track_station_drops_a_pending_artist_station() {
+        use crate::api::Artist;
+        let (mut state, mut data) = likes_playing(&["a", "b"], 0);
+        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() });
+        let in_flight = state.artist_station_fetch.request_id;
+        start_station(&mut state, &mut data, tracks(&["s"]));
+        assert!(state.artist_station_request.is_none());
+        assert_ne!(state.artist_station_fetch.request_id, in_flight, "the late mix is no longer current");
+        // The station replaces the queue but not the history.
+        assert_eq!(state.playback_history.len(), 1);
+        assert_eq!(queued_from_current(&state, &data).unwrap().track.track_urn, "s");
     }
 
     /// T14: Likes pages that load after playback started join the queue.

@@ -3,7 +3,7 @@ use crate::api::{Artist, Track};
 use crate::tui::logic::nav::{self, PaneId};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, FollowingTracksFocus};
 use crate::player::{Player, TrackChange};
-use crate::tui::logic::utils::{build_queue, enter_radio, queued_from_current};
+use crate::tui::logic::utils::{build_queue, queued_from_current, start_station};
 
 use super::queue::selected_queued;
 
@@ -60,14 +60,10 @@ pub(crate) fn handle_station(
         return InputOutcome::Continue;
     }
     state.toast(format!("Station started from {}", queued.track.title));
-    if let Some(current) = queued_from_current(state, data) {
-        state.push_history(current);
-    }
-    state.manual_queue.clear();
     player.play(queued.track.clone(), TrackChange::UserSkip);
     // Choosing something to play means play it, paused or not.
     player.resume();
-    enter_radio(state, data, vec![queued.track]);
+    start_station(state, data, vec![queued.track]);
     InputOutcome::Continue
 }
 
@@ -124,6 +120,7 @@ fn begin_playback(
             state.push_history(queued);
         }
 
+    state.cancel_artist_station();
     state.playback_source = source;
     state.override_playing = None;
     state.current_playing_index = Some(idx);
@@ -270,6 +267,19 @@ mod tests {
         let list = active_tracks(&state, &data);
         assert_eq!(list[state.current_playing_index.unwrap()].track_urn, "like1");
         assert_eq!(state.auto_queue.iter().map(|&i| list[i].track_urn.as_str()).collect::<Vec<_>>(), ["like2", "like3"]);
+    }
+
+    /// T10: an artist station still being fetched must not replace what the user then
+    /// chose to play.
+    #[test]
+    fn enter_drops_a_pending_artist_station() {
+        let (mut state, mut data) = (AppState::default(), library());
+        // Requested and not yet picked up by the loop, or already being fetched.
+        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() });
+        let in_flight = state.artist_station_fetch.request_id;
+        enter(&mut state, &mut data, PlaybackSource::Likes, |d| &d.likes, 0);
+        assert!(state.artist_station_request.is_none());
+        assert_ne!(state.artist_station_fetch.request_id, in_flight, "the late mix is no longer current");
     }
 
     /// T13: choosing something else to play keeps the hand-built queue and the history,

@@ -621,6 +621,13 @@ impl AppState {
         }
         self.playback_history.push(entry);
     }
+
+    /// The user started something else: drop an artist station that is still being
+    /// asked for or fetched, so its mix cannot take over when it lands seconds later.
+    pub fn cancel_artist_station(&mut self) {
+        self.artist_station_request = None;
+        self.artist_station_fetch.cancel();
+    }
 }
 
 /// What is known about which playlists and albums have any playable track, and the
