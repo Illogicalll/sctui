@@ -604,7 +604,11 @@ fn start(
         while let Ok(app_ev) = rx_main.try_recv() {
             match app_ev {
                 AppEvent::Redraw(completed) => {
-                    let _ = cover_art_async.update_resized_protocol(completed?);
+                    // An image that could not be encoded is simply not shown: the
+                    // protocol gave its image up for encoding and stays empty.
+                    if let Ok(completed) = completed {
+                        let _ = cover_art_async.update_resized_protocol(completed);
+                    }
                 }
                 AppEvent::Artwork(url, image, file) => {
                     if artwork_pending.as_deref() == Some(url.as_str()) {
@@ -1050,6 +1054,7 @@ fn start(
             )
         })?;
 
+        let mut resized = false;
         while event::poll(Duration::from_millis(10))? {
             match event::read()? {
                 Event::Key(key) => {
@@ -1059,17 +1064,24 @@ fn start(
                         return Ok(());
                     }
                 }
-                Event::Resize(_, _) => {
-                    picker = Picker::from_query_stdio()?;
-                    if let Some(image) = last_artwork_image.as_ref() {
-                        let resize_proto = picker.new_resize_protocol(image.clone());
-                        cover_art_async =
-                            ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
-                    } else {
-                        cover_art_async.empty_protocol();
-                    }
-                }
+                Event::Resize(_, _) => resized = true,
                 _ => {}
+            }
+        }
+        // Once per burst of resize events, and only after the pending input has been
+        // read: the query's answer comes in on stdin too. The font size can change
+        // with the window, so asking again is right, but a terminal that does not
+        // answer just leaves the picker as it was.
+        if resized {
+            if let Ok(queried) = Picker::from_query_stdio() {
+                picker = queried;
+            }
+            if let Some(image) = last_artwork_image.as_ref() {
+                let resize_proto = picker.new_resize_protocol(image.clone());
+                cover_art_async =
+                    ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
+            } else {
+                cover_art_async.empty_protocol();
             }
         }
 
