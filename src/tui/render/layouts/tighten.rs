@@ -67,18 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn layouts_not_built_yet_draw_as_tighten() {
-        let (mut state, mut data, views, np) = fixture();
-        go(&mut state, &mut data, 0, 1, 1);
-        tighten(&mut state);
-        let want = render_text(100, 30, &mut state, &mut data, &views, &np);
-        for layout in [Layout::PlayerPanel] {
-            state.settings.layout = layout;
-            assert_eq!(render_text(100, 30, &mut state, &mut data, &views, &np), want, "{layout:?}");
-        }
-        state.settings.layout = Layout::Classic;
-        assert_ne!(render_text(100, 30, &mut state, &mut data, &views, &np), want);
-        // The everything-tests cover every layout there is.
+    fn every_layout_is_in_the_everything_tests() {
         for layout in Layout::ALL {
             let mut state = AppState::default();
             let (_, set) = LAYOUTS.iter().find(|(name, _)| *name == layout.label()).expect("in testkit::LAYOUTS");

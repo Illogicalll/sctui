@@ -54,7 +54,7 @@ pub fn player_size(layout_is_classic: bool, rows: u16) -> PlayerSize {
 }
 
 /// Playing, paused or stopped.
-fn glyph(np: &NowPlaying) -> &'static str {
+pub fn glyph(np: &NowPlaying) -> &'static str {
     match (np.has_track, np.playing) {
         (false, _) => "■",
         (true, true) => "▶",
@@ -62,12 +62,12 @@ fn glyph(np: &NowPlaying) -> &'static str {
     }
 }
 
-fn ratio(state: &AppState, np: &NowPlaying) -> f64 {
+pub fn ratio(state: &AppState, np: &NowPlaying) -> f64 {
     (state.progress as f64 / np.track.duration_ms.max(1) as f64).clamp(0.0, 1.0)
 }
 
 /// `width` cells of progress rule, the played part in the accent colour.
-fn rule(width: u16, ratio: f64) -> Line<'static> {
+pub fn rule(width: u16, ratio: f64) -> Line<'static> {
     let t = theme::current();
     let done = ((width as f64 * ratio).round() as usize).min(width as usize);
     Line::from(vec![
@@ -107,7 +107,8 @@ pub fn draw_player(
     }
 }
 
-fn image(frame: &mut Frame, rect: Rect, cover: Option<&mut ThreadProtocol>) {
+/// Draw the cover image in `rect`; nothing without one.
+pub fn image(frame: &mut Frame, rect: Rect, cover: Option<&mut ThreadProtocol>) {
     let rect = rect.intersection(frame.area());
     if let Some(cover) = cover
         && !rect.is_empty()
@@ -119,6 +120,19 @@ fn image(frame: &mut Frame, rect: Rect, cover: Option<&mut ThreadProtocol>) {
 /// Volume runs 0.0 to 2.0 in steps of 0.1.
 fn volume_percent(np: &NowPlaying) -> u32 {
     (np.volume * 100.0).round().max(0.0) as u32
+}
+
+/// Shuffle, repeat and a ten-cell volume meter: `⇄ on   ↻ off   vol ▮▮▮▮▯▯▯▯▯▯`.
+pub fn readout(state: &AppState, np: &NowPlaying) -> String {
+    let on_off = |on: bool| if on { "on" } else { "off" };
+    let filled = ((np.volume * 5.0).round().max(0.0) as usize).min(10);
+    format!(
+        "⇄ {}   ↻ {}   vol {}{}",
+        on_off(state.shuffle_enabled),
+        on_off(state.repeat_enabled),
+        "▮".repeat(filled),
+        "▯".repeat(10 - filled)
+    )
 }
 
 fn classic7(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying, cover: Option<&mut ThreadProtocol>) {
@@ -216,16 +230,8 @@ fn bar4(
         left = inner.x + 7;
     }
     let right = inner.right() - 1;
-    let on_off = |on: bool| if on { "on" } else { "off" };
     let readout = if area.width >= 90 {
-        let filled = ((np.volume * 5.0).round().max(0.0) as usize).min(10);
-        format!(
-            "⇄ {}   ↻ {}   vol {}{}",
-            on_off(state.shuffle_enabled),
-            on_off(state.repeat_enabled),
-            "▮".repeat(filled),
-            "▯".repeat(10 - filled)
-        )
+        readout(state, np)
     } else {
         format!(
             "{}{}vol {}%",

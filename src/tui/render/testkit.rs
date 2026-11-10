@@ -13,7 +13,7 @@ use crate::config::Layout;
 use crate::tui::logic::filtering::{FilteredViews, build_filtered_views};
 use crate::tui::logic::nav;
 use crate::tui::logic::palette::PaletteState;
-use crate::tui::logic::state::{AppData, AppState, ConfirmAction, HelpPage, PlaybackSource, QueuedTrack};
+use crate::tui::logic::state::{AppData, AppState, ConfirmAction, HelpPage, PanelPage, PlaybackSource, QueuedTrack};
 
 use super::widgets::pane::pane_view;
 use super::widgets::text_width;
@@ -33,6 +33,12 @@ fn layout(state: &mut AppState, layout: Layout, nav_focused: bool, dock_queue: b
     (state.settings.layout, state.nav_focused, state.settings.dock_queue) = (layout, nav_focused, dock_queue);
 }
 
+/// The Player panel layout on one of its panel's pages.
+fn panel(state: &mut AppState, page: PanelPage) {
+    layout(state, Layout::PlayerPanel, false, false);
+    state.panel_page = page;
+}
+
 /// Every layout (and each of its variants), as a function that switches a fixture to
 /// it. The plain variant of a layout is named by its label.
 pub const LAYOUTS: &[(&str, Setup)] = &[
@@ -43,7 +49,10 @@ pub const LAYOUTS: &[(&str, Setup)] = &[
     ("sidebar: docked queue", |s| layout(s, Layout::Sidebar, false, true)),
     ("columns", |s| layout(s, Layout::Columns, false, false)),
     ("columns: nav focused", |s| layout(s, Layout::Columns, true, false)),
-    ("player-panel", |s| layout(s, Layout::PlayerPanel, false, false)),
+    ("player-panel", |s| panel(s, PanelPage::UpNext)),
+    ("player-panel: lyrics", |s| panel(s, PanelPage::Lyrics)),
+    ("player-panel: spectrum", |s| panel(s, PanelPage::Spectrum)),
+    ("player-panel: history", |s| panel(s, PanelPage::History)),
 ];
 
 /// Every overlay (and each of its pages / modes), as a function that opens it.

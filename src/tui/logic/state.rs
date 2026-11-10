@@ -30,6 +30,33 @@ pub enum LyricsStatus {
     Found(Lyrics),
 }
 
+/// What the lower part of the Player panel layout's panel shows.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum PanelPage {
+    #[default]
+    UpNext,
+    Lyrics,
+    Spectrum,
+    History,
+}
+
+impl PanelPage {
+    pub const ALL: [Self; 4] = [Self::UpNext, Self::Lyrics, Self::Spectrum, Self::History];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UpNext => "Up next",
+            Self::Lyrics => "Lyrics",
+            Self::Spectrum => "Spectrum",
+            Self::History => "History",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self as usize + 1) % Self::ALL.len()]
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum VisualizerMode {
     #[default]
@@ -449,6 +476,8 @@ pub struct AppState {
     /// Visible rows of the focused pane, written by the renderer; 0 until it has drawn
     /// (`nav::page_rows` then answers 10).
     pub page_rows: usize,
+    /// The page the Player panel layout's panel is on. Only `Action::PanelPage` moves it.
+    pub panel_page: PanelPage,
     pub query: String,
     pub selected_searchfilter: usize,
     pub search_needs_fetch: bool,

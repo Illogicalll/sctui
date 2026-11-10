@@ -30,6 +30,18 @@ pub fn up_next<'a>(
         .chain(auto_queue.iter().filter_map(|idx| queue_tracks.get(*idx)).map(|track| (track, false)))
 }
 
+/// What the playing list is, as the queue's `FROM …` heading names it.
+pub fn source_name(state: &AppState) -> &'static str {
+    match state.playback_source {
+        PlaybackSource::Likes | PlaybackSource::FollowingLikes => "LIKES",
+        PlaybackSource::Playlist => "PLAYLIST",
+        PlaybackSource::Album => "ALBUM",
+        PlaybackSource::FollowingPublished => "UPLOADS",
+        PlaybackSource::Feed => "FEED",
+        PlaybackSource::Radio => "STATION",
+    }
+}
+
 /// The queue as a plain numbered list filling `area`, for a layout that shows it
 /// beside the panes (Sidebar's dock, the Player panel): the user's own tracks under
 /// `QUEUED BY YOU`, the rest under what they come from. Display only.
@@ -44,14 +56,7 @@ pub fn draw_up_next(frame: &mut Frame, area: Rect, state: &AppState, data: &AppD
         }
     };
     let heading = Style::new().fg(t.secondary).add_modifier(Modifier::BOLD);
-    let source = match state.playback_source {
-        PlaybackSource::Likes | PlaybackSource::FollowingLikes => "LIKES",
-        PlaybackSource::Playlist => "PLAYLIST",
-        PlaybackSource::Album => "ALBUM",
-        PlaybackSource::FollowingPublished => "UPLOADS",
-        PlaybackSource::Feed => "FEED",
-        PlaybackSource::Radio => "STATION",
-    };
+    let source = source_name(state);
     let mut section = None;
     let mut n = 0;
     let upcoming = up_next(active_tracks(state, data), &state.manual_queue, &state.auto_queue);

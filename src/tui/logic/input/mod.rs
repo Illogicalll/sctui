@@ -478,6 +478,51 @@ mod tests {
     }
 
     #[test]
+    fn o_cycles_pages() {
+        use crate::tui::logic::state::PanelPage;
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        assert_eq!(state.panel_page, PanelPage::UpNext);
+        // Whatever the layout: the page is there when the user switches to the panel.
+        for (layout, want) in [
+            (crate::config::Layout::PlayerPanel, PanelPage::Lyrics),
+            (crate::config::Layout::PlayerPanel, PanelPage::Spectrum),
+            (crate::config::Layout::Classic, PanelPage::History),
+            (crate::config::Layout::Columns, PanelPage::UpNext),
+        ] {
+            state.settings.layout = layout;
+            let Routed::Action(action) = ch(&mut state, &mut data, 'o') else { panic!("o is not bound") };
+            assert_eq!(action, Action::PanelPage);
+            commands::run_command(action, &mut state, &mut data);
+            assert_eq!(state.panel_page, want);
+            assert!(state.toasts.is_empty());
+        }
+        // The navigation column does not swallow it.
+        state.nav_focused = true;
+        assert!(!commands::run_nav_command(Action::PanelPage, &mut state, &mut data));
+    }
+
+    #[test]
+    fn q_and_h_still_open_popups_in_panel_layout() {
+        use crate::tui::logic::state::PanelPage;
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        state.settings.layout = crate::config::Layout::PlayerPanel;
+        for (key, want) in [('Q', Action::ToggleQueue), ('H', Action::ToggleHistory)] {
+            let Routed::Action(action) = ch(&mut state, &mut data, key) else { panic!("{key} is not bound") };
+            assert_eq!(action, want);
+            commands::run_command(action, &mut state, &mut data);
+            // Popups, not pages: the panel stays where `o` left it.
+            assert!(state.queue_visible != state.history_visible, "{key} opened its popup");
+            assert_eq!(state.panel_page, PanelPage::UpNext);
+            (state.queue_visible, state.history_visible) = (false, key == 'H');
+        }
+        // The popups are modal as in any layout: `o` does not reach the panel behind.
+        assert!(!matches!(ch(&mut state, &mut data, 'o'), Routed::Action(_)));
+        assert_eq!(state.panel_page, PanelPage::UpNext);
+    }
+
+    #[test]
     fn palette_runs_selected_command_and_closes() {
         let mut state = AppState::default();
         let mut data = AppData::default();

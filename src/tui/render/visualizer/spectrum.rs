@@ -16,6 +16,13 @@ pub fn render_spectrum_bars(frame: &mut Frame, area: Rect, samples: &[f32]) {
     let block = frame_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    draw_bars(frame, inner, samples);
+}
+
+/// The bars themselves filling `inner`, without the visualiser's frame: the Player
+/// panel's Spectrum page.
+pub fn draw_bars(frame: &mut Frame, inner: Rect, samples: &[f32]) {
+    let inner = inner.intersection(frame.area());
     frame.render_widget(Clear, inner);
 
     if inner.width == 0 || inner.height == 0 {

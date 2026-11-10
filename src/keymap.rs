@@ -75,10 +75,11 @@ pub enum Action {
     DeletePlaylist,
     Themes,
     Palette,
+    PanelPage,
 }
 
 impl Action {
-    pub const ALL: [Action; 45] = [
+    pub const ALL: [Action; 46] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
@@ -124,6 +125,7 @@ impl Action {
         Action::DeletePlaylist,
         Action::Themes,
         Action::Palette,
+        Action::PanelPage,
     ];
 
     /// Name used in the config file.
@@ -174,6 +176,7 @@ impl Action {
             Action::DeletePlaylist => "delete_playlist",
             Action::Themes => "themes",
             Action::Palette => "palette",
+            Action::PanelPage => "panel_page",
         }
     }
 
@@ -225,6 +228,7 @@ impl Action {
             Action::DeletePlaylist => "Delete the selected playlist of yours",
             Action::Themes => "Choose a colour theme",
             Action::Palette => "Command palette",
+            Action::PanelPage => "Next page of the player panel (Player panel layout)",
         }
     }
 
@@ -288,6 +292,7 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::DeletePlaylist, &["x"]),
     (Action::Themes, &["t"]),
     (Action::Palette, &[":", "ctrl+p"]),
+    (Action::PanelPage, &["o"]),
 ];
 
 /// A normalised key press: letters are lowercase with Shift as a modifier,

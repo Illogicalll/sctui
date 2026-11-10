@@ -111,6 +111,7 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
         }
         Action::Themes => super::theme_picker::open_theme_picker(state),
         Action::Palette => state.palette = Some(Default::default()),
+        Action::PanelPage => state.panel_page = state.panel_page.next(),
         Action::ToggleHistory => {
             state.history_visible = !state.history_visible;
             state.history_selected = 0;

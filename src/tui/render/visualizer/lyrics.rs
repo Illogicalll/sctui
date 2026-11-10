@@ -36,6 +36,19 @@ pub fn render_lyrics(
     let block = frame_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    draw_lyrics(frame, inner, status, progress_ms, duration_ms);
+}
+
+/// The lyrics themselves filling `inner`, without the visualiser's frame: the Player
+/// panel's Lyrics page.
+pub fn draw_lyrics(
+    frame: &mut Frame,
+    inner: Rect,
+    status: &LyricsStatus,
+    progress_ms: u64,
+    duration_ms: u64,
+) {
+    let inner = inner.intersection(frame.area());
     frame.render_widget(Clear, inner);
     if inner.width == 0 || inner.height == 0 {
         return;

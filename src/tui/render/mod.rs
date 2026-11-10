@@ -90,7 +90,7 @@ pub fn render(
             &state.lyrics,
         );
     } else {
-        layouts::draw(frame, state, data, views, np, cover);
+        layouts::draw(frame, state, data, views, np, cover, wave_buffer);
     }
     overlays::render_overlays(frame, state, data);
     widgets::toasts::draw(frame, &state.toasts);

@@ -2,8 +2,12 @@
 
 pub mod classic;
 pub mod columns;
+pub mod panel;
 pub mod sidebar;
 pub mod tighten;
+
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use ratatui::{Frame, layout::Rect};
 use ratatui_image::thread::ThreadProtocol;
@@ -22,14 +26,14 @@ pub fn draw(
     views: &FilteredViews,
     np: &NowPlaying,
     cover: Option<&mut ThreadProtocol>,
+    wave: &Arc<Mutex<VecDeque<f32>>>,
 ) {
     match state.settings.layout {
         Layout::Classic => classic::draw(frame, state, data, views, np, cover),
         Layout::Tighten => tighten::draw(frame, state, data, views, np, cover),
         Layout::Sidebar => sidebar::draw(frame, state, data, views, np, cover),
         Layout::Columns => columns::draw(frame, state, data, views, np, cover),
-        // Not built yet: Tighten stands in.
-        Layout::PlayerPanel => tighten::draw(frame, state, data, views, np, cover),
+        Layout::PlayerPanel => panel::draw(frame, state, data, views, np, cover, wave),
     }
 }
 

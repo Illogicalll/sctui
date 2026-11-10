@@ -29,7 +29,9 @@ pub fn rows(state: &AppState, height: u16) -> u16 {
 
 /// The keys that apply in the current mode, most useful first, each with a one-word
 /// description. Unbound actions are left out.
-pub fn pairs(state: &AppState, data: &AppData) -> Vec<(String, &'static str)> {
+/// `cols` is the terminal's width: the Player panel's page key is only named while the
+/// panel is on screen.
+pub fn pairs(state: &AppState, data: &AppData, cols: u16) -> Vec<(String, &'static str)> {
     let km = &state.keymap;
     let k = |action: Action, what: &'static str| (km.hint_label(action), what);
     let two = |a: Action, b: Action, what: &'static str| {
@@ -120,6 +122,9 @@ pub fn pairs(state: &AppState, data: &AppData) -> Vec<(String, &'static str)> {
             1 => out.extend([sides("sub-tab"), k(Action::Search, "search")]),
             _ => {}
         }
+        if state.settings.layout == Layout::PlayerPanel && cols >= crate::tui::render::layouts::panel::COLS_PANEL {
+            out.push(k(Action::PanelPage, "page"));
+        }
         out.extend([k(Action::Palette, "commands"), k(Action::Help, "keys")]);
         out
     };
@@ -148,7 +153,7 @@ pub fn draw(frame: &mut Frame, area: Rect, state: &AppState, data: &AppData) {
     let limit = (area.width as usize).saturating_sub(text_width(&pending) + 2);
     let mut spans = vec![Span::raw(" ")];
     let mut x = 1;
-    for (keys, what) in pairs(state, data) {
+    for (keys, what) in pairs(state, data, area.width) {
         let need = text_width(&keys) + 1 + text_width(what);
         if x + need > limit {
             break;
@@ -171,7 +176,7 @@ mod tests {
     use crate::tui::render::testkit::{draw_buffer, fixture, go, render_buffer, render_text, text};
 
     fn described(state: &AppState, data: &AppData) -> Vec<&'static str> {
-        pairs(state, data).into_iter().map(|(_, what)| what).collect()
+        pairs(state, data, u16::MAX).into_iter().map(|(_, what)| what).collect()
     }
 
     /// The hint line alone, `width` cells wide.
@@ -215,7 +220,7 @@ mod tests {
         assert_eq!(described(&state, &data), ["move", "open", "commands", "keys"]);
         // Columns: the pane keys step out of and into a column.
         (state.settings.layout, state.nav_focused) = (Layout::Columns, false);
-        assert_eq!(pairs(&state, &data)[0], ("[ ]".to_string(), "out / in"));
+        assert_eq!(pairs(&state, &data, u16::MAX)[0], ("[ ]".to_string(), "out / in"));
         state.nav_focused = true;
         assert_eq!(described(&state, &data), ["move", "open", "commands", "keys"]);
         state.settings.layout = Layout::Classic;
@@ -237,7 +242,7 @@ mod tests {
         state.quit_confirm_visible = true;
         assert_eq!(described(&state, &data), ["choose", "confirm", "cancel"]);
         state.palette = Some(Default::default());
-        assert_eq!(pairs(&state, &data), [("enter".to_string(), "run"), ("↑ ↓".to_string(), "move"), ("esc".to_string(), "close")]);
+        assert_eq!(pairs(&state, &data, u16::MAX), [("enter".to_string(), "run"), ("↑ ↓".to_string(), "move"), ("esc".to_string(), "close")]);
     }
 
     #[test]
@@ -255,7 +260,7 @@ mod tests {
         let (state, data, ..) = fixture();
         let full = line(240, &state, &data).trim_end().to_string();
         assert!(full.ends_with(": commands   ? keys"), "{full:?}");
-        let all = pairs(&state, &data);
+        let all = pairs(&state, &data, u16::MAX);
         for width in 1..=full.chars().count() as u16 + 4 {
             let shown = line(width, &state, &data);
             let shown = shown.trim_end();
