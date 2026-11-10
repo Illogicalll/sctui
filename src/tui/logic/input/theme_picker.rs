@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::{list_step, lookup};
 use crate::keymap::Action;
 use crate::theme::{self, Theme};
 use crate::tui::logic::state::AppState;
@@ -18,7 +19,8 @@ pub(crate) fn open_theme_picker(state: &mut AppState) {
 /// Esc restores what was active before.
 pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
     let last = Theme::BUILTIN.len() - 1;
-    match (key.code, state.keymap.action(&key)) {
+    let action = lookup(state, &key);
+    match (key.code, action) {
         (KeyCode::Esc, _) | (_, Some(Action::Themes)) => {
             if let Some(previous) = state.theme_picker_previous.take() {
                 theme::set(previous);
@@ -41,23 +43,12 @@ pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> 
                 .err()
                 .map(|e| format!("theme not saved: {e}"));
         }
-        (_, Some(Action::Up)) | (KeyCode::Up, _) => {
-            state.theme_picker_selected = state.theme_picker_selected.saturating_sub(1);
-            preview(state);
+        _ => {
+            if let Some(next) = list_step(&key, action, state.theme_picker_selected, last) {
+                state.theme_picker_selected = next;
+                preview(state);
+            }
         }
-        (_, Some(Action::Down)) | (KeyCode::Down, _) => {
-            state.theme_picker_selected = (state.theme_picker_selected + 1).min(last);
-            preview(state);
-        }
-        (KeyCode::Home, _) => {
-            state.theme_picker_selected = 0;
-            preview(state);
-        }
-        (KeyCode::End, _) => {
-            state.theme_picker_selected = last;
-            preview(state);
-        }
-        _ => {}
     }
     InputOutcome::Continue
 }

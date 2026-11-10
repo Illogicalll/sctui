@@ -262,7 +262,7 @@ pub fn save(
         std::fs::create_dir_all(dir)?;
     }
     let mut out = String::from(
-        "# sctui configuration. Edit here or from the app (? for keys, Shift+O for themes).\n\n[theme]\n",
+        "# sctui configuration. Edit here or from the app (? for keys, t for themes).\n\n[theme]\n",
     );
     out.push_str(&theme_section(theme_name, overrides));
     out.push_str("\n[settings]\n");

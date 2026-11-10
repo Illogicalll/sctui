@@ -16,9 +16,14 @@
 //! `space`, `enter`, `tab`, `esc`, `backspace`, `delete`, `insert`, `home`,
 //! `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `f1`..`f12`.
 //! An uppercase letter means shift. A bare `+` is the plus key.
+//!
+//! A binding is one chord or a sequence of up to three, separated by spaces
+//! (`top = ["g g", "home"]`). No binding may be the start of another.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
+
+use std::time::Duration;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::Deserialize;
@@ -29,6 +34,9 @@ pub enum Action {
     Help,
     NextTab,
     PrevTab,
+    TabLibrary,
+    TabSearch,
+    TabFeed,
     SubTabLeft,
     SubTabRight,
     Up,
@@ -69,11 +77,14 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 41] = [
+    pub const ALL: [Action; 44] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
         Action::PrevTab,
+        Action::TabLibrary,
+        Action::TabSearch,
+        Action::TabFeed,
         Action::SubTabLeft,
         Action::SubTabRight,
         Action::Up,
@@ -120,6 +131,9 @@ impl Action {
             Action::Help => "help",
             Action::NextTab => "next_tab",
             Action::PrevTab => "prev_tab",
+            Action::TabLibrary => "tab_library",
+            Action::TabSearch => "tab_search",
+            Action::TabFeed => "tab_feed",
             Action::SubTabLeft => "sub_tab_left",
             Action::SubTabRight => "sub_tab_right",
             Action::Up => "up",
@@ -167,6 +181,9 @@ impl Action {
             Action::Help => "Key reference and editor",
             Action::NextTab => "Next main tab / next visualiser mode",
             Action::PrevTab => "Previous main tab",
+            Action::TabLibrary => "Go to Library",
+            Action::TabSearch => "Go to Search",
+            Action::TabFeed => "Go to Feed",
             Action::SubTabLeft => "Previous sub-tab / search filter",
             Action::SubTabRight => "Next sub-tab / search filter",
             Action::Up => "Move up in the focused pane",
@@ -212,51 +229,60 @@ impl Action {
     }
 }
 
-/// The default bindings. Every chord is unique; a test enforces it.
+/// Config names of actions that no longer exist; a `[keys]` entry for one is
+/// ignored with a warning that says so.
+const REMOVED: [&str; 4] = ["secondary_up", "secondary_down", "tertiary_up", "tertiary_down"];
+
+/// How long a half-typed sequence waits for its next key.
+pub const SEQ_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The default bindings. None is a duplicate or the start of another; a test
+/// enforces it.
 pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::Quit, &["q"]),
     (Action::Help, &["?"]),
     (Action::NextTab, &["tab"]),
     (Action::PrevTab, &["shift+tab"]),
-    (Action::SubTabLeft, &["left", "h"]),
-    (Action::SubTabRight, &["right", "l"]),
-    (Action::Up, &["up", "k"]),
-    (Action::Down, &["down", "j"]),
-    (Action::PageUp, &["pageup"]),
-    (Action::PageDown, &["pagedown"]),
+    (Action::TabLibrary, &["1"]),
+    (Action::TabSearch, &["2"]),
+    (Action::TabFeed, &["3"]),
+    (Action::SubTabLeft, &["h", "left"]),
+    (Action::SubTabRight, &["l", "right"]),
+    (Action::Up, &["k", "up"]),
+    (Action::Down, &["j", "down"]),
+    (Action::PageUp, &["ctrl+b", "pageup"]),
+    (Action::PageDown, &["ctrl+f", "pagedown"]),
     (Action::HalfPageUp, &["ctrl+u"]),
     (Action::HalfPageDown, &["ctrl+d"]),
-    (Action::Top, &["home"]),
-    (Action::Bottom, &["end"]),
+    (Action::Top, &["g g", "home"]),
+    (Action::Bottom, &["G", "end"]),
     (Action::PaneLeft, &["["]),
     (Action::PaneRight, &["]"]),
     (Action::PlayPause, &["space"]),
     (Action::PlaySelected, &["enter"]),
-    (Action::StartStation, &["shift+enter"]),
-    (Action::NextTrack, &["shift+right", "shift+n"]),
-    (Action::PrevTrack, &["shift+left", "shift+b"]),
-    (Action::SeekForward, &["alt+right", "shift+l"]),
-    (Action::SeekBackward, &["alt+left", "shift+h"]),
+    (Action::StartStation, &["S", "shift+enter"]),
+    (Action::NextTrack, &[">"]),
+    (Action::PrevTrack, &["<"]),
+    (Action::SeekForward, &["."]),
+    (Action::SeekBackward, &[","]),
     (Action::VolumeUp, &["+", "="]),
     (Action::VolumeDown, &["-"]),
-    (Action::ToggleShuffle, &["shift+s"]),
-    (Action::ToggleRepeat, &["shift+r"]),
-    (Action::ToggleLike, &["shift+f"]),
-    // macOS sends Option+F as ƒ unless the terminal maps Option to Alt; bind both.
-    (Action::ToggleLikePlaying, &["alt+f", "ƒ"]),
-    (Action::AddToQueue, &["shift+a"]),
-    (Action::PlayNext, &["shift+u"]),
-    (Action::ToggleQueue, &["shift+q"]),
-    (Action::ToggleHistory, &["shift+p"]),
+    (Action::ToggleShuffle, &["s"]),
+    (Action::ToggleRepeat, &["r"]),
+    (Action::ToggleLike, &["f"]),
+    (Action::ToggleLikePlaying, &["F"]),
+    (Action::AddToQueue, &["a"]),
+    (Action::PlayNext, &["A"]),
+    (Action::ToggleQueue, &["Q"]),
+    (Action::ToggleHistory, &["H"]),
     (Action::Search, &["/"]),
-    (Action::ToggleVisualizer, &["shift+v"]),
-    (Action::AddToPlaylist, &["shift+t"]),
-    // macOS sends Option+T as † unless the terminal maps Option to Alt; bind both.
-    (Action::AddToPlaylistPlaying, &["alt+t", "†"]),
-    (Action::NewPlaylist, &["shift+c"]),
-    (Action::RemoveFromPlaylist, &["shift+d"]),
-    (Action::DeletePlaylist, &["shift+x"]),
-    (Action::Themes, &["shift+o"]),
+    (Action::ToggleVisualizer, &["v"]),
+    (Action::AddToPlaylist, &["p"]),
+    (Action::AddToPlaylistPlaying, &["P"]),
+    (Action::NewPlaylist, &["c"]),
+    (Action::RemoveFromPlaylist, &["d"]),
+    (Action::DeletePlaylist, &["x"]),
+    (Action::Themes, &["t"]),
 ];
 
 /// A normalised key press: letters are lowercase with Shift as a modifier,
@@ -429,63 +455,152 @@ impl Chord {
     }
 }
 
+/// One binding: 1 to 3 chords pressed in order (`g g`), written space-separated.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Seq(pub Vec<Chord>);
+
+impl Seq {
+    pub const MAX: usize = 3;
+
+    pub fn parse(spec: &str) -> Result<Seq, String> {
+        let chords = spec.split_whitespace().map(Chord::parse).collect::<Result<Vec<_>, _>>()?;
+        match chords.len() {
+            0 => Err("empty key".to_string()),
+            1..=Seq::MAX => Ok(Seq(chords)),
+            _ => Err(format!("'{spec}' is longer than {} keys", Seq::MAX)),
+        }
+    }
+
+    /// Human label, e.g. `g g`, `Shift+Enter`.
+    pub fn label(&self) -> String {
+        self.0.iter().map(Chord::label).collect::<Vec<_>>().join(" ")
+    }
+
+    /// Config-file spelling, e.g. `g g`, `shift+enter`.
+    fn spec(&self) -> String {
+        self.0.iter().map(Chord::spec).collect::<Vec<_>>().join(" ")
+    }
+}
+
+/// What a key press came to, given the keys already waiting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum KeyResult {
+    Action(Action),
+    /// The keys so far start a longer binding; wait for the next one.
+    Pending,
+    None,
+}
+
 pub struct Keymap {
-    bindings: HashMap<Chord, Action>,
-    chords: BTreeMap<Action, Vec<Chord>>,
+    /// The bindings in effect. No key is the start of another, so a lookup is
+    /// never ambiguous.
+    bindings: HashMap<Vec<Chord>, Action>,
+    seqs: BTreeMap<Action, Vec<Seq>>,
 }
 
 impl Default for Keymap {
     fn default() -> Self {
-        let mut chords = BTreeMap::new();
+        let mut seqs = BTreeMap::new();
         for (action, specs) in DEFAULTS {
-            let parsed = specs
-                .iter()
-                .map(|s| Chord::parse(s).expect("default chord parses"))
-                .collect();
-            chords.insert(*action, parsed);
+            seqs.insert(*action, default_seqs(specs));
         }
-        let mut km = Keymap { bindings: HashMap::new(), chords };
+        let mut km = Keymap { bindings: HashMap::new(), seqs };
         km.rebuild();
         km
     }
 }
 
+fn default_seqs(specs: &[&str]) -> Vec<Seq> {
+    specs.iter().map(|s| Seq::parse(s).expect("default binding parses")).collect()
+}
+
+/// The binding in `bindings` that equals `seq`, starts it, or is started by it.
+fn overlap<'a>(bindings: &'a HashMap<Vec<Chord>, Action>, seq: &[Chord]) -> Option<(&'a [Chord], Action)> {
+    bindings
+        .iter()
+        .find(|(b, _)| b.starts_with(seq) || seq.starts_with(b))
+        .map(|(b, a)| (b.as_slice(), *a))
+}
+
 impl Keymap {
+    /// Take one key press. `pending` holds the keys of a sequence typed so far and
+    /// is left holding them only when the result is `Pending`. Keys that stop
+    /// matching are dropped and the new key is tried on its own, so `g j` moves down.
+    pub fn feed(&self, pending: &mut Vec<Chord>, key: &KeyEvent) -> KeyResult {
+        pending.push(Chord::from_key(key));
+        loop {
+            if self.bindings.keys().any(|b| b.len() > pending.len() && b.starts_with(pending.as_slice())) {
+                return KeyResult::Pending;
+            }
+            if let Some(action) = self.bindings.get(pending.as_slice()) {
+                pending.clear();
+                return KeyResult::Action(*action);
+            }
+            let last = pending.pop();
+            if pending.is_empty() {
+                return KeyResult::None;
+            }
+            pending.clear();
+            pending.extend(last);
+        }
+    }
+
+    /// What a single key press means with nothing pending.
+    #[cfg(test)]
     pub fn action(&self, key: &KeyEvent) -> Option<Action> {
-        self.bindings.get(&Chord::from_key(key)).copied()
+        match self.feed(&mut Vec::new(), key) {
+            KeyResult::Action(action) => Some(action),
+            _ => None,
+        }
     }
 
-    pub fn chords(&self, action: Action) -> &[Chord] {
-        self.chords.get(&action).map(Vec::as_slice).unwrap_or(&[])
+    pub fn seqs(&self, action: Action) -> &[Seq] {
+        self.seqs.get(&action).map(Vec::as_slice).unwrap_or(&[])
     }
 
-    /// `"Shift+Right, n"` for the help popup; `"unbound"` when nothing is set.
+    /// `"g g, Home"` for the help popup; `"unbound"` when nothing is set.
     pub fn labels(&self, action: Action) -> String {
-        let chords = self.chords(action);
-        if chords.is_empty() {
+        let seqs = self.seqs(action);
+        if seqs.is_empty() {
             return "unbound".to_string();
         }
-        chords.iter().map(Chord::label).collect::<Vec<_>>().join(", ")
+        seqs.iter().map(Seq::label).collect::<Vec<_>>().join(", ")
     }
 
-    /// Rebuild chord → action. First action (in `Action::ALL` order) wins a
-    /// contested chord; the loser is reported.
+    /// The first binding's label, for hints (`"g g"`); empty when unbound.
+    pub fn first_label(&self, action: Action) -> String {
+        self.seqs(action).first().map(Seq::label).unwrap_or_default()
+    }
+
+    /// Rebuild binding → action. Shorter bindings go in first, then `Action::ALL`
+    /// order; one that repeats or continues a binding already in is left out and
+    /// reported, so a single key is never shadowed by a sequence.
     fn rebuild(&mut self) -> Vec<String> {
         let mut warnings = Vec::new();
         self.bindings.clear();
-        for action in Action::ALL {
-            let Some(chords) = self.chords.get(&action) else { continue };
-            for chord in chords {
-                if let Some(taken) = self.bindings.get(chord) {
-                    warnings.push(format!(
-                        "{} is bound to both {} and {}; keeping {}",
-                        chord.label(),
-                        taken.name(),
-                        action.name(),
-                        taken.name()
-                    ));
-                } else {
-                    self.bindings.insert(*chord, action);
+        let mut all: Vec<(&Seq, Action)> = Action::ALL
+            .into_iter()
+            .flat_map(|a| self.seqs.get(&a).into_iter().flatten().map(move |s| (s, a)))
+            .collect();
+        all.sort_by_key(|(seq, _)| seq.0.len());
+        for (seq, action) in all {
+            match overlap(&self.bindings, &seq.0) {
+                Some((taken_keys, taken)) if taken_keys == seq.0.as_slice() => warnings.push(format!(
+                    "{} is bound to both {} and {}; keeping {}",
+                    seq.label(),
+                    taken.name(),
+                    action.name(),
+                    taken.name()
+                )),
+                Some((taken_keys, taken)) => warnings.push(format!(
+                    "{} is ignored for {}: it starts with {}, which is bound to {}",
+                    seq.label(),
+                    action.name(),
+                    Seq(taken_keys.to_vec()).label(),
+                    taken.name()
+                )),
+                None => {
+                    self.bindings.insert(seq.0.clone(), action);
                 }
             }
         }
@@ -514,68 +629,81 @@ impl Keymap {
         let mut warnings = Vec::new();
         for (name, spec) in config.keys {
             let Some(action) = Action::from_name(&name) else {
-                warnings.push(format!("unknown action '{name}' in [keys]"));
+                warnings.push(if REMOVED.contains(&name.as_str()) {
+                    format!("action '{name}' in [keys] was removed and is ignored")
+                } else {
+                    format!("unknown action '{name}' in [keys]")
+                });
                 continue;
             };
             let specs = match spec {
                 Spec::One(s) => vec![s],
                 Spec::Many(v) => v,
             };
-            let mut chords = Vec::new();
+            let mut seqs = Vec::new();
             for s in specs {
-                match Chord::parse(&s) {
-                    Ok(c) => chords.push(c),
+                match Seq::parse(&s) {
+                    Ok(seq) => seqs.push(seq),
                     Err(e) => warnings.push(format!("{}: {e}", action.name())),
                 }
             }
-            self.chords.insert(action, chords);
+            self.seqs.insert(action, seqs);
         }
         warnings.extend(self.rebuild());
         warnings
     }
 
-    /// Add a chord to `action`. Refused with the owning action if another one
-    /// already has it; binding a chord the action already has is a no-op.
-    pub fn add_chord(&mut self, action: Action, chord: Chord) -> Result<(), Action> {
-        if let Some(other) = self.bindings.get(&chord)
-            && *other != action
-        {
-            return Err(*other);
+    /// Add a binding to `action`. Refused with the owning action if a binding in
+    /// effect is the same keys, starts with them, or is the start of them; one the
+    /// action already has is a no-op.
+    pub fn add(&mut self, action: Action, seq: Seq) -> Result<(), Action> {
+        if self.seqs(action).contains(&seq) {
+            return Ok(());
         }
-        let list = self.chords.entry(action).or_default();
-        if !list.contains(&chord) {
-            list.push(chord);
+        if let Some((_, other)) = overlap(&self.bindings, &seq.0) {
+            return Err(other);
         }
+        self.seqs.entry(action).or_default().push(seq);
         self.rebuild();
         Ok(())
     }
 
+    /// Remove `action`'s oldest binding and return it. Refused, with the reason,
+    /// when there is none, or when it is the only one left for Help or Quit: the
+    /// app must always be able to show its keys and to exit.
+    pub fn unbind_one(&mut self, action: Action) -> Result<Seq, String> {
+        let count = self.seqs(action).len();
+        if count == 0 {
+            return Err(format!("{} has no key to remove", action.description()));
+        }
+        if count == 1 && matches!(action, Action::Help | Action::Quit) {
+            return Err(format!("{} must keep a key; add another one first", action.description()));
+        }
+        let removed = self.seqs.entry(action).or_default().remove(0);
+        self.rebuild();
+        Ok(removed)
+    }
+
+    #[cfg(test)]
     pub fn clear(&mut self, action: Action) {
-        self.chords.insert(action, Vec::new());
+        self.seqs.insert(action, Vec::new());
         self.rebuild();
     }
 
-    /// Restore `action`'s default chords. A default that another action now
-    /// owns stays with that action; the message says so.
+    /// Restore `action`'s default bindings. A default that clashes with another
+    /// action's binding stays with that action; the message says so.
     pub fn reset(&mut self, action: Action) -> Vec<String> {
-        let defaults: Vec<Chord> = DEFAULTS
-            .iter()
-            .find(|(a, _)| *a == action)
-            .map(|(_, specs)| specs.iter().map(|s| Chord::parse(s).expect("default chord parses")).collect())
-            .unwrap_or_default();
-        let kept: Vec<Chord> = defaults
-            .iter()
-            .copied()
-            .filter(|c| !matches!(self.bindings.get(c), Some(other) if *other != action))
-            .collect();
-        let taken: Vec<String> = defaults
-            .iter()
-            .filter(|c| !kept.contains(c))
-            .map(|c| format!("{} stays with {}", c.label(), self.bindings[c].name()))
-            .collect();
-        self.chords.insert(action, kept);
+        let defaults = DEFAULTS.iter().find(|(a, _)| *a == action).map(|(_, specs)| default_seqs(specs));
+        self.seqs.insert(action, Vec::new());
         self.rebuild();
-        taken
+        let mut notes = Vec::new();
+        for seq in defaults.unwrap_or_default() {
+            let label = seq.label();
+            if let Err(other) = self.add(action, seq) {
+                notes.push(format!("{label} stays with {}", other.name()));
+            }
+        }
+        notes
     }
 
     /// The `[keys]` section of the config file, commented; with
@@ -585,20 +713,21 @@ impl Keymap {
         let km = self;
         let defaults = Keymap::default();
         let mut out = String::from(
-            "# Key bindings. Each action takes one chord or a list; an empty list unbinds it.\n\
+            "# Key bindings. Each action takes one binding or a list; an empty list unbinds it.\n\
              # Chords: modifiers shift / ctrl / alt joined with +, then a key: a character, space,\n\
              # enter, tab, esc, backspace, delete, insert, home, end, pageup, pagedown,\n\
              # up, down, left, right, f1..f12. An uppercase letter means shift. Bare + is the plus key.\n\
+             # A binding can be a sequence of up to three chords separated by spaces, e.g. \"g g\".\n\
              # Note: shift+enter needs a terminal with the kitty keyboard protocol.\n[keys]\n",
         );
         if only_overrides {
             out.push_str("# Only actions listed here are changed; everything else keeps its default.\n\n");
         }
         for action in Action::ALL {
-            if only_overrides && km.chords(action) == defaults.chords(action) {
+            if only_overrides && km.seqs(action) == defaults.seqs(action) {
                 continue;
             }
-            let specs: Vec<String> = km.chords(action).iter().map(|c| toml::Value::String(c.spec()).to_string()).collect();
+            let specs: Vec<String> = km.seqs(action).iter().map(|c| toml::Value::String(c.spec()).to_string()).collect();
             let _ = writeln!(out, "# {}\n{} = [{}]\n", action.description(), action.name(), specs.join(", "));
         }
         out
@@ -636,37 +765,187 @@ mod tests {
     #[test]
     fn defaults_cover_every_action_without_conflicts() {
         let mut km = Keymap::default();
-        assert!(km.rebuild().is_empty(), "default chords must be unique");
+        assert!(km.rebuild().is_empty(), "default bindings must not clash");
         for action in Action::ALL {
-            assert!(!km.chords(action).is_empty(), "{} has no default key", action.name());
+            assert!(!km.seqs(action).is_empty(), "{} has no default key", action.name());
         }
-        assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::NONE)), Some(Action::Down));
-        assert_eq!(km.action(&key(KeyCode::Char('?'), KeyModifiers::SHIFT)), Some(Action::Help));
-        assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::NONE)), Some(Action::Quit));
+        let plain = |c: char| km.action(&key(KeyCode::Char(c), KeyModifiers::NONE));
+        let shifted = |c: char| km.action(&key(KeyCode::Char(c), KeyModifiers::SHIFT));
+        let ctrl = |c: char| km.action(&key(KeyCode::Char(c), KeyModifiers::CONTROL));
+        assert_eq!(plain('j'), Some(Action::Down));
+        assert_eq!(shifted('?'), Some(Action::Help));
+        assert_eq!(plain('q'), Some(Action::Quit));
         assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), None, "Esc is never a command");
-        assert_eq!(km.action(&key(KeyCode::Char('h'), KeyModifiers::SHIFT)), Some(Action::SeekBackward));
+        // Plain letters act on the selection, capitals on what is playing or a popup.
+        for (c, lower, upper) in [
+            ('a', Action::AddToQueue, Action::PlayNext),
+            ('f', Action::ToggleLike, Action::ToggleLikePlaying),
+            ('p', Action::AddToPlaylist, Action::AddToPlaylistPlaying),
+            ('s', Action::ToggleShuffle, Action::StartStation),
+            ('q', Action::Quit, Action::ToggleQueue),
+            ('h', Action::SubTabLeft, Action::ToggleHistory),
+        ] {
+            assert_eq!(plain(c), Some(lower));
+            assert_eq!(shifted(c.to_ascii_uppercase()), Some(upper));
+        }
+        for (c, action) in [
+            ('1', Action::TabLibrary), ('2', Action::TabSearch), ('3', Action::TabFeed),
+            ('>', Action::NextTrack), ('<', Action::PrevTrack), ('.', Action::SeekForward),
+            (',', Action::SeekBackward), ('r', Action::ToggleRepeat), ('d', Action::RemoveFromPlaylist),
+            ('c', Action::NewPlaylist), ('x', Action::DeletePlaylist), ('v', Action::ToggleVisualizer),
+            ('t', Action::Themes), ('[', Action::PaneLeft), (']', Action::PaneRight),
+        ] {
+            assert_eq!(plain(c), Some(action), "{c}");
+        }
         // One focused pane: the second- and third-pane keys are gone, focus moves instead.
-        assert_eq!(km.action(&key(KeyCode::Char('J'), KeyModifiers::SHIFT)), None);
+        assert_eq!(shifted('J'), None);
         assert_eq!(km.action(&key(KeyCode::Char('j'), KeyModifiers::ALT)), None);
-        assert_eq!(km.action(&key(KeyCode::Char('['), KeyModifiers::NONE)), Some(Action::PaneLeft));
-        assert_eq!(km.action(&key(KeyCode::Char(']'), KeyModifiers::NONE)), Some(Action::PaneRight));
         assert_eq!(km.action(&key(KeyCode::Home, KeyModifiers::NONE)), Some(Action::Top));
         assert_eq!(km.action(&key(KeyCode::End, KeyModifiers::NONE)), Some(Action::Bottom));
-        assert_eq!(km.action(&key(KeyCode::Char('d'), KeyModifiers::CONTROL)), Some(Action::HalfPageDown));
-        assert_eq!(km.action(&key(KeyCode::Char('u'), KeyModifiers::CONTROL)), Some(Action::HalfPageUp));
+        assert_eq!(shifted('G'), Some(Action::Bottom));
+        assert_eq!(km.action(&key(KeyCode::Enter, KeyModifiers::SHIFT)), Some(Action::StartStation));
+        assert_eq!(ctrl('d'), Some(Action::HalfPageDown));
+        assert_eq!(ctrl('u'), Some(Action::HalfPageUp));
+        assert_eq!(ctrl('f'), Some(Action::PageDown));
+        assert_eq!(ctrl('b'), Some(Action::PageUp));
         for (name, action) in [
             ("pane_left", Action::PaneLeft), ("pane_right", Action::PaneRight), ("top", Action::Top),
             ("bottom", Action::Bottom), ("half_page_down", Action::HalfPageDown), ("half_page_up", Action::HalfPageUp),
+            ("tab_library", Action::TabLibrary), ("tab_search", Action::TabSearch), ("tab_feed", Action::TabFeed),
         ] {
             assert_eq!(Action::from_name(name), Some(action));
         }
         assert_eq!(Action::from_name("secondary_up"), None);
-        // Option+F on macOS, with and without the terminal mapping Option to Alt.
-        assert_eq!(km.action(&key(KeyCode::Char('f'), KeyModifiers::ALT)), Some(Action::ToggleLikePlaying));
-        assert_eq!(km.action(&key(KeyCode::Char('ƒ'), KeyModifiers::NONE)), Some(Action::ToggleLikePlaying));
-        // Option+T on macOS, with and without the terminal mapping Option to Alt.
-        assert_eq!(km.action(&key(KeyCode::Char('t'), KeyModifiers::ALT)), Some(Action::AddToPlaylistPlaying));
-        assert_eq!(km.action(&key(KeyCode::Char('†'), KeyModifiers::NONE)), Some(Action::AddToPlaylistPlaying));
+        assert_eq!(km.labels(Action::Top), "g g, Home");
+        assert_eq!(km.first_label(Action::Top), "g g");
+    }
+
+    fn feed(km: &Keymap, pending: &mut Vec<Chord>, c: char) -> KeyResult {
+        km.feed(pending, &key(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn gg_is_a_sequence() {
+        let km = Keymap::default();
+        let mut pending = Vec::new();
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Pending);
+        assert_eq!(pending, [Chord::parse("g").unwrap()]);
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Action(Action::Top));
+        assert!(pending.is_empty());
+        assert_eq!(km.action(&key(KeyCode::Char('g'), KeyModifiers::NONE)), None, "one g alone does nothing");
+    }
+
+    #[test]
+    fn pending_falls_back_to_single_key() {
+        let km = Keymap::default();
+        let mut pending = Vec::new();
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Pending);
+        assert_eq!(feed(&km, &mut pending, 'j'), KeyResult::Action(Action::Down));
+        assert!(pending.is_empty());
+        // An unbound key after a pending one is nothing, and leaves nothing waiting.
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Pending);
+        assert_eq!(feed(&km, &mut pending, 'z'), KeyResult::None);
+        assert!(pending.is_empty());
+
+        // Three keys: the key that breaks a sequence may itself start one again.
+        let mut km = Keymap::default();
+        assert_eq!(km.add(Action::Bottom, Seq::parse("z z g").unwrap()), Ok(()));
+        assert_eq!(feed(&km, &mut pending, 'z'), KeyResult::Pending);
+        assert_eq!(feed(&km, &mut pending, 'z'), KeyResult::Pending);
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Action(Action::Bottom));
+        assert_eq!(feed(&km, &mut pending, 'z'), KeyResult::Pending);
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Pending, "z dropped, g starts g g");
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Action(Action::Top));
+    }
+
+    #[test]
+    fn defaults_have_no_duplicate_or_prefix_conflicts() {
+        let all: Vec<(Action, Seq)> = DEFAULTS
+            .iter()
+            .flat_map(|(a, specs)| specs.iter().map(move |s| (*a, Seq::parse(s).unwrap())))
+            .collect();
+        for (i, (a, x)) in all.iter().enumerate() {
+            for (b, y) in &all[i + 1..] {
+                assert!(
+                    !x.0.starts_with(&y.0) && !y.0.starts_with(&x.0),
+                    "{} ({}) clashes with {} ({})",
+                    x.label(), a.name(), y.label(), b.name()
+                );
+            }
+        }
+        assert_eq!(DEFAULTS.len(), Action::ALL.len());
+        assert!(Keymap::default().rebuild().is_empty());
+    }
+
+    #[test]
+    fn config_sequence_parses() {
+        let mut km = Keymap::default();
+        let warnings = km.apply_toml("[keys]\ntop = [\"g g\", \"home\"]\nbottom = \"z  Z b\"\nhelp = \"a b c d\"\n");
+        assert_eq!(km.seqs(Action::Top), [Seq::parse("g g").unwrap(), Seq::parse("home").unwrap()]);
+        assert_eq!(km.seqs(Action::Bottom)[0].spec(), "z shift+z b");
+        assert_eq!(km.labels(Action::Bottom), "z Shift+Z b");
+        let mut pending = Vec::new();
+        assert_eq!(feed(&km, &mut pending, 'z'), KeyResult::Pending);
+        assert_eq!(km.feed(&mut pending, &key(KeyCode::Char('Z'), KeyModifiers::SHIFT)), KeyResult::Pending);
+        assert_eq!(feed(&km, &mut pending, 'b'), KeyResult::Action(Action::Bottom));
+        // More than three keys is refused; that entry is dropped and the rest loads.
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("help") && warnings[0].contains("longer than 3"));
+        // Written back out and read again, the sequences are unchanged.
+        let mut again = Keymap::default();
+        assert!(again.apply_toml(&km.keys_section(true)).is_empty());
+        assert_eq!(again.seqs(Action::Bottom), km.seqs(Action::Bottom));
+    }
+
+    #[test]
+    fn removed_actions_warn() {
+        let mut km = Keymap::default();
+        let warnings = km.apply_toml(
+            "[keys]\nsecondary_up = \"K\"\ntertiary_down = [\"alt+j\"]\nplay_pause = \"z\"\n",
+        );
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("'secondary_up'") && w.contains("removed")));
+        assert!(warnings.iter().any(|w| w.contains("'tertiary_down'") && w.contains("removed")));
+        assert_eq!(km.action(&key(KeyCode::Char('z'), KeyModifiers::NONE)), Some(Action::PlayPause));
+        assert_eq!(km.action(&key(KeyCode::Char('K'), KeyModifiers::SHIFT)), None);
+    }
+
+    /// A single key always beats a sequence that starts with it, whichever the config
+    /// names first; the loser is reported and everything else loads.
+    #[test]
+    fn prefix_conflict_in_config_warns_and_keeps_the_single_key() {
+        let mut km = Keymap::default();
+        let warnings = km.apply_toml("[keys]\nadd_to_queue = \"g\"\nplay_pause = [\"space\", \"j j\"]\n");
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("g g is ignored for top") && w.contains("add_to_queue")));
+        assert!(warnings.iter().any(|w| w.contains("j j is ignored for play_pause") && w.contains("down")));
+        let mut pending = Vec::new();
+        assert_eq!(feed(&km, &mut pending, 'g'), KeyResult::Action(Action::AddToQueue));
+        assert_eq!(feed(&km, &mut pending, 'j'), KeyResult::Action(Action::Down));
+        assert_eq!(km.action(&key(KeyCode::Home, KeyModifiers::NONE)), Some(Action::Top));
+        assert_eq!(km.action(&key(KeyCode::Char(' '), KeyModifiers::NONE)), Some(Action::PlayPause));
+    }
+
+    #[test]
+    fn help_and_quit_cannot_be_fully_unbound() {
+        let mut km = Keymap::default();
+        for action in [Action::Help, Action::Quit] {
+            let before = km.seqs(action).to_vec();
+            let refusal = km.unbind_one(action).unwrap_err();
+            assert!(refusal.contains("must keep a key"), "{refusal}");
+            assert_eq!(km.seqs(action), before);
+        }
+        // With a second key the first can go, and then the new one is the last.
+        assert_eq!(km.add(Action::Quit, Seq::parse("ctrl+q").unwrap()), Ok(()));
+        assert_eq!(km.unbind_one(Action::Quit), Ok(Seq::parse("q").unwrap()));
+        assert!(km.unbind_one(Action::Quit).is_err());
+        assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::CONTROL)), Some(Action::Quit));
+        // Any other action can be emptied, oldest key first.
+        assert_eq!(km.unbind_one(Action::Top), Ok(Seq::parse("g g").unwrap()));
+        assert_eq!(km.unbind_one(Action::Top), Ok(Seq::parse("home").unwrap()));
+        assert!(km.unbind_one(Action::Top).unwrap_err().contains("no key"));
+        assert_eq!(km.labels(Action::Top), "unbound");
+        assert_eq!(km.first_label(Action::Top), "");
     }
 
     #[test]
@@ -678,37 +957,43 @@ mod tests {
         assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), Some(Action::PlayPause));
         assert_eq!(km.action(&key(KeyCode::Char(' '), KeyModifiers::NONE)), None, "old chord dropped");
         assert_eq!(km.action(&key(KeyCode::Char('n'), KeyModifiers::CONTROL)), Some(Action::NextTrack));
-        assert!(km.chords(Action::DeletePlaylist).is_empty());
+        assert!(km.seqs(Action::DeletePlaylist).is_empty());
         assert_eq!(km.labels(Action::DeletePlaylist), "unbound");
         assert!(warnings.iter().any(|w| w.contains("unknown action 'bogus'")));
-        // An action that no longer exists is named, and the rest still loads.
-        assert!(warnings.iter().any(|w| w.contains("unknown action 'secondary_up'")));
+        // An action that no longer exists is named as removed, and the rest still loads.
+        assert!(warnings.iter().any(|w| w.contains("action 'secondary_up' in [keys] was removed")));
         // q stays with quit (earlier in Action::ALL); the conflict is reported.
         assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::NONE)), Some(Action::Quit));
         assert!(warnings.iter().any(|w| w.contains("q is bound to both quit and volume_up")));
+        // p moved to play_pause, so add_to_playlist's default p is the one reported.
+        assert!(warnings.iter().any(|w| w.contains("p is bound to both play_pause and add_to_playlist")));
         assert!(km.apply_toml("this is not toml").iter().any(|w| w.contains("could not be parsed")));
     }
 
     #[test]
     fn editing_api_adds_clears_resets_and_refuses_conflicts() {
         let mut km = Keymap::default();
-        let p = Chord::parse("p").unwrap();
-        assert_eq!(km.add_chord(Action::PlayPause, p), Ok(()));
-        assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), Some(Action::PlayPause));
-        assert_eq!(km.add_chord(Action::PlayPause, p), Ok(()), "same chord again is a no-op");
-        assert_eq!(km.chords(Action::PlayPause).len(), 2);
-        assert_eq!(km.add_chord(Action::NextTrack, p), Err(Action::PlayPause));
+        let z = Seq::parse("z").unwrap();
+        assert_eq!(km.add(Action::PlayPause, z.clone()), Ok(()));
+        assert_eq!(km.action(&key(KeyCode::Char('z'), KeyModifiers::NONE)), Some(Action::PlayPause));
+        assert_eq!(km.add(Action::PlayPause, z.clone()), Ok(()), "same binding again is a no-op");
+        assert_eq!(km.seqs(Action::PlayPause).len(), 2);
+        assert_eq!(km.add(Action::NextTrack, z.clone()), Err(Action::PlayPause));
+        // A sequence that starts with a bound key, or a key that starts a bound sequence.
+        assert_eq!(km.add(Action::NextTrack, Seq::parse("z n").unwrap()), Err(Action::PlayPause));
+        assert_eq!(km.add(Action::NextTrack, Seq::parse("g").unwrap()), Err(Action::Top));
+        assert_eq!(km.add(Action::NextTrack, Seq::parse("g n").unwrap()), Ok(()), "g g and g n share a start");
         km.clear(Action::PlayPause);
-        assert!(km.chords(Action::PlayPause).is_empty());
-        assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), None);
+        assert!(km.seqs(Action::PlayPause).is_empty());
+        assert_eq!(km.action(&key(KeyCode::Char('z'), KeyModifiers::NONE)), None);
         assert!(km.reset(Action::PlayPause).is_empty());
-        assert_eq!(km.chords(Action::PlayPause), Keymap::default().chords(Action::PlayPause));
+        assert_eq!(km.seqs(Action::PlayPause), Keymap::default().seqs(Action::PlayPause));
         // A default chord captured by another action stays there on reset.
         km.clear(Action::Help);
-        let q = Chord::parse("?").unwrap();
-        assert_eq!(km.add_chord(Action::Quit, q), Ok(()));
+        let q = Seq::parse("?").unwrap();
+        assert_eq!(km.add(Action::Quit, q), Ok(()));
         let notes = km.reset(Action::Help);
-        assert!(km.chords(Action::Help).is_empty());
+        assert!(km.seqs(Action::Help).is_empty());
         assert!(notes[0].contains("stays with quit"));
         // Saved form lists only the edited actions and reloads identically.
         let text = km.keys_section(true);
@@ -717,8 +1002,8 @@ mod tests {
         assert!(!text.contains("\nnext_tab = "), "untouched action is left to the defaults");
         let mut again = Keymap::default();
         assert!(again.apply_toml(&text).is_empty());
-        assert_eq!(again.chords(Action::Quit), km.chords(Action::Quit));
-        assert!(again.chords(Action::Help).is_empty());
+        assert_eq!(again.seqs(Action::Quit), km.seqs(Action::Quit));
+        assert!(again.seqs(Action::Help).is_empty());
     }
 
     #[test]
@@ -726,13 +1011,13 @@ mod tests {
         let mut km = Keymap::default();
         km.clear(Action::PlayPause);
         for spec in ["\"", "\\"] {
-            assert_eq!(km.add_chord(Action::PlayPause, Chord::parse(spec).unwrap()), Ok(()));
+            assert_eq!(km.add(Action::PlayPause, Seq::parse(spec).unwrap()), Ok(()));
         }
         let mut again = Keymap::default();
         let warnings = again.apply_toml(&km.keys_section(true));
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert_eq!(again.chords(Action::PlayPause), km.chords(Action::PlayPause));
-        assert_eq!(again.chords(Action::PlayPause).len(), 2);
+        assert_eq!(again.seqs(Action::PlayPause), km.seqs(Action::PlayPause));
+        assert_eq!(again.seqs(Action::PlayPause).len(), 2);
     }
 
     #[test]
@@ -741,7 +1026,7 @@ mod tests {
         let mut km = Keymap::default();
         assert!(km.apply_toml(&text).is_empty(), "dump must re-load cleanly");
         for action in Action::ALL {
-            assert_eq!(km.chords(action), Keymap::default().chords(action));
+            assert_eq!(km.seqs(action), Keymap::default().seqs(action));
         }
     }
 }

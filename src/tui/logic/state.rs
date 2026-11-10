@@ -466,7 +466,13 @@ pub struct AppState {
     pub help_eq_selected: usize,
     /// Equaliser gains in dB; `player::eq` holds the copy the audio thread reads.
     pub eq: crate::config::Equalizer,
+    /// The action the key editor is capturing a binding for. The keys captured so far
+    /// wait in `pending_keys`.
     pub help_capture: Option<crate::keymap::Action>,
+    /// Keys of a sequence typed so far (`g` of `g g`) and when the last one arrived.
+    /// Fed through `input::helpers::lookup`; the loop drops them after a second.
+    pub pending_keys: Vec<crate::keymap::Chord>,
+    pub pending_since: Option<Instant>,
     pub help_message: Option<String>,
     /// `config::Loaded::load_failed`: saving the config is refused while set.
     pub config_load_failed: bool,

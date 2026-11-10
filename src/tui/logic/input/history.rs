@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::{list_step, lookup};
 use crate::keymap::Action;
 use crate::player::{Player, TrackChange};
 use crate::tui::logic::state::{AppData, AppState};
@@ -15,15 +16,9 @@ pub(crate) fn handle_history_input(
     player: &Player,
 ) -> InputOutcome {
     let last = state.playback_history.len().saturating_sub(1);
-    let sel = &mut state.history_selected;
-    match (key.code, state.keymap.action(&key)) {
+    let action = lookup(state, &key);
+    match (key.code, action) {
         (KeyCode::Esc, _) | (_, Some(Action::ToggleHistory)) => state.history_visible = false,
-        (_, Some(Action::Up)) => *sel = sel.saturating_sub(1),
-        (_, Some(Action::Down)) => *sel = (*sel + 1).min(last),
-        (_, Some(Action::PageUp)) => *sel = sel.saturating_sub(10),
-        (_, Some(Action::PageDown)) => *sel = (*sel + 10).min(last),
-        (KeyCode::Home, _) | (_, Some(Action::Top)) => *sel = 0,
-        (KeyCode::End, _) | (_, Some(Action::Bottom)) => *sel = last,
         (KeyCode::Enter, _) => {
             // The popup lists newest first; map the row back to the Vec index.
             let idx = last.saturating_sub(state.history_selected);
@@ -37,7 +32,7 @@ pub(crate) fn handle_history_input(
                 state.history_visible = false;
             }
         }
-        _ => {}
+        _ => state.history_selected = list_step(&key, action, state.history_selected, last).unwrap_or(state.history_selected),
     }
     InputOutcome::Continue
 }

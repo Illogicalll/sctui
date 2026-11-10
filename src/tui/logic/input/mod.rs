@@ -1,6 +1,6 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
-use crate::keymap::Action;
+use crate::keymap::{Action, SEQ_TIMEOUT};
 use crate::player::Player;
 
 use crate::tui::logic::filtering::clear_filter;
@@ -50,11 +50,47 @@ pub fn handle_key_event(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
-    match route(key, state, data) {
+    let before = mode(state);
+    let outcome = match route(key, state, data) {
         Routed::Done(outcome) => outcome,
         Routed::Help => help_editor::handle_help_input(key, state, data, player),
         Routed::History => history::handle_history_input(key, state, data, player),
         Routed::Action(action) => run_action(action, state, data, player),
+    };
+    // A half-typed sequence never survives an overlay opening or closing, or a
+    // switch into or out of insert mode.
+    if mode(state) != before {
+        helpers::clear_pending(state);
+    }
+    outcome
+}
+
+/// Which mode owns the keyboard: each overlay, and each place that takes typed text.
+/// A new overlay adds its flag here.
+fn mode(state: &AppState) -> [bool; 10] {
+    [
+        state.quit_confirm_visible,
+        state.help_visible,
+        state.help_capture.is_some(),
+        state.theme_picker_visible,
+        state.confirm.is_some(),
+        state.playlist_picker_visible,
+        state.playlist_picker_title.is_some(),
+        state.history_visible,
+        state.queue_visible,
+        state.search_typing,
+    ]
+}
+
+/// Once per loop: a half-typed sequence lapses after a second. In the key editor that
+/// pause is what ends a capture, so there the keys are bound rather than dropped.
+pub(crate) fn expire_pending(state: &mut AppState) {
+    if state.pending_since.is_some_and(|since| since.elapsed() >= SEQ_TIMEOUT) {
+        if state.help_capture.is_some() {
+            help_editor::commit_capture(state);
+        } else {
+            helpers::clear_pending(state);
+        }
     }
 }
 
@@ -99,10 +135,12 @@ fn route(key: KeyEvent, state: &mut AppState, data: &mut AppData) -> Routed {
         return Routed::Done(queue::handle_queue_input(key, state));
     }
     if state.search_typing {
+        helpers::clear_pending(state);
         return Routed::Done(search::handle_insert(key, state, data));
     }
 
     if key.code == KeyCode::Esc {
+        helpers::clear_pending(state);
         if state.visualizer_mode {
             state.visualizer_mode = false;
         } else {
@@ -114,7 +152,7 @@ fn route(key: KeyEvent, state: &mut AppState, data: &mut AppData) -> Routed {
         state.visualizer_view = state.visualizer_view.next();
         return done;
     }
-    match state.keymap.action(&key) {
+    match helpers::lookup(state, &key) {
         Some(action) if state.visualizer_mode && needs_lists(action) => done,
         Some(action) => Routed::Action(action),
         None => done,
@@ -156,6 +194,9 @@ pub(crate) fn run_action(
         }
         Action::NextTab => return navigation::handle_tab_switch(state),
         Action::PrevTab => return navigation::handle_tab_switch_back(state),
+        Action::TabLibrary => return navigation::go_to_tab(state, 0),
+        Action::TabSearch => return navigation::go_to_tab(state, 1),
+        Action::TabFeed => return navigation::go_to_tab(state, 2),
         Action::SubTabLeft => return navigation::sub_tab(state, 3),
         Action::SubTabRight => return navigation::sub_tab(state, 1),
         Action::PaneLeft => {
@@ -358,6 +399,59 @@ mod tests {
 
         let mut state = AppState::default();
         assert!(matches!(ch(&mut state, &mut data, 'q'), Routed::Action(Action::Quit)));
+    }
+
+    #[test]
+    fn sequences_work_in_normal_mode_and_in_overlays() {
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        assert!(matches!(ch(&mut state, &mut data, 'g'), Routed::Done(_)));
+        assert_eq!(state.pending_keys.len(), 1);
+        assert!(state.pending_since.is_some());
+        assert!(matches!(ch(&mut state, &mut data, 'g'), Routed::Action(Action::Top)));
+        assert!(state.pending_keys.is_empty() && state.pending_since.is_none());
+        // The key that breaks a sequence still counts on its own.
+        ch(&mut state, &mut data, 'g');
+        assert!(matches!(ch(&mut state, &mut data, 'j'), Routed::Action(Action::Down)));
+        // Esc drops what was waiting; so does the pause, once the loop notices.
+        ch(&mut state, &mut data, 'g');
+        press(&mut state, &mut data, KeyCode::Esc, KeyModifiers::NONE);
+        assert!(state.pending_keys.is_empty());
+        ch(&mut state, &mut data, 'g');
+        expire_pending(&mut state);
+        assert_eq!(state.pending_keys.len(), 1, "not yet");
+        state.pending_since = std::time::Instant::now().checked_sub(SEQ_TIMEOUT);
+        expire_pending(&mut state);
+        assert!(state.pending_keys.is_empty() && state.pending_since.is_none());
+        // Insert mode never sees, or leaves behind, a pending key.
+        ch(&mut state, &mut data, 'g');
+        state.search_typing = true;
+        ch(&mut state, &mut data, 'g');
+        assert!(state.pending_keys.is_empty());
+        assert_eq!(state.search_query, "g");
+        state.search_typing = false;
+
+        // History and queue popups: g g and G reach the ends, j/k step.
+        let mut state = AppState::default();
+        state.queue_visible = true;
+        state.auto_queue = (0..30).collect();
+        ch(&mut state, &mut data, 'G');
+        assert_eq!(state.queue_scroll, 29);
+        ch(&mut state, &mut data, 'k');
+        assert_eq!(state.queue_scroll, 28);
+        ch(&mut state, &mut data, 'g');
+        assert_eq!((state.queue_scroll, state.pending_keys.len()), (28, 1));
+        ch(&mut state, &mut data, 'g');
+        assert_eq!(state.queue_scroll, 0);
+        press(&mut state, &mut data, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert_eq!(state.queue_scroll, 5);
+        // So does the playlist picker.
+        let mut state = AppState::default();
+        playlist_picker::open_picker(&mut state, track());
+        ch(&mut state, &mut data, 'j');
+        assert_eq!(state.playlist_picker_selected, 0, "only the New playlist row");
+        ch(&mut state, &mut data, 'G');
+        assert_eq!(state.playlist_picker_selected, 0);
     }
 
     #[test]

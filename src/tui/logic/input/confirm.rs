@@ -1,7 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
-use super::helpers::toggles_binary_choice;
+use super::helpers::{lookup, toggles_binary_choice};
 use crate::keymap::Action;
 use crate::tui::logic::nav::{self, PaneId};
 use crate::tui::logic::state::{AppData, AppState, ConfirmAction, PlaylistEdit};
@@ -14,10 +14,8 @@ pub(crate) fn handle_confirm_input(
     data: &mut AppData,
 ) -> InputOutcome {
     // Esc, or the key that asked, cancels.
-    let asked = matches!(
-        state.keymap.action(&key),
-        Some(Action::RemoveFromPlaylist | Action::DeletePlaylist)
-    );
+    let action = lookup(state, &key);
+    let asked = matches!(action, Some(Action::RemoveFromPlaylist | Action::DeletePlaylist));
     match key.code {
         _ if asked => state.confirm = None,
         KeyCode::Esc => state.confirm = None,
@@ -29,7 +27,7 @@ pub(crate) fn handle_confirm_input(
                 perform(action, state, data);
             }
         }
-        _ if toggles_binary_choice(&key, &state.keymap) => {
+        _ if toggles_binary_choice(&key, action) => {
             state.confirm_selected = if state.confirm_selected == 0 { 1 } else { 0 };
         }
         _ => {}

@@ -41,7 +41,7 @@ use image::DynamicImage;
 use super::render::render;
 use self::filtering::{FilteredViews, apply_unplayable_filter, build_filtered_views, rebuild_matches_if_active};
 use self::nav::PaneId;
-use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
+use self::input::{InputOutcome, expire_pending, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
@@ -110,7 +110,7 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loa
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
     // Lets terminals that speak the kitty keyboard protocol report Shift+Enter; others still
-    // send a plain Enter (Shift+G covers them).
+    // send a plain Enter (S covers them).
     let enhanced_keys = supports_keyboard_enhancement().unwrap_or(false);
     if enhanced_keys {
         let _ = execute!(
@@ -957,6 +957,7 @@ fn start(
             invalidate_screen(&mut terminal);
             last_view = Some(view);
         }
+        expire_pending(&mut state);
         nav::sync_tables(&state, &mut data);
         terminal.draw(|frame| {
             render(

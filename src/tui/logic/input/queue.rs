@@ -1,7 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
-use super::helpers::insert_manual_queue;
+use super::helpers::{insert_manual_queue, list_step, lookup};
 use crate::keymap::Action;
 use crate::tui::logic::nav::{self, PaneId};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, QueuedTrack, FollowingTracksFocus};
@@ -28,16 +28,10 @@ pub(crate) fn handle_add_next_to_queue(
 /// closes it, and every other key is dropped.
 pub(crate) fn handle_queue_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
     let last = (state.manual_queue.len() + state.auto_queue.len()).saturating_sub(1);
-    let scroll = &mut state.queue_scroll;
-    match (key.code, state.keymap.action(&key)) {
+    let action = lookup(state, &key);
+    match (key.code, action) {
         (KeyCode::Esc, _) | (_, Some(Action::ToggleQueue)) => state.queue_visible = false,
-        (_, Some(Action::Up)) => *scroll = scroll.saturating_sub(1),
-        (_, Some(Action::Down)) => *scroll = (*scroll + 1).min(last),
-        (_, Some(Action::PageUp)) => *scroll = scroll.saturating_sub(10),
-        (_, Some(Action::PageDown)) => *scroll = (*scroll + 10).min(last),
-        (_, Some(Action::Top)) => *scroll = 0,
-        (_, Some(Action::Bottom)) => *scroll = last,
-        _ => {}
+        _ => state.queue_scroll = list_step(&key, action, state.queue_scroll, last).unwrap_or(state.queue_scroll),
     }
     InputOutcome::Continue
 }

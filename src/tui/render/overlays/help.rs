@@ -18,11 +18,21 @@ use super::utils::{centered_rect, centered_rect_fixed};
 /// Key reference and editor, generated from the live keymap. A tab bar across the
 /// top names the pages; Tab cycles through them.
 pub fn render_help(frame: &mut Frame, state: &AppState) {
+    // The movement keys as the user has them, or the arrows when one is unbound.
+    let pair = |a: Action, b: Action, arrows: &str| {
+        match (state.keymap.first_label(a), state.keymap.first_label(b)) {
+            (a, b) if !a.is_empty() && !b.is_empty() => format!("{a}/{b}"),
+            _ => arrows.to_string(),
+        }
+    };
+    let rows_keys = pair(Action::Down, Action::Up, "↑↓");
+    let cols_keys = pair(Action::SubTabLeft, Action::SubTabRight, "←→");
+
     if state.help_page == HelpPage::Equalizer {
         let body = render_shell(
             frame,
             state,
-            "↑↓: adjust   ←→: band   r: flat   Tab: page   Esc: close",
+            &format!("{rows_keys}: gain   {cols_keys}: band   r: flat   Tab: page   Esc: close"),
         );
         render_bands(frame, body, state.eq.gains, state.help_eq_selected);
         return;
@@ -47,7 +57,7 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
             &["Setting", "State"],
             rows,
             state.help_settings_selected,
-            "Enter/Space: toggle   ←→: adjust   ↑↓: move   Tab: page   Esc: close",
+            &format!("Enter/Space: toggle   {cols_keys}: adjust   {rows_keys}: move   Tab: page   Esc: close"),
         );
         return;
     }
@@ -69,7 +79,7 @@ pub fn render_help(frame: &mut Frame, state: &AppState) {
         &["Action", "Keys"],
         rows,
         state.help_selected,
-        "Enter: add key   Backspace: unbind   r: default   ↑↓: move   Tab: page   Esc: close   ·  saved to ~/.config/sctui/config.toml",
+        &format!("Enter: add key (or keys, for a sequence)   Backspace: remove a key   r: default   {rows_keys}: move   Tab: page   Esc: close   ·  saved to ~/.config/sctui/config.toml"),
     );
 }
 

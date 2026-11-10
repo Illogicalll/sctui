@@ -16,6 +16,15 @@ pub(crate) fn handle_tab_switch_back(state: &mut AppState) -> InputOutcome {
     InputOutcome::Continue
 }
 
+/// Jump straight to a main tab. A tab that is not showing (the Feed, when hidden in
+/// Settings) is ignored.
+pub(crate) fn go_to_tab(state: &mut AppState, tab: usize) -> InputOutcome {
+    if tab < visible_tabs(state).len() {
+        nav::set_location(state, tab, None);
+    }
+    InputOutcome::Continue
+}
+
 /// Step the sub-tab (Library) or search type (Search) by `step`, wrapping; 3 is one to
 /// the left. The Feed has none.
 pub(crate) fn sub_tab(state: &mut AppState, step: usize) -> InputOutcome {
@@ -116,6 +125,22 @@ mod tests {
         let mut state = AppState::default();
         state.settings.hide_feed_tab = true;
         handle_tab_switch_back(&mut state);
+        assert_eq!(state.selected_tab, 1);
+    }
+
+    #[test]
+    fn number_keys_go_to_a_tab_and_the_hidden_feed_is_inert() {
+        let mut state = AppState::default();
+        sub_tab(&mut state, 1);
+        for tab in [2, 1, 0] {
+            go_to_tab(&mut state, tab);
+            assert_eq!(state.selected_tab, tab);
+        }
+        assert_eq!(state.selected_subtab, 1, "the tab's own sub-tab is kept");
+        state.settings.hide_feed_tab = true;
+        go_to_tab(&mut state, 2);
+        assert_eq!(state.selected_tab, 0);
+        go_to_tab(&mut state, 1);
         assert_eq!(state.selected_tab, 1);
     }
 
