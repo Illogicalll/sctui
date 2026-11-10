@@ -5,7 +5,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Alignment,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Tabs},
@@ -21,7 +21,9 @@ use crate::tui::render::NowPlaying;
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
 use crate::tui::render::widgets::player::{draw_player, player_size};
-use crate::tui::render::widgets::{fit, hints, put, text_width};
+use crate::tui::render::widgets::{header, hints};
+
+use super::{take_bottom, take_top};
 
 /// Terminal rows below which the boxed header gives way to two plain rows.
 pub const ROWS_BOXED: u16 = 24;
@@ -35,20 +37,6 @@ fn weights(state: &AppState) -> Option<&'static [u16]> {
         (2, _) => Some(&[40, 60]),
         _ => None,
     }
-}
-
-fn take_top(rest: &mut Rect, rows: u16) -> Rect {
-    let rows = rows.min(rest.height);
-    let taken = Rect { height: rows, ..*rest };
-    rest.y += rows;
-    rest.height -= rows;
-    taken
-}
-
-fn take_bottom(rest: &mut Rect, rows: u16) -> Rect {
-    let rows = rows.min(rest.height);
-    rest.height -= rows;
-    Rect { y: rest.bottom(), height: rows, ..*rest }
 }
 
 fn boxed(title: &'static str) -> Block<'static> {
@@ -94,7 +82,7 @@ pub fn draw(
     draw_player(frame, player, size, state, data, np, cover);
 
     if frame.area().height < ROWS_BOXED {
-        compact_header(frame, take_top(&mut rest, 2), state);
+        header::draw_compact(frame, take_top(&mut rest, 2), state, data);
     } else {
         let title = Span::styled("sctui", Style::new().add_modifier(Modifier::BOLD));
         let block = Block::default().title(title).title_alignment(Alignment::Center).borders(Borders::ALL).border_type(BorderType::Rounded);
@@ -129,58 +117,4 @@ pub fn draw(
 
     let weights = weights(state);
     draw_pane_row(frame, rest, state, data, views, PaneStyle { boxed_title: true }, weights, np);
-}
-
-/// Two plain rows in place of the boxes: `sctui │ Library Search Feed`, then the
-/// sub-tabs with the filter or query at the right.
-fn compact_header(frame: &mut Frame, area: Rect, state: &AppState) {
-    let t = theme::current();
-    let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
-    let row = |y: u16| Rect { y: area.y + y, height: 1, ..area };
-    if area.height == 0 {
-        return;
-    }
-
-    let mut spans = vec![Span::styled(" sctui", accent), Span::styled(" │", Style::new().fg(t.dim))];
-    for (i, title) in visible_tabs(state).iter().enumerate() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(*title, if i == state.selected_tab { accent } else { Style::new().fg(t.fg) }));
-    }
-    put(frame, row(0), Line::from(spans));
-    if area.height < 2 {
-        return;
-    }
-
-    let (titles, selected): (&[&str], usize) = match state.selected_tab {
-        0 => (&SUBTAB_TITLES, state.selected_subtab),
-        1 => (&SEARCHFILTERS, state.selected_searchfilter),
-        _ => (&[], 0),
-    };
-    let cursor = if state.search_typing { "▏" } else { "" };
-    let (find, find_style) = match state.selected_tab {
-        1 if state.query.is_empty() && !state.search_typing => ("/ search".to_string(), Style::new().fg(t.dim)),
-        1 => (format!("/ {}{cursor}", state.query), Style::new().fg(t.fg)),
-        0 if state.search_popup_visible => (
-            format!("/ {}{cursor}", state.search_query),
-            Style::new().fg(if state.search_typing { t.fg } else { t.warning }),
-        ),
-        _ => (String::new(), Style::new()),
-    };
-    // The query keeps at most half the row; the sub-tabs get what is left of it.
-    let find = fit(&find, area.width as usize / 2);
-    let room = (area.width as usize).saturating_sub(text_width(&find) + 2);
-    let mut spans = Vec::new();
-    let mut used = 1;
-    for (i, title) in titles.iter().enumerate() {
-        let width = title.chars().count() + 2;
-        if used + width > room {
-            break;
-        }
-        used += width + 1;
-        spans.push(Span::raw(" "));
-        let pill = Style::new().fg(t.accent).add_modifier(Modifier::BOLD | Modifier::REVERSED);
-        spans.push(Span::styled(format!(" {title} "), if i == selected { pill } else { Style::new().fg(t.muted) }));
-    }
-    put(frame, row(1), Line::from(spans));
-    put(frame, Rect { width: area.width.saturating_sub(1), ..row(1) }, Line::styled(find, find_style).right_aligned());
 }

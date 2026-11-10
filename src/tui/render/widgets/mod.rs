@@ -1,13 +1,14 @@
 //! Drawing shared by every layout: panes, the pane row, the player readouts, the hint
 //! line and toasts.
 
+pub mod header;
 pub mod hints;
 pub mod pane;
 pub mod pane_row;
 pub mod player;
 pub mod toasts;
 
-use ratatui::{Frame, layout::Rect, text::{Line, Span}};
+use ratatui::{Frame, layout::Rect, style::Style, text::{Line, Span}};
 
 /// Terminal cells `s` occupies (wide glyphs count twice).
 pub fn text_width(s: &str) -> usize {
@@ -44,6 +45,14 @@ pub fn put(frame: &mut Frame, rect: Rect, line: Line) {
     if !rect.is_empty() {
         frame.render_widget(line, rect);
     }
+}
+
+/// Draw `text` at the right end of `rect`, cut to fit. Only the cells under the text
+/// are touched: a right-aligned `Line` would restyle the whole row.
+pub fn put_right(frame: &mut Frame, rect: Rect, text: &str, style: Style) {
+    let text = fit(text, rect.width as usize);
+    let width = text_width(&text) as u16;
+    put(frame, Rect { x: rect.right() - width, width, ..rect }, Line::styled(text, style));
 }
 
 #[cfg(test)]

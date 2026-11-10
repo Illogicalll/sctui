@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use ratatui::{Frame, Terminal, backend::TestBackend, buffer::Buffer};
 
 use crate::api::{Activity, Album, Artist, Playlist, Track};
+use crate::config::Layout;
 use crate::tui::logic::filtering::{FilteredViews, build_filtered_views};
 use crate::tui::logic::nav;
 use crate::tui::logic::state::{AppData, AppState, ConfirmAction, HelpPage, PlaybackSource, QueuedTrack};
@@ -26,7 +27,13 @@ pub const HEIGHTS: [u16; 14] = [6, 8, 13, 14, 19, 20, 23, 24, 29, 30, 33, 34, 45
 pub type Setup = fn(&mut AppState);
 
 /// Every layout, as a function that switches a fixture to it.
-pub const LAYOUTS: &[(&str, Setup)] = &[("classic", |_| {})];
+pub const LAYOUTS: &[(&str, Setup)] = &[
+    ("classic", |s| s.settings.layout = Layout::Classic),
+    ("tighten", |s| s.settings.layout = Layout::Tighten),
+    ("sidebar", |s| s.settings.layout = Layout::Sidebar),
+    ("columns", |s| s.settings.layout = Layout::Columns),
+    ("player-panel", |s| s.settings.layout = Layout::PlayerPanel),
+];
 
 /// Every overlay (and each of its pages / modes), as a function that opens it.
 pub const OVERLAYS: &[(&str, Setup)] = &[
@@ -176,7 +183,17 @@ pub fn fixture() -> (AppState, AppData, FilteredViews, NowPlaying) {
         ..Default::default()
     };
     let playing = data.likes[4].clone();
-    let state = AppState {
+    let state = fixture_state(&data);
+    nav::sync_tables(&state, &mut data);
+    let views = build_filtered_views(&state, &data);
+    let np = NowPlaying { track: playing, volume: 0.7, playing: true, has_track: true };
+    (state, data, views, np)
+}
+
+/// The state half of [`fixture`], for tests that want a fresh one over the same data
+/// (building the data is most of a fixture's cost).
+pub fn fixture_state(data: &AppData) -> AppState {
+    AppState {
         query: "found".into(),
         progress: 61_000,
         current_playing_index: Some(4),
@@ -184,11 +201,7 @@ pub fn fixture() -> (AppState, AppData, FilteredViews, NowPlaying) {
         manual_queue: data.likes[10..12].iter().map(queued).collect(),
         playback_history: data.likes[20..23].iter().map(queued).collect(),
         ..Default::default()
-    };
-    nav::sync_tables(&state, &mut data);
-    let views = build_filtered_views(&state, &data);
-    let np = NowPlaying { track: playing, volume: 0.7, playing: true, has_track: true };
-    (state, data, views, np)
+    }
 }
 
 /// A new account: every list empty, nothing playing.
@@ -283,14 +296,14 @@ pub fn render_buffer(
 /// other half and is skipped, so wide text reads as it was written.
 pub fn text(buf: &Buffer) -> String {
     let mut out = String::with_capacity(buf.area.area() as usize + buf.area.height as usize);
-    for y in 0..buf.area.height {
+    for row in buf.content.chunks(buf.area.width.max(1) as usize) {
         let mut skip = 0;
-        for x in 0..buf.area.width {
+        for cell in row {
             if skip > 0 {
                 skip -= 1;
                 continue;
             }
-            let symbol = buf[(x, y)].symbol();
+            let symbol = cell.symbol();
             if !symbol.is_ascii() {
                 skip = text_width(symbol).saturating_sub(1);
             }
@@ -319,16 +332,18 @@ mod tests {
     use crate::tui::render::{MIN_COLS, MIN_ROWS};
 
     type Fixture = fn() -> (AppState, AppData, FilteredViews, NowPlaying);
-    const FIXTURES: [(&str, Fixture); 2] = [("populated", fixture), ("empty", fixture_empty)];
+    /// Each fixture, and how to make another state like the one it came with.
+    const FIXTURES: [(&str, Fixture, fn(&AppData) -> AppState); 2] =
+        [("populated", fixture, fixture_state), ("empty", fixture_empty, |_| AppState::default())];
 
     #[test]
     fn every_location_renders_at_every_size() {
         let locations = locations();
         assert_eq!(locations.len(), 18);
         for_all_sizes(|w, h| {
-            for (layout, set_layout) in LAYOUTS {
-                for (fixture_name, fixture) in FIXTURES {
-                    let (mut state, mut data, views, np) = fixture();
+            for (fixture_name, fixture, _) in FIXTURES {
+                let (mut state, mut data, views, np) = fixture();
+                for (layout, set_layout) in LAYOUTS {
                     set_layout(&mut state);
                     for &(tab, sub, focus) in &locations {
                         go(&mut state, &mut data, tab, sub, focus);
@@ -355,10 +370,11 @@ mod tests {
     #[test]
     fn every_overlay_renders_at_every_size() {
         for_all_sizes(|w, h| {
-            for (_, set_layout) in LAYOUTS {
-                for (_, fixture) in FIXTURES {
+            for (_, fixture, fresh_state) in FIXTURES {
+                let (_, mut data, views, np) = fixture();
+                for (_, set_layout) in LAYOUTS {
                     for (_, open) in OVERLAYS.iter().chain(EXTRAS) {
-                        let (mut state, mut data, views, np) = fixture();
+                        let mut state = fresh_state(&data);
                         set_layout(&mut state);
                         open(&mut state);
                         render_buffer(w, h, &mut state, &mut data, &views, &np);

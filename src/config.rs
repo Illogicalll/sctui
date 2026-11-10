@@ -48,10 +48,66 @@ impl Equalizer {
     }
 }
 
+/// How the main screen is arranged. Every layout draws the same panes and player
+/// from the same state; `render::layouts` has one function for each.
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Layout {
+    #[default]
+    Classic,
+    Tighten,
+    Sidebar,
+    Columns,
+    PlayerPanel,
+}
+
+impl Layout {
+    pub const ALL: [Layout; 5] =
+        [Layout::Classic, Layout::Tighten, Layout::Sidebar, Layout::Columns, Layout::PlayerPanel];
+
+    /// The name in the config file and on the settings page.
+    pub fn label(self) -> &'static str {
+        match self {
+            Layout::Classic => "classic",
+            Layout::Tighten => "tighten",
+            Layout::Sidebar => "sidebar",
+            Layout::Columns => "columns",
+            Layout::PlayerPanel => "player-panel",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Layout> {
+        Self::ALL.into_iter().find(|l| l.label() == label)
+    }
+
+    fn step(self, by: usize) -> Layout {
+        let at = Self::ALL.iter().position(|l| *l == self).unwrap_or(0);
+        Self::ALL[(at + by) % Self::ALL.len()]
+    }
+
+    /// The layout after this one, wrapping.
+    pub fn next(self) -> Layout {
+        self.step(1)
+    }
+
+    /// The layout before this one, wrapping.
+    pub fn prev(self) -> Layout {
+        self.step(Self::ALL.len() - 1)
+    }
+}
+
+/// An unknown layout name falls back to the default instead of failing the whole
+/// `[settings]` table (which would also block saving); `load_from` warns about it.
+fn de_layout<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Layout, D::Error> {
+    Ok(Layout::from_label(&String::deserialize(deserializer)?).unwrap_or_default())
+}
+
 /// Options edited from the settings page of the `?` overlay.
 #[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(deserialize_with = "de_layout")]
+    pub layout: Layout,
     pub hide_unplayable: bool,
     pub hide_feed_tab: bool,
     pub crossfade: bool,
@@ -60,17 +116,24 @@ pub struct Settings {
     pub crossfade_user_skips: bool,
     /// The row of applicable keys along the bottom.
     pub hint_line: bool,
+    /// Sidebar on a wide terminal: show the queue as a column instead of a popup.
+    pub dock_queue: bool,
+    /// The setup wizard was finished or skipped. Not on the settings page.
+    pub onboarded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            layout: Layout::Classic,
             hide_unplayable: false,
             hide_feed_tab: false,
             crossfade: false,
             crossfade_secs: 5.0,
             crossfade_user_skips: true,
             hint_line: true,
+            dock_queue: false,
+            onboarded: false,
         }
     }
 }
@@ -101,12 +164,16 @@ pub enum SettingRow {
     CrossfadeToggle(&'static str, fn(&mut Settings) -> &mut bool),
     /// A number of seconds in half-second steps, adjusted with left/right.
     Secs(&'static str, fn(&mut Settings) -> &mut f32),
+    /// One of the layouts: left/right cycle through them, Enter or Space goes forward.
+    Choice(&'static str, fn(&mut Settings) -> &mut Layout),
 }
 
 impl Settings {
     /// The settings page, in display order.
-    pub const ROWS: [SettingRow; 6] = [
+    pub const ROWS: [SettingRow; 8] = [
+        SettingRow::Choice("Layout", |s| &mut s.layout),
         SettingRow::Toggle("Hint line", |s| &mut s.hint_line),
+        SettingRow::Toggle("Dock the queue (Sidebar, wide terminals)", |s| &mut s.dock_queue),
         SettingRow::Toggle("Hide unplayable tracks", |s| &mut s.hide_unplayable),
         SettingRow::Toggle("Hide feed tab", |s| &mut s.hide_feed_tab),
         SettingRow::Toggle("Crossfade between tracks", |s| &mut s.crossfade),
@@ -149,7 +216,8 @@ impl SettingRow {
         match self {
             SettingRow::Toggle(label, _)
             | SettingRow::CrossfadeToggle(label, _)
-            | SettingRow::Secs(label, _) => label,
+            | SettingRow::Secs(label, _)
+            | SettingRow::Choice(label, _) => label,
         }
     }
 
@@ -171,6 +239,7 @@ impl SettingRow {
             SettingRow::Secs(_, field) => {
                 (format!("{:.1}s", field(&mut settings)), settings.crossfade)
             }
+            SettingRow::Choice(_, field) => (format!("‹ {} ›", field(&mut settings).label()), true),
         }
     }
 }
@@ -220,6 +289,17 @@ fn load_from(text: &str) -> Loaded {
             File::default()
         }
     };
+    // `de_layout` let an unknown name through as the default; say so.
+    let layout_name = text.parse::<toml::Table>().ok().and_then(|file| {
+        file.get("settings")?.get("layout")?.as_str().map(str::to_string)
+    });
+    if let Some(name) = layout_name.filter(|name| Layout::from_label(name).is_none()) {
+        warnings.push(format!(
+            "unknown layout '{name}' (have: {}); using {}",
+            Layout::ALL.map(Layout::label).join(", "),
+            Layout::default().label()
+        ));
+    }
     if load_failed {
         warnings.push("in-app changes will not be saved until config.toml is fixed and sctui restarted".to_string());
     }
@@ -292,7 +372,7 @@ pub fn template() -> String {
     out.push_str(".\n# [theme.colors] overrides single roles with \"#rrggbb\" or a colour name: ");
     out.push_str(&theme::ROLES.join(", "));
     out.push_str(".\n[theme]\nname = \"default\"\n# [theme.colors]\n# accent = \"#7aa2f7\"\n\n");
-    out.push_str("# Options also editable in the app (? then Tab). crossfade_secs is 0.5-12, in half-second steps.\n[settings]\n");
+    out.push_str("# Options also editable in the app (? then Tab). layout is one of classic, tighten, sidebar,\n# columns, player-panel. crossfade_secs is 0.5-12, in half-second steps.\n[settings]\n");
     out.push_str(&settings_section(&Settings::default()));
     out.push_str("\n# Equaliser gains in dB, one per band (60Hz 230Hz 910Hz 3kHz 8kHz 16kHz),\n");
     out.push_str("# -12 to +12. Also editable in the app (? then Tab twice).\n[eq]\n");
@@ -346,6 +426,7 @@ mod tests {
         assert_eq!(file.settings.crossfade_secs, Settings::default().crossfade_secs);
         assert!(file.settings.crossfade_user_skips);
         assert!(file.settings.hint_line);
+        assert_eq!(file.settings.layout, Layout::Classic);
         assert_eq!(file.eq.gains, [0; 6]);
     }
 
@@ -368,6 +449,7 @@ mod tests {
                     *field(&mut settings) = true
                 }
                 SettingRow::Secs(_, field) => *field(&mut settings) = 9.5,
+                SettingRow::Choice(_, field) => *field(&mut settings) = Layout::Columns,
             }
         }
         let text = format!("[settings]\n{}", settings_section(&settings));
@@ -441,6 +523,43 @@ mod tests {
         assert_eq!(row.display(settings), ("on".to_string(), true));
         settings.crossfade_user_skips = false;
         assert_eq!(row.display(settings), ("off".to_string(), false));
+    }
+
+    #[test]
+    fn layout_round_trips_in_toml() {
+        for layout in Layout::ALL {
+            let settings = Settings { layout, ..Default::default() };
+            let text = format!("[settings]\n{}", settings_section(&settings));
+            assert!(text.contains(&format!("layout = \"{}\"\n", layout.label())), "{text}");
+            let loaded = load_from(&text);
+            assert_eq!(loaded.settings.layout, layout);
+            assert!(loaded.warnings.is_empty() && !loaded.load_failed, "{:?}", loaded.warnings);
+            // The label is the serde name, so the palette and the file agree.
+            assert_eq!(toml::Value::try_from(layout).unwrap().as_str(), Some(layout.label()));
+        }
+        assert_eq!(Layout::PlayerPanel.label(), "player-panel");
+        // A config from before layouts existed stays on Classic, hint line on, not onboarded.
+        let older = load_from("[settings]\nhide_feed_tab = true\n").settings;
+        assert_eq!(older.layout, Layout::Classic);
+        assert!(older.hint_line && !older.dock_queue && !older.onboarded);
+        // dock_queue has a row on the settings page; onboarded round-trips without one.
+        let text = format!("[settings]\n{}", settings_section(&Settings { dock_queue: true, onboarded: true, ..Default::default() }));
+        let loaded = load_from(&text).settings;
+        assert!(loaded.dock_queue && loaded.onboarded);
+        assert_eq!(Layout::ALL.map(Layout::next), [Layout::Tighten, Layout::Sidebar, Layout::Columns, Layout::PlayerPanel, Layout::Classic]);
+        assert!(Layout::ALL.into_iter().all(|l| l.next().prev() == l));
+    }
+
+    #[test]
+    fn unknown_layout_warns_and_defaults() {
+        let loaded = load_from("[settings]\nlayout = \"mosaic\"\ncrossfade = true\n");
+        assert_eq!(loaded.settings.layout, Layout::Classic);
+        assert!(loaded.settings.crossfade, "the rest of [settings] still loads");
+        assert!(!loaded.load_failed, "and in-app saves are not blocked");
+        let warning = loaded.warnings.iter().find(|w| w.contains("mosaic")).expect("a warning naming it");
+        assert!(warning.contains("player-panel") && warning.contains("using classic"), "{warning}");
+        // The Rust-style name is not the config name.
+        assert!(!load_from("[settings]\nlayout = \"PlayerPanel\"\n").warnings.is_empty());
     }
 
     #[test]

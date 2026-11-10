@@ -141,6 +141,8 @@ fn handle_settings_input(
                 apply_settings(state, data, player);
                 let on = if value { "on" } else { "off" };
                 state.help_message = Some(saved(state, format!("{label}: {on}")));
+            } else if let SettingRow::Choice(..) = row {
+                adjust(row, state, data, player, 1);
             }
         }
         (KeyCode::Left, _) | (_, Some(Action::SubTabLeft)) => adjust(row, state, data, player, -1),
@@ -157,6 +159,10 @@ fn handle_settings_input(
 /// value is snapped onto the grid first, so a duration hand-edited to something off it
 /// lands on a round figure rather than carrying the offset for ever.
 fn adjust(row: SettingRow, state: &mut AppState, data: &mut AppData, player: &Player, steps: i8) {
+    if let Some(msg) = cycle(row, &mut state.settings, steps) {
+        state.help_message = Some(saved(state, msg));
+        return;
+    }
     let SettingRow::Secs(label, field) = row else { return };
     let snapped = state.settings.crossfade_secs_snapped();
     let secs = {
@@ -167,6 +173,15 @@ fn adjust(row: SettingRow, state: &mut AppState, data: &mut AppData, player: &Pl
     };
     apply_settings(state, data, player);
     state.help_message = Some(saved(state, format!("{label}: {secs:.1}s")));
+}
+
+/// Move a choice row one option back (`steps` < 0) or forward, wrapping; the message
+/// names what it is now. `None` for any other kind of row.
+fn cycle(row: SettingRow, settings: &mut Settings, steps: i8) -> Option<String> {
+    let SettingRow::Choice(label, field) = row else { return None };
+    let layout = field(settings);
+    *layout = if steps < 0 { layout.prev() } else { layout.next() };
+    Some(format!("{label}: {}", layout.label()))
 }
 
 /// The equaliser page: ←→ (or h/l) picks a band, ↑↓ (or k/j) moves its fader,
@@ -341,6 +356,26 @@ mod tests {
         assert_eq!(state.help_selected, Action::ALL.len() - 1);
         press(&mut state, KeyCode::Home);
         assert_eq!(state.help_selected, 0);
+    }
+
+    #[test]
+    fn settings_row_cycles_layout() {
+        use crate::config::Layout;
+        let row = *Settings::ROWS.iter().find(|r| r.label() == "Layout").expect("a Layout row");
+        let mut settings = Settings::default();
+        assert_eq!(row.display(settings), ("‹ classic ›".to_string(), true));
+        // Right (and Enter / Space) goes forward through all five and wraps; Left goes back.
+        let seen: Vec<Layout> = (0..5).map(|_| { cycle(row, &mut settings, 1); settings.layout }).collect();
+        assert_eq!(seen, [Layout::Tighten, Layout::Sidebar, Layout::Columns, Layout::PlayerPanel, Layout::Classic]);
+        assert_eq!(cycle(row, &mut settings, -1).as_deref(), Some("Layout: player-panel"));
+        assert_eq!(settings.layout, Layout::PlayerPanel);
+        assert_eq!(row.display(settings).0, "‹ player-panel ›");
+        // Only a choice row cycles; the others keep their own keys.
+        for other in Settings::ROWS.iter().filter(|r| r.label() != "Layout") {
+            assert_eq!(cycle(*other, &mut settings, 1), None);
+        }
+        assert!(Settings::ROWS.iter().any(|r| r.label().starts_with("Dock the queue")));
+        assert!(!Settings::ROWS.iter().any(|r| r.label().to_lowercase().contains("onboard")));
     }
 
     #[test]

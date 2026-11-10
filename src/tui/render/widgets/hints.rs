@@ -15,7 +15,7 @@ use crate::theme;
 use crate::tui::logic::nav::{self, PaneId, PaneKind};
 use crate::tui::logic::state::{AppData, AppState, HelpPage};
 
-use super::{put, text_width};
+use super::{put, put_right, text_width};
 
 /// Terminal rows below which the hint line is not drawn.
 pub const ROWS_HINTS: u16 = 14;
@@ -150,7 +150,7 @@ pub fn draw(frame: &mut Frame, area: Rect, state: &AppState, data: &AppData) {
     put(frame, area, Line::from(spans));
     if !pending.is_empty() {
         let style = Style::new().fg(t.warning).add_modifier(Modifier::BOLD);
-        put(frame, Rect { width: area.width - 1, ..area }, Line::styled(pending, style).right_aligned());
+        put_right(frame, Rect { width: area.width - 1, ..area }, &pending, style);
     }
 }
 
@@ -247,7 +247,8 @@ mod tests {
         let buf = draw_buffer(60, 1, |f| draw(f, f.area(), &state, &data));
         let shown = text(&buf);
         assert!(shown.trim_end_matches('\n').ends_with("g … "), "{shown:?}");
-        assert_eq!(buf[(56, 0)].fg, theme::current().warning);
+        let t = theme::current();
+        assert_eq!((buf[(1, 0)].fg, buf[(7, 0)].fg, buf[(56, 0)].fg), (t.accent, t.dim, t.warning));
         // The hints stop short of it rather than running underneath.
         let before = shown.trim_end_matches('\n').trim_end_matches("g … ");
         assert!(before.ends_with("   ") && before.trim_end().ends_with("p playlist"), "{shown:?}");
