@@ -17,6 +17,7 @@ pub enum Command {
     /// A built-in theme, by name.
     Theme(&'static str),
     ToggleHints,
+    ToggleHideUnplayable,
     SetupWizard,
 }
 
@@ -64,6 +65,8 @@ pub fn items(state: &AppState) -> Vec<(String, String, Command)> {
     );
     let hints = if state.settings.hint_line { "on" } else { "off" };
     out.push(("Hint line: toggle".to_string(), hints.to_string(), Command::ToggleHints));
+    let hiding = if state.settings.hide_unplayable { "on" } else { "off" };
+    out.push(("Hide unplayable tracks: toggle".to_string(), hiding.to_string(), Command::ToggleHideUnplayable));
     out.push(("Setup wizard".to_string(), String::new(), Command::SetupWizard));
     out
 }

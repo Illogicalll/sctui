@@ -58,6 +58,11 @@ pub(crate) fn run(command: Command, state: &mut AppState) {
             state.settings.hint_line = !state.settings.hint_line;
             format!("Hint line {}", if state.settings.hint_line { "on" } else { "off" })
         }
+        Command::ToggleHideUnplayable => {
+            // The loop notices the change and filters the lists.
+            state.settings.hide_unplayable = !state.settings.hide_unplayable;
+            format!("Hide unplayable tracks {}", if state.settings.hide_unplayable { "on" } else { "off" })
+        }
         Command::SetupWizard => return crate::tui::logic::wizard::start(state),
     };
     match crate::config::save(

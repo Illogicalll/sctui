@@ -204,6 +204,88 @@ pub fn apply_unplayable_filter(state: &mut AppState, data: &mut AppData) {
     if let Some((len, table)) = shown {
         clamp_row(&mut state.selected_row, table, len);
     }
+    apply_container_filter(state, data);
+}
+
+/// With "hide unplayable tracks" on, a playlist or album known to hold nothing
+/// playable is not listed at all (in the Library and in search results). Turning
+/// the setting off puts the Library ones back where they were.
+///
+/// A container is only "known" once the loop has asked the API about it, so rows
+/// drop out a moment after a list loads. Empty playlists stay: there is nothing
+/// unplayable in them, and the user's own are where new tracks go.
+pub fn apply_container_filter(state: &mut AppState, data: &mut AppData) {
+    use crate::tui::logic::nav::{self, PaneId};
+
+    // First-seen order, so restored rows can be put back in place.
+    let known = &mut data.containers.seq;
+    for uri in data.playlists.iter().map(|p| &p.tracks_uri).chain(data.albums.iter().map(|a| &a.tracks_uri)) {
+        let next = known.len();
+        known.entry(uri.clone()).or_insert(next);
+    }
+
+    if !state.settings.hide_unplayable {
+        let c = &mut data.containers;
+        if !c.hidden_playlists.is_empty() {
+            data.playlists.append(&mut c.hidden_playlists);
+            data.playlists.sort_by_key(|p| c.seq.get(&p.tracks_uri).copied().unwrap_or(usize::MAX));
+        }
+        if !c.hidden_albums.is_empty() {
+            data.albums.append(&mut c.hidden_albums);
+            data.albums.sort_by_key(|a| c.seq.get(&a.tracks_uri).copied().unwrap_or(usize::MAX));
+        }
+        return;
+    }
+
+    let none = &data.containers.none_playable;
+    if none.is_empty() {
+        return;
+    }
+    // Take the dead rows out of `rows`, keeping the cursor on the item it was on
+    // (or the row that slid into its place when that item is the one removed).
+    fn prune<T: Clone>(
+        rows: &mut Vec<T>,
+        uri: impl Fn(&T) -> &str,
+        dead: &std::collections::HashSet<String>,
+        cursor: usize,
+        mut stash: Option<&mut Vec<T>>,
+    ) -> Option<usize> {
+        if !rows.iter().any(|r| dead.contains(uri(r))) {
+            return None;
+        }
+        let removed_before = rows.iter().take(cursor).filter(|r| dead.contains(uri(r))).count();
+        rows.retain(|r| {
+            let keep = !dead.contains(uri(r));
+            if !keep && let Some(stash) = stash.as_deref_mut() {
+                stash.push(r.clone());
+            }
+            keep
+        });
+        Some((cursor - removed_before).min(rows.len().saturating_sub(1)))
+    }
+
+    let at = |state: &AppState, id| nav::selected_index(state, id).unwrap_or(0);
+    let moved = [
+        (PaneId::Playlists, prune(&mut data.playlists, |p| &p.tracks_uri, none, at(state, PaneId::Playlists), Some(&mut data.containers.hidden_playlists))),
+        (PaneId::Albums, prune(&mut data.albums, |a| &a.tracks_uri, none, at(state, PaneId::Albums), Some(&mut data.containers.hidden_albums))),
+        (PaneId::SearchPlaylists, prune(&mut data.search_playlists, |p| &p.tracks_uri, none, at(state, PaneId::SearchPlaylists), None)),
+        (PaneId::SearchAlbums, prune(&mut data.search_albums, |a| &a.tracks_uri, none, at(state, PaneId::SearchAlbums), None)),
+    ];
+    for (id, cursor) in moved {
+        if let Some(cursor) = cursor {
+            *nav::cursor_mut(state, id) = cursor;
+        }
+    }
+}
+
+/// The containers worth asking the API about: listed, not empty, not asked yet.
+pub fn containers_to_probe(data: &AppData) -> impl Iterator<Item = &str> {
+    let playlists = data.playlists.iter().chain(&data.search_playlists).map(|p| (&p.tracks_uri, &p.track_count));
+    let albums = data.albums.iter().chain(&data.search_albums).map(|a| (&a.tracks_uri, &a.track_count));
+    playlists
+        .chain(albums)
+        .filter(|(uri, count)| !uri.is_empty() && count.as_str() != "0" && !data.containers.probed.contains(*uri))
+        .map(|(uri, _)| uri.as_str())
 }
 
 /// Take the unplayable tracks out of one pane, keeping its cursor in range.
@@ -351,5 +433,96 @@ mod tests {
             restore_rows(&mut tracks, &mut stash);
             assert_eq!(urns(&tracks), urns(&original));
         }
+    }
+
+    fn playlist(name: &str, count: &str) -> crate::api::Playlist {
+        crate::api::Playlist {
+            title: name.to_string(),
+            track_count: count.to_string(),
+            duration: String::new(),
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00+00:00").unwrap(),
+            tracks_uri: format!("uri:{name}"),
+            is_owned: true,
+        }
+    }
+
+    fn album(name: &str) -> crate::api::Album {
+        crate::api::Album {
+            title: name.to_string(),
+            artists: String::new(),
+            release_year: String::new(),
+            duration: String::new(),
+            track_count: "10".to_string(),
+            tracks_uri: format!("uri:{name}"),
+        }
+    }
+
+    fn titles<T>(rows: &[T], title: impl Fn(&T) -> &str) -> Vec<&str> {
+        rows.iter().map(title).collect()
+    }
+
+    #[test]
+    fn containers_with_nothing_playable_are_hidden_and_come_back() {
+        use crate::tui::logic::nav::{self, PaneId};
+        let mut state = AppState::default();
+        state.settings.hide_unplayable = true;
+        let mut data = AppData {
+            playlists: vec![playlist("a", "3"), playlist("dead1", "11"), playlist("b", "2"), playlist("dead2", "4"), playlist("c", "9")],
+            albums: vec![album("x"), album("gone"), album("y")],
+            search_albums: vec![album("gone"), album("z")],
+            ..Default::default()
+        };
+
+        // Nothing is known yet: nothing is hidden.
+        apply_container_filter(&mut state, &mut data);
+        assert_eq!(data.playlists.len(), 5);
+
+        // The cursor is on "c"; two dead rows above it go.
+        nav::set_location(&mut state, 0, Some(1));
+        *nav::cursor_mut(&mut state, PaneId::Playlists) = 4;
+        for dead in ["uri:dead1", "uri:dead2", "uri:gone"] {
+            data.containers.none_playable.insert(dead.to_string());
+        }
+        apply_container_filter(&mut state, &mut data);
+        assert_eq!(titles(&data.playlists, |p| &p.title), ["a", "b", "c"]);
+        assert_eq!(titles(&data.albums, |a| &a.title), ["x", "y"]);
+        assert_eq!(titles(&data.search_albums, |a| &a.title), ["z"], "search results too");
+        assert_eq!(nav::cursor(&state, PaneId::Playlists), 2, "the cursor stays on the same playlist");
+
+        // Applying again changes nothing.
+        apply_container_filter(&mut state, &mut data);
+        assert_eq!(data.playlists.len(), 3);
+
+        // The cursor's own row dies: it lands on the row that slides up, and never past the end.
+        data.containers.none_playable.insert("uri:c".to_string());
+        apply_container_filter(&mut state, &mut data);
+        assert_eq!(titles(&data.playlists, |p| &p.title), ["a", "b"]);
+        assert_eq!(nav::cursor(&state, PaneId::Playlists), 1);
+
+        // Setting off: the Library rows return in their original order.
+        state.settings.hide_unplayable = false;
+        apply_container_filter(&mut state, &mut data);
+        assert_eq!(titles(&data.playlists, |p| &p.title), ["a", "dead1", "b", "dead2", "c"]);
+        assert_eq!(titles(&data.albums, |a| &a.title), ["x", "gone", "y"]);
+
+        // And back on: gone again without asking the API a second time.
+        state.settings.hide_unplayable = true;
+        apply_container_filter(&mut state, &mut data);
+        assert_eq!(titles(&data.playlists, |p| &p.title), ["a", "b"]);
+    }
+
+    #[test]
+    fn only_listed_non_empty_unasked_containers_are_probed() {
+        let mut data = AppData {
+            playlists: vec![playlist("full", "3"), playlist("empty", "0"), playlist("asked", "5")],
+            albums: vec![album("x")],
+            search_playlists: vec![playlist("found", "7")],
+            ..Default::default()
+        };
+        data.containers.probed.insert("uri:asked".to_string());
+        let mut todo: Vec<&str> = containers_to_probe(&data).collect();
+        todo.sort_unstable();
+        // An empty playlist has nothing unplayable in it, and is where new tracks go.
+        assert_eq!(todo, ["uri:found", "uri:full", "uri:x"]);
     }
 }

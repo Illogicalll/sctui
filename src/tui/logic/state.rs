@@ -607,6 +607,22 @@ pub struct AppState {
     pub preload_triggered_for_track_urn: Option<String>,
 }
 
+/// What is known about which playlists and albums have any playable track, and the
+/// ones the "hide unplayable tracks" setting has taken out of the Library lists.
+#[derive(Default)]
+pub struct Containers {
+    /// `tracks_uri` of every container found to hold no playable track.
+    pub none_playable: HashSet<String>,
+    /// `tracks_uri` already checked, or being checked now.
+    pub probed: HashSet<String>,
+    /// Checks in flight.
+    pub probing: usize,
+    /// Order each container was first seen in, so restored rows go back in place.
+    pub seq: std::collections::HashMap<String, usize>,
+    pub hidden_playlists: Vec<Playlist>,
+    pub hidden_albums: Vec<Album>,
+}
+
 #[derive(Default)]
 pub struct AppData {
     pub likes: Vec<Track>,
@@ -668,6 +684,8 @@ pub struct AppData {
     /// lists them.
     pub hidden_tracks: Vec<Vec<(usize, Track)>>,
     pub hidden_feed: Vec<(usize, Activity)>,
+    /// Playlists and albums with nothing playable in them (see `filtering::apply_container_filter`).
+    pub containers: Containers,
 }
 
 impl AppData {
@@ -747,6 +765,7 @@ impl AppData {
             feed_tracks_key: None,
             hidden_tracks: Vec::new(),
             hidden_feed: Vec::new(),
+            containers: Containers::default(),
         })
     }
 }

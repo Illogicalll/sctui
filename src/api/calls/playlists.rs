@@ -77,6 +77,23 @@ impl API {
     }
 }
 
+/// Whether a playlist or album has at least one track the API will actually play.
+/// One tiny request: only playable tracks are asked for, and only the first.
+pub async fn has_playable_tracks(token: Arc<Mutex<Token>>, tracks_uri: String) -> anyhow::Result<bool> {
+    let access_token = access_token(&token);
+    let base = if tracks_uri.starts_with("http") { tracks_uri } else { format!("https://api.soundcloud.com{tracks_uri}") };
+    let sep = if base.contains('?') { '&' } else { '?' };
+    let resp: serde_json::Value = reqwest::Client::new()
+        .get(format!("{base}{sep}access=playable&limit=1&linked_partitioning=true"))
+        .bearer_auth(access_token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(!response_items(&resp).is_empty())
+}
+
 pub async fn fetch_playlist_tracks(
     token: Arc<Mutex<Token>>,
     tracks_uri: String,

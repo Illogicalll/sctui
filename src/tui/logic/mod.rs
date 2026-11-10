@@ -11,7 +11,7 @@ use crate::api::{
     Lyrics, fetch_lyrics,
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
     fetch_related_tracks, fetch_related_users,
-    API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
+    API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
     fetch_user_tracks,
 };
@@ -54,6 +54,8 @@ use self::utils::{
 
 /// How long a track must have been playing before its lyrics are looked up.
 const LYRICS_DEBOUNCE: Duration = Duration::from_millis(400);
+/// How many playlists/albums are asked "anything playable?" at once.
+const CONTAINER_PROBES: usize = 6;
 
 enum AppEvent {
     Redraw(Result<ResizeResponse, Errors>),
@@ -112,6 +114,9 @@ enum Msg {
     PlaylistEditFailed(String),
     /// A fetch that failed; the text is ready to show.
     FetchFailed(String),
+    /// A playlist or album (by `tracks_uri`) and whether anything in it can be played.
+    /// `None` when the check itself failed; nothing is concluded from that.
+    ContainerProbed(String, Option<bool>),
 }
 
 pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded, setup: bool) -> anyhow::Result<()> {
@@ -372,6 +377,7 @@ fn start(
     let mut media_synced_at = Instant::now();
     let mut media_synced_pos: u64 = 0;
 
+    let mut hiding_unplayable = state.settings.hide_unplayable;
     loop {
         // Rows that arrived this iteration; the hide-unplayable setting prunes them
         // once here rather than in each of the arms below.
@@ -509,10 +515,34 @@ fn start(
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
                 Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
                 Msg::PlaylistEditFailed(why) | Msg::FetchFailed(why) => state.toast_err(why),
+                Msg::ContainerProbed(uri, playable) => {
+                    data.containers.probing = data.containers.probing.saturating_sub(1);
+                    if playable == Some(false) {
+                        data.containers.none_playable.insert(uri);
+                    }
+                }
             }
         }
-        if fetched {
+        // New rows, or the setting changed (from the settings page or the palette).
+        if fetched || hiding_unplayable != state.settings.hide_unplayable {
+            hiding_unplayable = state.settings.hide_unplayable;
             apply_unplayable_filter(&mut state, &mut data);
+        }
+
+        // With "hide unplayable tracks" on, ask about each listed playlist and album once
+        // per session, a few at a time, so the ones with nothing playable can be dropped.
+        if state.settings.hide_unplayable && data.containers.probing < CONTAINER_PROBES {
+            let room = CONTAINER_PROBES - data.containers.probing;
+            let next: Vec<String> = filtering::containers_to_probe(&data).take(room).map(str::to_string).collect();
+            for uri in next {
+                data.containers.probed.insert(uri.clone());
+                data.containers.probing += 1;
+                let (token, tx) = (auth(), tx.clone());
+                async_rt.spawn(async move {
+                    let playable = has_playable_tracks(token, uri.clone()).await.ok();
+                    let _ = tx.send(Msg::ContainerProbed(uri, playable));
+                });
+            }
         }
 
         while let Some(action) = state.engagement_queue.pop_front() {
