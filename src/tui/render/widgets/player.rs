@@ -11,12 +11,13 @@ use ratatui::{
 use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
 
 use crate::api::{Track, format_duration};
+use crate::config::Credit;
 use crate::theme;
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::active_tracks;
 use crate::tui::render::NowPlaying;
 
-use super::{fit, put, text_width};
+use super::{border_credit, fit, put, text_width};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PlayerSize {
@@ -158,6 +159,7 @@ fn classic7(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying, co
     let block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded);
     let inner = block.inner(mid);
     frame.render_widget(block, mid);
+    border_credit(frame, mid, state);
     if inner.width < 4 || inner.height < 5 {
         return;
     }
@@ -221,6 +223,7 @@ fn bar4(
         .border_style(Style::new().fg(t.dim));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    border_credit(frame, area, state);
     if inner.width < 6 || inner.height == 0 {
         return;
     }
@@ -289,6 +292,10 @@ fn line1(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying) {
             on(state.repeat_enabled, "↻ "),
             volume_percent(np)
         ));
+    }
+    // No box to carry the credit on its border: it ends the line instead.
+    if state.settings.soundcloud_credit == Credit::Text {
+        tail.push_str(" · SoundCloud");
     }
     let tail_w = text_width(&tail) as u16;
     let rule_w = if area.width >= 70 { area.width / 5 } else { 0 };

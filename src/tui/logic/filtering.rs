@@ -354,6 +354,7 @@ mod tests {
             artwork_url: String::new(),
             access: access.to_string(),
             track_urn: urn.to_string(),
+            permalink_url: String::new(),
         }
     }
 
@@ -517,6 +518,7 @@ mod tests {
             created_at: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00+00:00").unwrap(),
             tracks_uri: format!("uri:{name}"),
             is_owned: true,
+            permalink_url: String::new(),
         }
     }
 
@@ -528,6 +530,7 @@ mod tests {
             duration: String::new(),
             track_count: "10".to_string(),
             tracks_uri: format!("uri:{name}"),
+            permalink_url: String::new(),
         }
     }
 

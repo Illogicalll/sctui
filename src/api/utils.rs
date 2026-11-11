@@ -167,6 +167,7 @@ pub(crate) fn parse_track(obj: &serde_json::Value) -> Track {
     let artwork_url = parse_str(obj, "artwork_url").replace("-large.", "-t500x500.");
     let access = parse_str(obj, "access");
     let track_urn = parse_str(obj, "urn");
+    let permalink_url = parse_str(obj, "permalink_url");
 
     Track {
         title,
@@ -177,6 +178,7 @@ pub(crate) fn parse_track(obj: &serde_json::Value) -> Track {
         artwork_url,
         access,
         track_urn,
+        permalink_url,
     }
 }
 
@@ -187,6 +189,28 @@ pub(crate) fn response_items(resp: &serde_json::Value) -> Vec<serde_json::Value>
         array.clone()
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod permalink_tests {
+    use super::parse_track;
+    use serde_json::json;
+
+    /// #54: the link back to soundcloud.com is read where the payload has one, and is
+    /// empty (never a failure) where it does not.
+    #[test]
+    fn permalink_url_is_read_and_optional() {
+        let track = json!({ "title": "Await", "urn": "soundcloud:tracks:1", "permalink_url": "https://soundcloud.com/dj-dave/await" });
+        assert_eq!(parse_track(&track).permalink_url, "https://soundcloud.com/dj-dave/await");
+        let older = parse_track(&json!({ "title": "Await", "urn": "soundcloud:tracks:1" }));
+        assert_eq!((older.permalink_url.as_str(), older.title.as_str()), ("", "Await"));
+        assert_eq!(parse_track(&json!({ "permalink_url": null })).permalink_url, "");
+
+        let playlist = json!({ "title": "rave", "permalink_url": "https://soundcloud.com/me/sets/rave" });
+        let parsed = crate::api::calls::playlists::parse_playlist(&playlist, true);
+        assert_eq!(parsed.permalink_url, "https://soundcloud.com/me/sets/rave");
+        assert_eq!(crate::api::calls::playlists::parse_playlist(&json!({ "title": "rave" }), true).permalink_url, "");
     }
 }
 

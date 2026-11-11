@@ -237,6 +237,7 @@ mod tests {
                 artwork_url: String::new(),
                 access: String::new(),
                 track_urn: format!("{prefix}{i}"),
+                permalink_url: String::new(),
             })
             .collect()
     }
@@ -275,7 +276,7 @@ mod tests {
     fn enter_drops_a_pending_artist_station() {
         let (mut state, mut data) = (AppState::default(), library());
         // Requested and not yet picked up by the loop, or already being fetched.
-        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() });
+        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into(), permalink_url: String::new() });
         let in_flight = state.artist_station_fetch.request_id;
         enter(&mut state, &mut data, PlaybackSource::Likes, |d| &d.likes, 0);
         assert!(state.artist_station_request.is_none());

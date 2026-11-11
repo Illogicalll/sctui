@@ -301,6 +301,7 @@ mod tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: "soundcloud:tracks:1".to_string(),
+            permalink_url: String::new(),
         }
     }
 

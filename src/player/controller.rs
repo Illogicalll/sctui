@@ -160,6 +160,7 @@ impl Player {
                 artwork_url: "".to_string(),
                 access: "playable".to_string(),
                 track_urn: "".to_string(),
+                permalink_url: String::new(),
             })
     }
 

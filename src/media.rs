@@ -244,6 +244,7 @@ mod souvlaki_tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: "x".into(),
+            permalink_url: String::new(),
         };
         let _ = cover;
         (media, t)

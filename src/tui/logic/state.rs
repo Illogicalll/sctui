@@ -783,7 +783,7 @@ mod tests {
         use crate::tui::logic::toast::ToastKind;
         let mut state = AppState::default();
         let mut data = AppData::default();
-        let artist = Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() };
+        let artist = Artist { name: "Someone".into(), urn: "soundcloud:users:7".into(), permalink_url: String::new() };
         // What the follow key does, then the server saying no.
         data.followed_user_urns.insert(artist.urn.clone());
         Engagement::FollowUser { artist: artist.clone(), user_id: 7 }.failed("403 Forbidden", &mut state, &mut data);
@@ -840,6 +840,7 @@ mod tests {
                 artwork_url: String::new(),
                 access: String::new(),
                 track_urn: i.to_string(),
+                permalink_url: String::new(),
             })
             .collect();
         for i in 0..HISTORY_CAP + 2 {
@@ -869,6 +870,7 @@ mod tests {
                 artwork_url: String::new(),
                 access: String::new(),
                 track_urn: format!("soundcloud:tracks:{i}"),
+                permalink_url: String::new(),
             };
             (0..n).map(track).collect()
         };

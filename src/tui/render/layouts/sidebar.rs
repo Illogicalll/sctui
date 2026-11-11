@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders},
 };
 use ratatui_image::thread::ThreadProtocol;
@@ -22,7 +22,7 @@ use crate::tui::render::widgets::nav_column::{self, draw_nav_column};
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
 use crate::tui::render::widgets::player::{draw_player, player_size};
-use crate::tui::render::widgets::{fit, header, hints, put};
+use crate::tui::render::widgets::{brand_mark, fit, header, hints, put, text_width};
 
 use super::{take_bottom, take_top};
 
@@ -80,9 +80,13 @@ pub fn draw(
     if state.selected_tab == 1 || !wide {
         let mut strip = take_top(&mut rest, 1);
         if !wide {
-            put(frame, Rect { x: strip.x + 1, width: 1, ..strip }, Line::styled("≡", Style::new().fg(t.dim)));
-            strip.x += 2;
-            strip.width -= 2;
+            // No column, so no `sctui` for the SoundCloud mark to sit beside: it leads the strip.
+            let mark = brand_mark(state);
+            let used = 2 + text_width(mark) as u16;
+            let lead = Line::from(vec![Span::styled(mark, Style::new().fg(t.accent)), Span::styled("≡", Style::new().fg(t.dim))]);
+            put(frame, Rect { x: strip.x + 1, width: used - 1, ..strip }, lead);
+            strip.x += used;
+            strip.width -= used;
         }
         if state.selected_tab == 1 {
             header::draw_subtabs(frame, strip, state);

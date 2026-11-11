@@ -215,7 +215,8 @@ mod tests {
         let (mut state, mut data, ..) = fixture();
         let warnings = state.keymap.apply_toml(
             "[keys]\ndown = \"n\"\nbottom = \"B\"\ntop = \"T\"\nsub_tab_right = \"w\"\npane_right = \"e\"\npane_left = \"b\"\n\
-             play_selected = \"y\"\nplay_pause = \"u\"\nadd_to_queue = \"z\"\nsearch = \"i\"\npalette = \";\"\nhelp = \"K\"\n",
+             play_selected = \"y\"\nplay_pause = \"u\"\nadd_to_queue = \"z\"\nsearch = \"i\"\npalette = \";\"\nhelp = \"K\"\n\
+             open_in_browser = []\nopen_in_browser_playing = []\n",
         );
         assert!(warnings.is_empty(), "{warnings:?}");
         wizard::start_practice(&mut state, &data);

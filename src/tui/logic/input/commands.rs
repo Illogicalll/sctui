@@ -41,6 +41,14 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
             let playing = queued_from_current(state, data).map(|q| q.track);
             toggle_track_like(playing, state, data);
         }
+        Action::OpenInBrowser => {
+            let url = selected_permalink(state, data);
+            open_on_soundcloud(url, state);
+        }
+        Action::OpenInBrowserPlaying => {
+            let url = queued_from_current(state, data).map(|q| q.track.permalink_url);
+            open_on_soundcloud(url, state);
+        }
         Action::Search => {
             // Insert mode: the query on Search, the filter of the location's filterable
             // pane (which takes focus) in Library. An existing filter is edited, not cleared.
@@ -169,6 +177,10 @@ pub(crate) fn run_nav_command(action: Action, state: &mut AppState, data: &mut A
             }
         }
         Action::ToggleLike => toggle_playlist_like(nav::nav_playlist(state, data).cloned(), state, data),
+        Action::OpenInBrowser => {
+            let url = nav::nav_playlist(state, data).map(|p| p.permalink_url.clone());
+            open_on_soundcloud(url, state);
+        }
         // The filter belongs to a pane, which takes the focus.
         Action::Search => {
             state.nav_focused = false;
@@ -198,6 +210,41 @@ fn toggle_like_selected(state: &mut AppState, data: &mut AppData) {
             let views = build_filtered_views(state, data);
             toggle_track_like(nav::selected_track(state, data, &views), state, data);
         }
+    }
+}
+
+/// The soundcloud.com page of the focused pane's selected row: the track in a tracks
+/// pane, the playlist, album, person or feed item in a container pane. `None` when
+/// the pane is empty; an empty string when the row came without a permalink.
+fn selected_permalink(state: &AppState, data: &AppData) -> Option<String> {
+    let id = nav::focused(state);
+    let idx = nav::selected_index(state, id)?;
+    match id {
+        PaneId::Playlists => data.playlists.get(idx).map(|p| p.permalink_url.clone()),
+        PaneId::SearchPlaylists => data.search_playlists.get(idx).map(|p| p.permalink_url.clone()),
+        PaneId::Albums => data.albums.get(idx).map(|a| a.permalink_url.clone()),
+        PaneId::SearchAlbums => data.search_albums.get(idx).map(|a| a.permalink_url.clone()),
+        PaneId::Following => data.following.get(idx).map(|a| a.permalink_url.clone()),
+        PaneId::SearchPeople => data.search_people.get(idx).map(|a| a.permalink_url.clone()),
+        PaneId::Feed => data.feed.get(idx).map(|a| a.permalink_url.clone()),
+        _ => {
+            let views = build_filtered_views(state, data);
+            nav::selected_track(state, data, &views).map(|t| t.permalink_url)
+        }
+    }
+}
+
+/// Open a row's soundcloud.com page in the browser and say so, or say why not.
+fn open_on_soundcloud(url: Option<String>, state: &mut AppState) {
+    let Some(url) = url else { return state.toast_err("Nothing to open") };
+    // The link is whatever the API sent: only a soundcloud.com page goes to the OS.
+    if !url.starts_with("https://soundcloud.com/") {
+        return state.toast_err("No SoundCloud link for this item");
+    }
+    // Tests drive the real handlers; none of them may open a browser.
+    match if cfg!(test) { Ok(()) } else { webbrowser::open(&url) } {
+        Ok(()) => state.toast(format!("Opened in browser · {url}")),
+        Err(e) => state.toast_err(format!("Could not open the browser: {e}")),
     }
 }
 
@@ -271,6 +318,63 @@ fn toggle_track_like(track: Option<Track>, state: &mut AppState, data: &mut AppD
 mod tests {
     use super::*;
     use crate::tui::logic::state::PlaybackSource;
+    use crate::tui::logic::toast::ToastKind;
+    use crate::tui::render::testkit::{fixture, fixture_empty, go};
+
+    /// #54: `b` opens the focused pane's selected row on soundcloud.com, whatever kind
+    /// of row it is, and `B` the playing track. Under test nothing is launched; the
+    /// toast names the link that would be.
+    #[test]
+    fn open_in_browser_opens_the_selection_or_the_playing_track() {
+        let (mut state, mut data, ..) = fixture();
+        let said = |state: &mut AppState, data: &mut AppData, action| {
+            state.toasts.clear();
+            run_command(action, state, data);
+            let toast = state.toasts.last().expect("a toast either way");
+            (toast.msg.clone(), toast.kind)
+        };
+        let opened = |url: &str| (format!("Opened in browser · {url}"), ToastKind::Ok);
+        // (tab, sub-tab, focused pane) and the page its selected row links to.
+        for (tab, sub, focus, url) in [
+            (0, 0, 0, "https://soundcloud.com/artist-0/track-0"),
+            (0, 1, 0, "https://soundcloud.com/me/sets/playlist-0"),
+            (0, 1, 1, "https://soundcloud.com/artist-2/track-100"),
+            (0, 2, 0, "https://soundcloud.com/artist-0/sets/album-0"),
+            (0, 3, 0, "https://soundcloud.com/person-0"),
+            (1, 3, 0, "https://soundcloud.com/person-0"),
+            (2, 0, 0, "https://soundcloud.com/poster-0/post-0"),
+        ] {
+            go(&mut state, &mut data, tab, sub, focus);
+            assert_eq!(said(&mut state, &mut data, Action::OpenInBrowser), opened(url), "{tab} {sub} {focus}");
+        }
+        // The playing track (Song 04), wherever the cursor is.
+        assert_eq!(said(&mut state, &mut data, Action::OpenInBrowserPlaying), opened("https://soundcloud.com/artist-4/track-4"));
+
+        // A row that came without a permalink, or with something that is not a
+        // soundcloud.com page, is never handed to the browser.
+        go(&mut state, &mut data, 0, 0, 0);
+        for bad in ["", "file:///etc/passwd", "https://soundcloud.com.evil.example/x"] {
+            data.likes[0].permalink_url = bad.to_string();
+            assert_eq!(said(&mut state, &mut data, Action::OpenInBrowser), ("No SoundCloud link for this item".to_string(), ToastKind::Err));
+        }
+        // The navigation column: the playlist under its cursor, or nothing.
+        state.settings.layout = Layout::Sidebar;
+        go(&mut state, &mut data, 0, 1, 0);
+        state.nav_focused = true;
+        *nav::cursor_mut(&mut state, PaneId::Playlists) = 2;
+        state.toasts.clear();
+        assert!(run_nav_command(Action::OpenInBrowser, &mut state, &mut data));
+        assert_eq!(state.toasts[0].msg, "Opened in browser · https://soundcloud.com/me/sets/playlist-2");
+        state.nav_on_header = true;
+        assert!(run_nav_command(Action::OpenInBrowser, &mut state, &mut data));
+        assert_eq!(state.toasts[1].msg, "Nothing to open");
+
+        // Nothing selected and nothing playing.
+        let (mut state, mut data, ..) = fixture_empty();
+        for action in [Action::OpenInBrowser, Action::OpenInBrowserPlaying] {
+            assert_eq!(said(&mut state, &mut data, action), ("Nothing to open".to_string(), ToastKind::Err));
+        }
+    }
 
     /// T17: toggling shuffle in a station must not queue the tracks already heard.
     #[test]
@@ -284,6 +388,7 @@ mod tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: i.to_string(),
+            permalink_url: String::new(),
         };
         let mut data = AppData { playback_tracks: (0..6).map(track).collect(), ..Default::default() };
         let mut state = AppState {

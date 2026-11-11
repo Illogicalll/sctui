@@ -18,6 +18,7 @@ pub(crate) fn parse_playlist(playlist: &serde_json::Value, is_owned: bool) -> Pl
         created_at: parse_datetime(playlist, "created_at"),
         tracks_uri: parse_str(playlist, "tracks_uri"),
         is_owned,
+        permalink_url: parse_str(playlist, "permalink_url"),
     }
 }
 
