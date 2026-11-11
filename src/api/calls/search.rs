@@ -1,5 +1,6 @@
 use chrono::{DateTime, FixedOffset, Utc};
 
+use crate::api::rate_limit::SendGatedAsync;
 use crate::auth::Token;
 
 use super::super::utils::{
@@ -29,9 +30,8 @@ pub async fn fetch_search_tracks(
             ("access", "playable,preview,blocked"),
         ])
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
 
@@ -53,9 +53,8 @@ pub async fn fetch_search_albums(
             ("show_tracks", "false"),
         ])
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
 
@@ -105,9 +104,8 @@ pub async fn fetch_search_playlists(
             ("show_tracks", "false"),
         ])
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
 
@@ -153,9 +151,8 @@ pub async fn fetch_search_people(
             ("limit", "50"),
         ])
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
 

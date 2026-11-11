@@ -15,7 +15,7 @@ use crate::api::{
     fetch_related_tracks, fetch_related_users,
     API, Activity, List, MAX_PAGES, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
-    fetch_user_tracks,
+    fetch_user_tracks, rate_limit,
 };
 use crate::auth::Token;
 use crate::player::{Player, TrackChange};
@@ -182,7 +182,8 @@ fn spawn_fetch<F>(pagers: &mut Pagers, list: List, api: &Arc<Mutex<API>>, tx: &S
 where
     F: FnOnce(&mut API) -> anyhow::Result<Msg> + Send + 'static,
 {
-    if !pagers.start(list, Instant::now()) {
+    // Rate limited: no page is asked for, and none fails for the pager to back off from.
+    if rate_limit::until().is_some() || !pagers.start(list, Instant::now()) {
         return;
     }
     let (api, tx) = (Arc::clone(api), tx.clone());
@@ -431,6 +432,11 @@ fn start(
         // Rows that arrived this iteration; the hide-unplayable setting prunes them
         // once here rather than in each of the arms below.
         let mut fetched = false;
+        // SoundCloud's rate limit, before the results that tripped it: while it holds,
+        // nothing below asks for a page, a search or a stream.
+        if let Some(track) = state.set_rate_limit(rate_limit::until()) {
+            player.play(track, TrackChange::Natural);
+        }
         while let Ok(msg) = rx.try_recv() {
             fetched = true;
             match msg {
@@ -531,12 +537,22 @@ fn start(
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
                 Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
                 Msg::PlaylistEditFailed(why) => state.toast_err(why),
+                // The rate limit has been announced once already. A search it refused is
+                // sent again when it lifts.
+                Msg::FetchFailed(why) if state.rate_limited_until.is_some() => {
+                    if why.starts_with("Search failed") {
+                        state.search_needs_fetch = true;
+                        // Otherwise `search_due` drops it as a repeat of the search just sent.
+                        state.search_last_sent = None;
+                    }
+                }
                 Msg::FetchFailed(why) => state.toast_err(toast::brief_fetch_error(&why)),
                 Msg::PageSettled(list, outcome) => {
                     let first_page = outcome.is_ok() && std::mem::take(&mut data.loading[list as usize]);
                     // One notice per run of failures; the retries after it are silent.
                     let why = outcome.as_ref().err().cloned();
                     if pagers.settled(list, outcome.ok(), Instant::now())
+                        && state.rate_limited_until.is_none()
                         && let Some(why) = why
                     {
                         state.toast_err(toast::brief_fetch_error(&why));
@@ -566,7 +582,7 @@ fn start(
 
         // With "hide unplayable tracks" on, ask about each listed playlist and album once
         // per session, a few at a time, so the ones with nothing playable can be dropped.
-        if state.settings.hide_unplayable && data.containers.probing < CONTAINER_PROBES {
+        if state.settings.hide_unplayable && data.containers.probing < CONTAINER_PROBES && state.rate_limited_until.is_none() {
             let room = CONTAINER_PROBES - data.containers.probing;
             let next: Vec<String> = filtering::containers_to_probe(&data).take(room).map(str::to_string).collect();
             for uri in next {
@@ -823,7 +839,8 @@ fn start(
             }));
         }
 
-        if state.selected_tab == 1 && state.search_due(Instant::now()) {
+        // Rate limited: the query waits, and the latest one is sent once the limit lifts.
+        if state.selected_tab == 1 && state.rate_limited_until.is_none() && state.search_due(Instant::now()) {
             state.search_results_fetch.cancel();
             state.search_playlist_tracks_fetch.cancel();
             state.search_album_tracks_fetch.cancel();
@@ -959,13 +976,18 @@ fn start(
                 MediaCommand::SeekBackward => player.rewind(),
             }
         }
-        if let Some(failure) = player.take_load_failure() {
-            state.toast_err(format!("Couldn't play {}", failure.track.title));
-            // Move on to the next track, unless several in a row have failed
-            // (offline, most likely): then stop instead of emptying the queue.
-            if !failure.give_up {
-                next_track(&mut state, &mut data, &player);
+        match player.take_load_failure() {
+            // Nothing wrong with the track: it starts when the rate limit lifts.
+            Some(failure) if failure.rate_limited => state.held_track = Some(failure.track),
+            Some(failure) => {
+                state.toast_err(format!("Couldn't play {}", failure.track.title));
+                // Move on to the next track, unless several in a row have failed
+                // (offline, most likely): then stop instead of emptying the queue.
+                if !failure.give_up {
+                    next_track(&mut state, &mut data, &player);
+                }
             }
+            None => {}
         }
         {
             let track = player.current_track();

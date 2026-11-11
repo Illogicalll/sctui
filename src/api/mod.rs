@@ -19,6 +19,7 @@ pub use calls::search::{
 };
 pub use models::{Activity, Album, Artist, Playlist, Track};
 pub mod lyrics;
+pub mod rate_limit;
 pub use lyrics::{Lyrics, fetch_lyrics};
 pub(crate) use utils::{MAX_PAGES, format_duration};
 

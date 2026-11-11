@@ -25,7 +25,7 @@ use crate::tui::render::overlays::queue::{draw_up_next, source_name};
 use crate::tui::render::visualizer::{lyrics::draw_lyrics, spectrum::draw_bars};
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
-use crate::tui::render::widgets::player::{glyph, image, ratio, readout, rule};
+use crate::tui::render::widgets::player::{glyph, image, rate_limit_title, ratio, readout, rule};
 use crate::tui::render::widgets::{border_credit, fit, header, hints, put, put_right, text_width};
 
 use super::{take_bottom, take_top, tighten};
@@ -97,7 +97,7 @@ fn draw_panel(
     let muted = Style::new().fg(t.muted);
     let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
     let block = Block::default()
-        .title(Line::styled(" Now playing ", muted))
+        .title(rate_limit_title(state, area.width).unwrap_or_else(|| Line::styled(" Now playing ", muted)))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(dim);
@@ -212,6 +212,27 @@ mod tests {
         let buf = render_buffer(w, h, state, data, views, np);
         let x = w - panel_width(w);
         (0..h).map(|y| (x..w).map(|x| buf[(x, y)].symbol()).collect::<String>()).collect()
+    }
+
+    /// #55: every layout carries the rate-limit notice once, on whichever player it has.
+    #[test]
+    fn every_layout_shows_the_rate_limit_notice_once() {
+        use chrono::TimeZone;
+        let (mut state, mut data, views, np) = fixture();
+        state.rate_limited_until = Some(chrono::Local.with_ymd_and_hms(2100, 1, 1, 14, 32, 10).unwrap());
+        for layout in Layout::ALL {
+            state.settings.layout = layout;
+            // A player box (the panel's, from 110 columns), then the one-line player.
+            for (w, h) in [(160, 40), (100, 24), (100, 12)] {
+                let screen = render_text(w, h, &mut state, &mut data, &views, &np);
+                assert_eq!(screen.matches("Rate limited by SoundCloud · resumes").count(), 1, "{layout:?} {w}x{h}:\n{screen}");
+            }
+        }
+        state.settings.layout = Layout::PlayerPanel;
+        let screen = render_text(110, 30, &mut state, &mut data, &views, &np);
+        let top: String = screen.lines().next().unwrap().chars().skip(71).collect();
+        assert!(top.starts_with("╭ Rate limited by SoundCloud · resum") && top.ends_with('╮'), "{screen}");
+        assert!(!screen.contains("Now playing"), "the notice takes the title's place:\n{screen}");
     }
 
     #[test]

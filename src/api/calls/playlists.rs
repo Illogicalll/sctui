@@ -1,5 +1,7 @@
 use reqwest::blocking::Client;
 
+use crate::api::rate_limit::{SendGated, SendGatedAsync};
+
 use crate::auth::Token;
 
 use super::super::utils::{
@@ -26,7 +28,7 @@ impl API {
     pub fn get_playlists(&mut self) -> anyhow::Result<Vec<Playlist>> {
         let access_token = access_token(&self.token);
         self.next_playlists(|url| {
-            Ok(Client::new().get(url).bearer_auth(&access_token).send()?.error_for_status()?.json()?)
+            Ok(Client::new().get(url).bearer_auth(&access_token).send_gated()?.json()?)
         })
     }
 
@@ -94,9 +96,8 @@ pub async fn has_playable_tracks(token: Arc<Mutex<Token>>, tracks_uri: String) -
     let resp: serde_json::Value = reqwest::Client::new()
         .get(format!("{base}{sep}access=playable&limit=1&linked_partitioning=true"))
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
     Ok(!response_items(&resp).is_empty())

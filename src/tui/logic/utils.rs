@@ -455,6 +455,7 @@ const RADIO_RETRY_DELAY: Duration = Duration::from_secs(3);
 /// ones turned up nothing new, so each fetch drifts a little further from the start.
 pub(crate) fn radio_seed_due(state: &AppState, data: &AppData, now: Instant) -> Option<String> {
     if state.playback_source != PlaybackSource::Radio
+        || state.rate_limited_until.is_some()
         || !state.manual_queue.is_empty()
         || state.auto_queue.len() > 1
         || state.radio_misses >= RADIO_MAX_MISSES
@@ -794,6 +795,17 @@ mod tests {
         state.radio_fetched_for = radio_seed_due(&state, &data, now);
         assert_eq!(state.radio_fetched_for.as_deref(), chain.last().copied());
         (state, data)
+    }
+
+    /// #55: the station asks for nothing while SoundCloud's rate limit is in force.
+    #[test]
+    fn radio_waits_for_the_rate_limit() {
+        let now = Instant::now();
+        let (mut state, data) = station_out_of_tracks(&["a", "b"], now);
+        state.radio_fetched_for = None;
+        assert!(radio_seed_due(&state, &data, now).is_some());
+        state.rate_limited_until = Some(chrono::Local::now());
+        assert_eq!(radio_seed_due(&state, &data, now), None);
     }
 
     /// T9: a failed related-tracks fetch is retried after a pause, and playback starts

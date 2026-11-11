@@ -1,5 +1,7 @@
 use reqwest::blocking::Client;
 
+use crate::api::rate_limit::SendGated;
+
 use super::super::utils::{access_token, format_duration, parse_str, parse_u64};
 use crate::api::{API, Album, Page};
 
@@ -16,8 +18,7 @@ impl API {
         let resp: serde_json::Value = Client::new()
             .get(&url)
             .bearer_auth(&access_token)
-            .send()?
-            .error_for_status()?
+            .send_gated()?
             .json()?;
 
         self.albums_page = Page::from_response(&resp);

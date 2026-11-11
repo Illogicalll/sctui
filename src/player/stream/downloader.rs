@@ -6,6 +6,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use crate::api::rate_limit::{self, SendGated};
 use crate::auth::Token;
 use crate::player::Position;
 use crate::player::stream::cache::SegmentCache;
@@ -53,6 +54,11 @@ pub(crate) struct SegmentPumpParams {
 /// waiting — a dropped connection still recovers on its own. Returns `None`
 /// only when there is nothing left to try: cancelled, out of refreshes, or the
 /// track came back re-segmented (which would misalign the cached indices).
+///
+/// A rate limit is neither of those: retrying is exactly what SoundCloud has
+/// asked not to happen, and a fresh manifest is one more request into the same
+/// limit. While `limited` says one is in force nothing is fetched or refreshed
+/// and nothing counts as a failure; the segment is asked for again once it lifts.
 fn fetch_segment(
     manifest: &mut Arc<HlsManifest>,
     index: usize,
@@ -60,6 +66,7 @@ fn fetch_segment(
     fetch: &mut impl FnMut(&Url) -> anyhow::Result<Vec<u8>>,
     refresh: &mut impl FnMut() -> anyhow::Result<HlsManifest>,
     cancelled: &mut impl FnMut() -> bool,
+    limited: &mut impl FnMut() -> bool,
 ) -> Option<Vec<u8>> {
     let mut failures = 0usize;
     let mut refreshes = 0usize;
@@ -68,8 +75,14 @@ fn fetch_segment(
         if cancelled() {
             return None;
         }
+        if limited() {
+            std::thread::sleep(retry_delay);
+            continue;
+        }
         match fetch(&manifest.segments[index].url) {
             Ok(bytes) => return Some(bytes),
+            // That was the 429 itself.
+            Err(_) if limited() => continue,
             Err(_) => failures += 1,
         }
 
@@ -132,16 +145,10 @@ pub(crate) fn spawn_segment_pump(params: SegmentPumpParams) {
                         &mut manifest,
                         next_index,
                         RETRY_DELAY,
-                        &mut |url| {
-                            Ok(client
-                                .get(url.as_str())
-                                .send()
-                                .and_then(|r| r.error_for_status())
-                                .and_then(|r| r.bytes())?
-                                .to_vec())
-                        },
+                        &mut |url| Ok(client.get(url.as_str()).send_gated()?.bytes()?.to_vec()),
                         &mut || resolve_manifest(&client, &track_urn, &token),
                         &mut || is_cancelled(),
+                        &mut || rate_limit::until().is_some(),
                     );
                     let Some(bytes) = bytes else { break };
                     let arc = Arc::new(bytes);
@@ -209,6 +216,7 @@ mod tests {
                 Ok(manifest("fresh", 4))
             },
             &mut || false,
+            &mut || false,
         );
 
         assert_eq!(bytes.as_deref(), Some(&b"segment"[..]));
@@ -230,6 +238,7 @@ mod tests {
                 refreshes += 1;
                 Ok(manifest("fresh", 4))
             },
+            &mut || false,
             &mut || false,
         );
 
@@ -261,6 +270,7 @@ mod tests {
                 Err(anyhow::anyhow!("dns failure"))
             },
             &mut || false,
+            &mut || false,
         );
 
         assert_eq!(bytes.as_deref(), Some(&b"segment"[..]));
@@ -278,9 +288,48 @@ mod tests {
             &mut |_| Err(anyhow::anyhow!("403 expired")),
             &mut || Ok(manifest("fresh", 7)),
             &mut || false,
+            &mut || false,
         );
         assert!(bytes.is_none());
         assert_eq!(m.segments.len(), 4, "cached segment indices stay as they were");
+    }
+
+    /// #55: a 429 used to be retried twice a second for ever, since the manifest
+    /// refresh failed with a 429 of its own and a failed refresh is free.
+    #[test]
+    fn a_rate_limit_is_waited_out_not_retried_or_refreshed() {
+        let mut m = Arc::new(manifest("signed", 4));
+        // The first fetch is answered 429; the limit lifts 20 checks later.
+        let limited_for = std::cell::Cell::new(0u32);
+        let mut fetches = 0;
+        let mut refreshes = 0;
+
+        let bytes = fetch_segment(
+            &mut m,
+            1,
+            Duration::ZERO,
+            &mut |_| {
+                fetches += 1;
+                if fetches == 1 {
+                    limited_for.set(20);
+                    return Err(anyhow::anyhow!("429"));
+                }
+                Ok(b"segment".to_vec())
+            },
+            &mut || {
+                refreshes += 1;
+                Err(anyhow::anyhow!("429"))
+            },
+            &mut || false,
+            &mut || {
+                limited_for.set(limited_for.get().saturating_sub(1));
+                limited_for.get() > 0
+            },
+        );
+
+        assert_eq!(bytes.as_deref(), Some(&b"segment"[..]), "the track carries on once the limit lifts");
+        assert_eq!(fetches, 2, "the 429 and the one after the limit lifted; none in between");
+        assert_eq!(refreshes, 0, "a fresh manifest would be one more request into the limit");
     }
 
     #[test]
@@ -297,6 +346,7 @@ mod tests {
                 ticks += 1;
                 ticks > 2
             },
+            &mut || false,
         );
         assert!(bytes.is_none());
     }

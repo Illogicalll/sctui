@@ -19,6 +19,7 @@ pub(crate) fn handle_history_input(
     let action = lookup(state, &key);
     match (key.code, action) {
         (KeyCode::Esc, _) | (_, Some(Action::ToggleHistory)) => state.history_visible = false,
+        (KeyCode::Enter, _) if state.stream_held() => {}
         (KeyCode::Enter, _) => {
             // The popup lists newest first; map the row back to the Vec index.
             let idx = last.saturating_sub(state.history_selected);

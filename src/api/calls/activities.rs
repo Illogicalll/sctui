@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use reqwest::blocking::Client;
 
+use crate::api::rate_limit::SendGated;
+
 use super::super::utils::{access_token, parse_datetime, parse_str, parse_track, response_items};
 use crate::api::{API, Activity, Page};
 
@@ -20,8 +22,7 @@ impl API {
         let resp: serde_json::Value = client
             .get(&url)
             .bearer_auth(&access_token)
-            .send()?
-            .error_for_status()?
+            .send_gated()?
             .json()?;
 
         self.feed_page = Page::from_response(&resp);
@@ -37,9 +38,8 @@ impl API {
             let name = client
                 .get(format!("https://api.soundcloud.com/users/{}", urn.replace(':', "%3A")))
                 .bearer_auth(&access_token)
-                .send()
-                .and_then(|r| r.error_for_status())
-                .and_then(|r| r.json::<serde_json::Value>())
+                .send_gated()
+                .and_then(|r| Ok(r.json::<serde_json::Value>()?))
                 .map(|u| parse_str(&u, "username"))
                 .unwrap_or_else(|_| urn.to_string());
             self.user_names.insert(urn.to_string(), name);

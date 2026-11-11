@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use crate::api::rate_limit::SendGatedAsync;
 use crate::auth::Token;
 
 use super::super::utils::{access_token, parse_str, parse_track, response_items};
@@ -21,9 +22,8 @@ pub async fn fetch_related_tracks(
             ("linked_partitioning", "true"),
         ])
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
 
@@ -43,9 +43,8 @@ pub async fn fetch_related_users(
         .get(format!("https://api.soundcloud.com/users/{user_urn}/related"))
         .query(&[("limit", "20"), ("linked_partitioning", "true")])
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .await?
-        .error_for_status()?
         .json()
         .await?;
 

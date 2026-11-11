@@ -4,6 +4,7 @@ use serde::Deserialize;
 use reqwest::Url;
 use std::sync::{Arc, Mutex};
 
+use crate::api::rate_limit::SendGated;
 use crate::auth::{Token, try_refresh_token};
 
 #[derive(Debug, Deserialize)]
@@ -30,10 +31,8 @@ fn hls_playlist_url(
     let streams_response: StreamsResponse = client
         .get(&streams_url)
         .bearer_auth(access_token)
-        .send()
+        .send_gated()
         .context("failed to fetch streams endpoint")?
-        .error_for_status()
-        .context("streams endpoint returned error status")?
         .json()
         .context("failed to parse streams response json")?;
 
@@ -100,10 +99,8 @@ impl HlsManifest {
             let playlist_content = client
                 .get(url.as_str())
                 .bearer_auth(access_token)
-                .send()
+                .send_gated()
                 .with_context(|| format!("failed to fetch playlist {}", url))?
-                .error_for_status()
-                .with_context(|| format!("playlist returned error status {}", url))?
                 .bytes()
                 .with_context(|| format!("failed to read playlist bytes {}", url))?;
 
