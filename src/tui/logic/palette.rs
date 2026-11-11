@@ -17,6 +17,7 @@ pub enum Command {
     /// A built-in theme, by name.
     Theme(&'static str),
     ToggleHints,
+    ToggleCredit,
     ToggleHideUnplayable,
     SetupWizard,
 }
@@ -65,6 +66,8 @@ pub fn items(state: &AppState) -> Vec<(String, String, Command)> {
     );
     let hints = if state.settings.hint_line { "on" } else { "off" };
     out.push(("Hint line: toggle".to_string(), hints.to_string(), Command::ToggleHints));
+    let credit = state.settings.soundcloud_credit.label();
+    out.push(("SoundCloud credit: text / glyph".to_string(), credit.to_string(), Command::ToggleCredit));
     let hiding = if state.settings.hide_unplayable { "on" } else { "off" };
     out.push(("Hide unplayable tracks: toggle".to_string(), hiding.to_string(), Command::ToggleHideUnplayable));
     out.push(("Setup wizard".to_string(), String::new(), Command::SetupWizard));
@@ -141,6 +144,8 @@ mod tests {
         let right = |label: &str| all.iter().find(|i| i.0 == label).unwrap().1.clone();
         assert_eq!((right("Layout: classic"), right("Layout: sidebar")), ("current".to_string(), String::new()));
         assert_eq!(right("Hint line: toggle"), "on");
+        assert_eq!(right("SoundCloud credit: text / glyph"), "text");
+        assert_eq!((right("Open the selection on SoundCloud"), right("Open the currently playing track on SoundCloud")), ("b".to_string(), "B".to_string()));
         assert_eq!(right("Quit"), "q");
         // The hint line's notation, not `Shift+A, Ctrl+P`.
         assert_eq!(right("Play the selected track next"), "A");

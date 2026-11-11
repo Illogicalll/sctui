@@ -26,7 +26,7 @@ use crate::tui::render::visualizer::{lyrics::draw_lyrics, spectrum::draw_bars};
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
 use crate::tui::render::widgets::player::{glyph, image, rate_limit_title, ratio, readout, rule};
-use crate::tui::render::widgets::{fit, header, hints, put, put_right, text_width};
+use crate::tui::render::widgets::{border_credit, fit, header, hints, put, put_right, text_width};
 
 use super::{take_bottom, take_top, tighten};
 
@@ -103,6 +103,7 @@ fn draw_panel(
         .border_style(dim);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    border_credit(frame, area, state);
     if inner.width < 8 || inner.height == 0 {
         return;
     }

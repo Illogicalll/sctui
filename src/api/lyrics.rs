@@ -439,6 +439,7 @@ mod tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: String::new(),
+            permalink_url: String::new(),
         }
     }
 
@@ -609,6 +610,7 @@ mod live_tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: String::new(),
+            permalink_url: String::new(),
         }
     }
 }
@@ -639,6 +641,7 @@ mod eval {
                 artwork_url: String::new(),
                 access: String::new(),
                 track_urn: String::new(),
+                permalink_url: String::new(),
             };
             total += 1;
             match rt.block_on(fetch_lyrics(track)) {

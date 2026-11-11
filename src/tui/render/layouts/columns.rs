@@ -22,7 +22,7 @@ use crate::tui::render::widgets::nav_column::draw_nav_column;
 use crate::tui::render::widgets::pane::{PaneStyle, draw_pane, pane_view};
 use crate::tui::render::widgets::pane_row::visible_window;
 use crate::tui::render::widgets::player::{draw_player, player_size};
-use crate::tui::render::widgets::{fit, header, hints, put, put_right, text_width};
+use crate::tui::render::widgets::{brand_mark, fit, header, hints, put, put_right, text_width};
 
 use super::{take_bottom, take_top};
 
@@ -129,8 +129,9 @@ fn draw_breadcrumb(frame: &mut Frame, area: Rect, state: &AppState, data: &AppDa
     let room = (area.width as usize).saturating_sub(1 + if find_w > 0 { find_w + 2 } else { 0 });
 
     let mut parts: Vec<String> = crumbs(state, data, views).iter().map(|part| fit(part, 24)).collect();
+    let brand = format!(" {}sctui", brand_mark(state));
     let width = |parts: &[String], cut: bool| {
-        " sctui".len() + cut as usize * 4 + parts.iter().map(|p| 3 + text_width(p)).sum::<usize>()
+        text_width(&brand) + cut as usize * 4 + parts.iter().map(|p| 3 + text_width(p)).sum::<usize>()
     };
     let mut cut = false;
     while parts.len() > 1 && width(&parts, cut) > room {
@@ -138,7 +139,7 @@ fn draw_breadcrumb(frame: &mut Frame, area: Rect, state: &AppState, data: &AppDa
         cut = true;
     }
     let dim = Style::new().fg(t.dim);
-    let mut spans = vec![Span::styled(" sctui", Style::new().fg(t.accent).add_modifier(Modifier::BOLD))];
+    let mut spans = vec![Span::styled(brand.clone(), Style::new().fg(t.accent).add_modifier(Modifier::BOLD))];
     if cut {
         spans.push(Span::styled(" › …", dim));
     }

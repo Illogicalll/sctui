@@ -79,9 +79,10 @@ pub fn render(
     // Layouts leave the last row free for the hint line; so does the visualiser.
     let hint_rows = widgets::hints::rows(state, area);
     if state.visualizer_mode {
+        let area = Rect { height: area.height - hint_rows, ..area };
         render_visualizer(
             frame,
-            Rect { height: area.height - hint_rows, ..area },
+            area,
             wave_buffer,
             state.visualizer_view,
             &np.track,
@@ -89,6 +90,7 @@ pub fn render(
             cover,
             &state.lyrics,
         );
+        visualizer::render_credit(frame, area, state.settings.soundcloud_credit);
     } else {
         layouts::draw(frame, state, data, views, np, cover, wave_buffer);
     }

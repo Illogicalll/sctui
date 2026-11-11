@@ -35,7 +35,7 @@ impl API {
 
                 // Most feed reposters are followed users; saves a lookup each in the feed fetch.
                 self.user_names.insert(urn.clone(), name.clone());
-                following.push(Artist { name, urn });
+                following.push(Artist { name, urn, permalink_url: parse_str(artist, "permalink_url") });
             }
         }
 

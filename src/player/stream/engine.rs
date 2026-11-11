@@ -858,6 +858,7 @@ mod tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: urn.into(),
+            permalink_url: String::new(),
         }
     }
 

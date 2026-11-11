@@ -101,6 +101,7 @@ pub(crate) fn parse_activity(item: &serde_json::Value) -> Option<Activity> {
         created_at: parse_datetime(item, "created_at"),
         track,
         key,
+        permalink_url: parse_str(origin, "permalink_url"),
     })
 }
 

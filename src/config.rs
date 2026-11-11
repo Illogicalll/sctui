@@ -104,6 +104,42 @@ fn de_layout<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Layout
     Ok(Layout::from_label(&String::deserialize(deserializer)?).unwrap_or_default())
 }
 
+/// How SoundCloud is credited as the source of what is on screen, which its API terms
+/// ask for. Text is the default: without a Nerd Font the glyph is an empty box, and
+/// that user would have no credit at all.
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Credit {
+    /// `via SoundCloud` on the player's border.
+    #[default]
+    Text,
+    /// The Nerd Font SoundCloud mark beside `sctui`.
+    Glyph,
+}
+
+impl Credit {
+    /// The name in the config file and on the settings page.
+    pub fn label(self) -> &'static str {
+        match self {
+            Credit::Text => "text",
+            Credit::Glyph => "glyph",
+        }
+    }
+
+    /// The other style.
+    pub fn next(self) -> Credit {
+        match self {
+            Credit::Text => Credit::Glyph,
+            Credit::Glyph => Credit::Text,
+        }
+    }
+}
+
+/// As `de_layout`: an unknown style is the default (text), not a failed `[settings]`.
+fn de_credit<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Credit, D::Error> {
+    Ok(if String::deserialize(deserializer)? == "glyph" { Credit::Glyph } else { Credit::Text })
+}
+
 /// Options edited from the settings page of the `?` overlay.
 #[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(default)]
@@ -118,6 +154,8 @@ pub struct Settings {
     pub crossfade_user_skips: bool,
     /// The row of applicable keys along the bottom.
     pub hint_line: bool,
+    #[serde(deserialize_with = "de_credit")]
+    pub soundcloud_credit: Credit,
     /// Sidebar on a wide terminal: show the queue as a column instead of a popup.
     pub dock_queue: bool,
     /// The setup wizard was finished or skipped. Not on the settings page.
@@ -134,6 +172,7 @@ impl Default for Settings {
             crossfade_secs: 5.0,
             crossfade_user_skips: true,
             hint_line: true,
+            soundcloud_credit: Credit::Text,
             dock_queue: false,
             onboarded: false,
         }
@@ -168,13 +207,16 @@ pub enum SettingRow {
     Secs(&'static str, fn(&mut Settings) -> &mut f32),
     /// One of the layouts: left/right cycle through them, Enter or Space goes forward.
     Choice(&'static str, fn(&mut Settings) -> &mut Layout),
+    /// The SoundCloud credit's style: left/right, Enter or Space switch it.
+    Credit(&'static str, fn(&mut Settings) -> &mut Credit),
 }
 
 impl Settings {
     /// The settings page, in display order.
-    pub const ROWS: [SettingRow; 8] = [
+    pub const ROWS: [SettingRow; 9] = [
         SettingRow::Choice("Layout", |s| &mut s.layout),
         SettingRow::Toggle("Hint line", |s| &mut s.hint_line),
+        SettingRow::Credit("SoundCloud credit (glyph needs a Nerd Font)", |s| &mut s.soundcloud_credit),
         SettingRow::Toggle("Dock the queue (Sidebar, wide terminals)", |s| &mut s.dock_queue),
         SettingRow::Toggle("Hide unplayable tracks", |s| &mut s.hide_unplayable),
         SettingRow::Toggle("Hide feed tab", |s| &mut s.hide_feed_tab),
@@ -219,7 +261,8 @@ impl SettingRow {
             SettingRow::Toggle(label, _)
             | SettingRow::CrossfadeToggle(label, _)
             | SettingRow::Secs(label, _)
-            | SettingRow::Choice(label, _) => label,
+            | SettingRow::Choice(label, _)
+            | SettingRow::Credit(label, _) => label,
         }
     }
 
@@ -242,6 +285,7 @@ impl SettingRow {
                 (format!("{:.1}s", field(&mut settings)), settings.crossfade)
             }
             SettingRow::Choice(_, field) => (format!("‹ {} ›", field(&mut settings).label()), true),
+            SettingRow::Credit(_, field) => (format!("‹ {} ›", field(&mut settings).label()), true),
         }
     }
 }
@@ -386,7 +430,7 @@ pub fn template() -> String {
     out.push_str(".\n# [theme.colors] overrides single roles with \"#rrggbb\" or a colour name: ");
     out.push_str(&theme::ROLES.join(", "));
     out.push_str(".\n[theme]\nname = \"default\"\n# [theme.colors]\n# accent = \"#7aa2f7\"\n\n");
-    out.push_str("# Options also editable in the app (? then Tab). layout is one of classic, tighten, sidebar,\n# columns, player-panel. crossfade_secs is 0.5-12, in half-second steps.\n[settings]\n");
+    out.push_str("# Options also editable in the app (? then Tab). layout is one of classic, tighten, sidebar,\n# columns, player-panel. crossfade_secs is 0.5-12, in half-second steps. soundcloud_credit is text\n# or glyph (the glyph needs a Nerd Font).\n[settings]\n");
     out.push_str(&settings_section(&Settings::default()));
     out.push_str("\n# Equaliser gains in dB, one per band (60Hz 230Hz 910Hz 3kHz 8kHz 16kHz),\n");
     out.push_str("# -12 to +12. Also editable in the app (? then Tab twice).\n[eq]\n");
@@ -441,6 +485,7 @@ mod tests {
         assert!(file.settings.crossfade_user_skips);
         assert!(file.settings.hint_line);
         assert_eq!(file.settings.layout, Layout::Classic);
+        assert_eq!(file.settings.soundcloud_credit, Credit::Text);
         assert_eq!(file.eq.gains, [0; 6]);
     }
 
@@ -464,6 +509,7 @@ mod tests {
                 }
                 SettingRow::Secs(_, field) => *field(&mut settings) = 9.5,
                 SettingRow::Choice(_, field) => *field(&mut settings) = Layout::Columns,
+                SettingRow::Credit(_, field) => *field(&mut settings) = Credit::Glyph,
             }
         }
         let text = format!("[settings]\n{}", settings_section(&settings));
@@ -473,6 +519,20 @@ mod tests {
         assert!(file.settings.crossfade);
         assert_eq!(file.settings.crossfade_secs, 9.5);
         assert!(file.settings.crossfade_user_skips);
+        assert_eq!(file.settings.soundcloud_credit, Credit::Glyph);
+        assert!(text.contains("soundcloud_credit = \"glyph\"\n"), "{text}");
+    }
+
+    /// The credit is text unless the file says glyph: a config from before the option
+    /// existed, or a misspelt style, still credits SoundCloud and still loads.
+    #[test]
+    fn soundcloud_credit_defaults_to_text() {
+        assert_eq!(load_from("[settings]\nhide_feed_tab = true\n").settings.soundcloud_credit, Credit::Text);
+        assert_eq!(load_from("[settings]\nsoundcloud_credit = \"glyph\"\n").settings.soundcloud_credit, Credit::Glyph);
+        let odd = load_from("[settings]\nsoundcloud_credit = \"logo\"\ncrossfade = true\n");
+        assert_eq!(odd.settings.soundcloud_credit, Credit::Text);
+        assert!(odd.settings.crossfade && !odd.load_failed);
+        assert_eq!(Credit::Text.next().next(), Credit::Text);
     }
 
     /// A config file written before crossfading existed has neither key, so the

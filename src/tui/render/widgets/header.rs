@@ -12,7 +12,7 @@ use crate::keymap::Action;
 use crate::theme;
 use crate::tui::logic::state::{AppData, AppState, SEARCHFILTERS, SUBTAB_TITLES, visible_tabs};
 
-use super::{fit, put, put_right, text_width};
+use super::{brand_mark, fit, put, put_right, text_width};
 
 /// Rows the compact header takes.
 pub const ROWS: u16 = 2;
@@ -35,7 +35,7 @@ pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &App
         return 0;
     }
 
-    let mut spans = vec![Span::styled(" sctui", accent), Span::styled(" │", dim)];
+    let mut spans = vec![Span::styled(format!(" {}sctui", brand_mark(state)), accent), Span::styled(" │", dim)];
     let tab_keys = [Action::TabLibrary, Action::TabSearch, Action::TabFeed];
     for (i, title) in visible_tabs(state).iter().enumerate() {
         spans.push(Span::raw("  "));

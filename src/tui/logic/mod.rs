@@ -1,3 +1,4 @@
+mod art_cache;
 pub(crate) mod filtering;
 mod input;
 pub(crate) mod nav;
@@ -69,12 +70,13 @@ enum AppEvent {
 
 /// Where a track's artwork bytes are cached for the OS media panel. souvlaki on
 /// macOS loads the cover with `NSImage` and aborts the process if that returns
-/// nil, which remote URLs do intermittently; a local file never does.
+/// nil, which remote URLs do intermittently; a local file never does. The file
+/// goes in this run's own directory, which is deleted on exit (`art_cache`).
 fn artwork_cache_path(url: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     url.hash(&mut h);
-    std::env::temp_dir().join(format!("sctui-art-{:016x}.img", h.finish()))
+    art_cache::run_dir(&std::env::temp_dir()).join(format!("sctui-art-{:016x}.img", h.finish()))
 }
 
 /// Results of background fetches, folded into the app state at the top of each loop pass.
@@ -127,6 +129,10 @@ enum Msg {
 
 pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded, setup: bool) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
+    // Cover art is cached for this session only: clear what crashed runs left behind,
+    // and drop this run's directory however `run` is left.
+    art_cache::sweep(&std::env::temp_dir());
+    let _art_dir = art_cache::RunDir::create(&std::env::temp_dir());
     let terminal = ratatui::init();
     // Lets terminals that speak the kitty keyboard protocol report Shift+Enter; others still
     // send a plain Enter (S covers them).
@@ -534,7 +540,11 @@ fn start(
                 // The rate limit has been announced once already. A search it refused is
                 // sent again when it lifts.
                 Msg::FetchFailed(why) if state.rate_limited_until.is_some() => {
-                    state.search_needs_fetch |= why.starts_with("Search failed");
+                    if why.starts_with("Search failed") {
+                        state.search_needs_fetch = true;
+                        // Otherwise `search_due` drops it as a repeat of the search just sent.
+                        state.search_last_sent = None;
+                    }
                 }
                 Msg::FetchFailed(why) => state.toast_err(toast::brief_fetch_error(&why)),
                 Msg::PageSettled(list, outcome) => {
@@ -830,7 +840,7 @@ fn start(
         }
 
         // Rate limited: the query waits, and the latest one is sent once the limit lifts.
-        if state.selected_tab == 1 && state.search_needs_fetch && state.rate_limited_until.is_none() {
+        if state.selected_tab == 1 && state.rate_limited_until.is_none() && state.search_due(Instant::now()) {
             state.search_results_fetch.cancel();
             state.search_playlist_tracks_fetch.cancel();
             state.search_album_tracks_fetch.cancel();

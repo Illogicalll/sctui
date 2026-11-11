@@ -650,6 +650,7 @@ mod tests {
             artwork_url: String::new(),
             access: access.to_string(),
             track_urn: urn.to_string(),
+            permalink_url: String::new(),
         }
     }
 
@@ -884,7 +885,7 @@ mod tests {
     fn starting_a_track_station_drops_a_pending_artist_station() {
         use crate::api::Artist;
         let (mut state, mut data) = likes_playing(&["a", "b"], 0);
-        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() });
+        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into(), permalink_url: String::new() });
         let in_flight = state.artist_station_fetch.request_id;
         start_station(&mut state, &mut data, tracks(&["s"]));
         assert!(state.artist_station_request.is_none());

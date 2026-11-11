@@ -301,6 +301,7 @@ mod tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: "soundcloud:tracks:1".to_string(),
+            permalink_url: String::new(),
         }
     }
 
@@ -344,6 +345,72 @@ mod tests {
         state.queue_visible = true;
         press(&mut state, &mut data, KeyCode::Esc, KeyModifiers::NONE);
         assert!(!state.queue_visible && !state.quit_confirm_visible);
+    }
+
+    #[test]
+    fn search_requests_are_debounced_and_never_repeated() {
+        use crate::tui::logic::state::SEARCH_DEBOUNCE;
+        use std::time::Duration;
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        nav::set_location(&mut state, 1, None);
+        commands::run_command(Action::Search, &mut state, &mut data);
+        // What the main loop asks on every pass, `ms` after the last edit of the query.
+        let due = |state: &mut AppState, ms: u64| {
+            let edited = state.search_edited_at.unwrap_or_else(std::time::Instant::now);
+            state.search_due(edited + Duration::from_millis(ms))
+        };
+        let quiet = SEARCH_DEBOUNCE.as_millis() as u64;
+
+        // Several edits inside the window: nothing goes out until the query has sat
+        // unedited for the whole of it, and then one request does, with no further key.
+        for c in ['l', 'o', 'f', 'i'] {
+            ch(&mut state, &mut data, c);
+            assert!(!due(&mut state, quiet - 1), "sent while still typing {c:?}");
+        }
+        assert!(due(&mut state, quiet));
+        assert_eq!(state.search_last_sent, Some((0, "lofi".to_string())));
+        assert!(!due(&mut state, quiet + 1000), "one request per pause");
+
+        // Enter sends what is pending without waiting.
+        ch(&mut state, &mut data, 'x');
+        press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(due(&mut state, 0));
+        // ...and sends nothing when the query is the one already sent.
+        commands::run_command(Action::Search, &mut state, &mut data);
+        press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!due(&mut state, 0));
+
+        // Edited and put back, or only padded: still the search that was sent.
+        commands::run_command(Action::Search, &mut state, &mut data);
+        ch(&mut state, &mut data, 'y');
+        press(&mut state, &mut data, KeyCode::Backspace, KeyModifiers::NONE);
+        ch(&mut state, &mut data, ' ');
+        assert!(!due(&mut state, quiet));
+
+        // A change of search type sends at once, replacing an edit still waiting: one request.
+        ch(&mut state, &mut data, 'z');
+        press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
+        state.search_edited_at = Some(std::time::Instant::now());
+        nav::set_location(&mut state, 1, Some(1));
+        assert!(due(&mut state, 0));
+        assert_eq!(state.search_last_sent, Some((1, "lofix z".to_string())));
+        assert!(!due(&mut state, quiet), "the debounced edit must not send a second one");
+        // There and back before the loop runs: the same type and query as last time.
+        nav::set_location(&mut state, 1, Some(0));
+        nav::set_location(&mut state, 1, Some(1));
+        assert!(!due(&mut state, 0));
+        // Back on the first type its results are gone, so that one is sent.
+        nav::set_location(&mut state, 1, Some(0));
+        assert!(due(&mut state, 0));
+
+        // An emptied query is passed to the loop once (it clears the lists and sends
+        // nothing, see the dispatch site); spaces are the same empty query.
+        commands::run_command(Action::Search, &mut state, &mut data);
+        press(&mut state, &mut data, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert!(due(&mut state, quiet));
+        ch(&mut state, &mut data, ' ');
+        assert!(!due(&mut state, quiet));
     }
 
     #[test]
