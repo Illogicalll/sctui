@@ -465,12 +465,9 @@ pub struct AppState {
     pub selected_row: usize,
     /// Focused pane index per location, `[main tab][sub-tab]`. Read through `nav::focus`.
     pub focus: [[usize; 4]; 3],
-    /// The navigation column (Sidebar, Columns) has focus instead of a pane. Read it
+    /// The navigation column (Columns) has focus instead of a pane. Read it
     /// through `nav::in_nav`, which also checks the layout has one.
     pub nav_focused: bool,
-    /// On Library › Playlists, the navigation column's cursor is on the `Playlists`
-    /// entry itself rather than on the selected playlist beneath it.
-    pub nav_on_header: bool,
     /// Where each child pane's cursor was for each parent item it has shown (playlist
     /// or album `tracks_uri`, user urn, feed key). Written by `FetchTask::refetch`.
     pub child_cursors: HashMap<(PaneId, String), usize>,

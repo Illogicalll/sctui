@@ -21,7 +21,7 @@ use crate::tui::render::NowPlaying;
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
 use crate::tui::render::widgets::player::{draw_player, player_size};
-use crate::tui::render::widgets::{brand_mark, header, hints};
+use crate::tui::render::widgets::{BRAND_MARK, header, hints};
 
 use super::{take_bottom, take_top};
 
@@ -84,7 +84,7 @@ pub fn draw(
     if frame.area().height < ROWS_BOXED {
         header::draw_compact(frame, take_top(&mut rest, 2), state, data);
     } else {
-        let mark = Span::styled(brand_mark(state), Style::new().fg(theme::current().accent));
+        let mark = Span::styled(BRAND_MARK, Style::new().fg(theme::current().accent));
         let title = Line::from(vec![mark, Span::styled("sctui", Style::new().add_modifier(Modifier::BOLD))]);
         let block = Block::default().title(title).title_alignment(Alignment::Center).borders(Borders::ALL).border_type(BorderType::Rounded);
         let titles = visible_tabs(state).iter().map(|t| Span::raw(*t));

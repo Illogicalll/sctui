@@ -12,13 +12,12 @@ use ratatui::{
 use ratatui_image::{Resize, StatefulImage, thread::ThreadProtocol};
 
 use crate::api::{Track, format_duration};
-use crate::config::Credit;
 use crate::theme;
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::active_tracks;
 use crate::tui::render::NowPlaying;
 
-use super::{border_credit, fit, put, text_width};
+use super::{fit, put, text_width};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PlayerSize {
@@ -117,14 +116,22 @@ pub fn draw_player(
     }
 }
 
-/// Draw the cover image in `rect`; nothing without one.
+/// Draw the cover image in the middle of `rect`; nothing without one. The image keeps
+/// its shape, so it seldom fills the slot exactly, and would otherwise sit top-left.
 pub fn image(frame: &mut Frame, rect: Rect, cover: Option<&mut ThreadProtocol>) {
     let rect = rect.intersection(frame.area());
     if let Some(cover) = cover
         && !rect.is_empty()
     {
+        let rect = cover.size_for(Resize::Scale(None), rect).map_or(rect, |size| centred(rect, size.width, size.height));
         frame.render_stateful_widget(StatefulImage::new().resize(Resize::Scale(None)), rect, cover);
     }
+}
+
+/// A `width` by `height` rect in the middle of `slot`, never larger than it.
+fn centred(slot: Rect, width: u16, height: u16) -> Rect {
+    let (width, height) = (width.min(slot.width), height.min(slot.height));
+    Rect::new(slot.x + (slot.width - width) / 2, slot.y + (slot.height - height) / 2, width, height)
 }
 
 /// Volume runs 0.0 to 2.0 in steps of 0.1.
@@ -171,7 +178,6 @@ fn classic7(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying, co
     }
     let inner = block.inner(mid);
     frame.render_widget(block, mid);
-    border_credit(frame, mid, state);
     if inner.width < 4 || inner.height < 5 {
         return;
     }
@@ -181,7 +187,7 @@ fn classic7(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying, co
         image(frame, Rect::new(left, inner.y, 12, inner.height), cover);
         left += 12 + 3;
     }
-    // `shf / vol / rep`, bottom-right.
+    // `shf / vol / rep`, right, centred on the box's middle row.
     const READOUT: u16 = 9;
     let mut right = inner.right().saturating_sub(1);
     if inner.width >= READOUT + 14 {
@@ -194,7 +200,7 @@ fn classic7(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying, co
         let x = right - READOUT;
         for (i, text) in lines.into_iter().enumerate() {
             let line = Line::styled(text, Style::new().add_modifier(Modifier::BOLD)).right_aligned();
-            put(frame, Rect::new(x, inner.y + 2 + i as u16, READOUT, 1), line);
+            put(frame, Rect::new(x, inner.y + (inner.height - 3) / 2 + i as u16, READOUT, 1), line);
         }
         right = x.saturating_sub(2);
     }
@@ -238,13 +244,14 @@ fn bar4(
     }
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    border_credit(frame, area, state);
     if inner.width < 6 || inner.height == 0 {
         return;
     }
     let mut left = inner.x + 1;
     if area.width >= 70 {
-        image(frame, Rect::new(inner.x, inner.y, 5, inner.height.min(2)), cover);
+        // One cell in from the border, like the text's right edge; two rows of a square
+        // cover are about four cells wide.
+        image(frame, Rect::new(inner.x + 1, inner.y, 4, inner.height.min(2)), cover);
         left = inner.x + 7;
     }
     let right = inner.right() - 1;
@@ -308,10 +315,6 @@ fn line1(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying) {
             volume_percent(np)
         ));
     }
-    // No box to carry the credit on its border: it ends the line instead.
-    if state.settings.soundcloud_credit == Credit::Text {
-        tail.push_str(" · SoundCloud");
-    }
     let tail_w = text_width(&tail) as u16;
     let rule_w = if area.width >= 70 { area.width / 5 } else { 0 };
     let right = area.right().saturating_sub(1);
@@ -347,6 +350,16 @@ fn line1(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cover_sits_in_the_middle_of_its_slot() {
+        let slot = Rect::new(10, 4, 12, 5);
+        assert_eq!(centred(slot, 10, 5), Rect::new(11, 4, 10, 5));
+        assert_eq!(centred(slot, 4, 2), Rect::new(14, 5, 4, 2));
+        // An odd gap leaves the spare cell on the right / below; never outside the slot.
+        assert_eq!(centred(slot, 9, 4), Rect::new(11, 4, 9, 4));
+        assert_eq!(centred(slot, 40, 40), slot);
+    }
     use crate::tui::render::testkit::{draw_buffer, fixture, text};
 
     #[test]

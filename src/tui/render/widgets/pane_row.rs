@@ -27,15 +27,15 @@ pub fn max_panes(width: u16) -> usize {
 }
 
 /// Which of `n` panes to show when at most `max` fit: a half-open range that always
-/// holds `focus`, never starts before `first`, and prefers to show the focused
-/// pane's child (the pane to its right) over its parent.
-pub fn visible_window(n: usize, focus: usize, first: usize, max: usize) -> (usize, usize) {
+/// holds `focus` and prefers to show the focused pane's child (the pane to its
+/// right) over its parent.
+pub fn visible_window(n: usize, focus: usize, max: usize) -> (usize, usize) {
     let max = max.max(1);
-    if n.saturating_sub(first) <= max {
-        return (first.min(n), n);
+    if n <= max {
+        return (0, n);
     }
     let child = (focus + 1 < n && max > 1) as usize;
-    let start = (focus + child).saturating_sub(max - 1).max(first).min(n - max);
+    let start = (focus + child).saturating_sub(max - 1).min(n - max);
     (start, start + max)
 }
 
@@ -59,10 +59,9 @@ pub fn draw_pane_row(
     }
     let panes = nav::panes(state);
     let focus = nav::focus(state);
-    // Sidebar lists the playlists itself, and no pane is lit while its column has focus.
-    let first = nav::first_pane(state);
+    // No pane is lit while the navigation column has focus.
     let lit = !nav::in_nav(state);
-    let (a, b) = visible_window(panes.len(), focus, first, max_panes(area.width));
+    let (a, b) = visible_window(panes.len(), focus, max_panes(area.width));
     let weight = |i: usize| {
         weights.and_then(|w| w.get(i).copied()).unwrap_or(match panes[i].kind() {
             PaneKind::Tracks => 23,
@@ -82,7 +81,7 @@ pub fn draw_pane_row(
         // Name what is off-screen on the bottom border, clear of the counter.
         let bottom = area.bottom() - 1;
         let mut left_end = rect.x + 1;
-        if i == a && a > first && rect.height >= 3 {
+        if i == a && a > 0 && rect.height >= 3 {
             let label = format!("‹ {}", fit(&pane_view(panes[a - 1], state, data, views).0, 10));
             let w = (text_width(&label) as u16).min(rect.width.saturating_sub(4));
             put(frame, Rect::new(rect.x + 2, bottom, w, 1), Line::styled(label, dim));
@@ -109,28 +108,21 @@ mod tests {
     #[test]
     fn visible_window_cases() {
         // Everything fits.
-        assert_eq!(visible_window(3, 0, 0, 3), (0, 3));
-        assert_eq!(visible_window(2, 1, 0, 3), (0, 2));
-        assert_eq!(visible_window(1, 0, 0, 1), (0, 1));
+        assert_eq!(visible_window(3, 0, 3), (0, 3));
+        assert_eq!(visible_window(2, 1, 3), (0, 2));
+        assert_eq!(visible_window(1, 0, 1), (0, 1));
         // Two of three: the focused pane and, when it has one, its child.
-        assert_eq!(visible_window(3, 0, 0, 2), (0, 2));
-        assert_eq!(visible_window(3, 1, 0, 2), (1, 3));
-        assert_eq!(visible_window(3, 2, 0, 2), (1, 3));
+        assert_eq!(visible_window(3, 0, 2), (0, 2));
+        assert_eq!(visible_window(3, 1, 2), (1, 3));
+        assert_eq!(visible_window(3, 2, 2), (1, 3));
         // One at a time: the focused pane.
-        assert_eq!(visible_window(3, 0, 0, 1), (0, 1));
-        assert_eq!(visible_window(3, 1, 0, 1), (1, 2));
-        assert_eq!(visible_window(3, 2, 0, 1), (2, 3));
-        assert_eq!(visible_window(2, 1, 0, 1), (1, 2));
-        // A layout that draws the first pane elsewhere (Sidebar's playlists) starts at 1.
-        assert_eq!(visible_window(2, 1, 1, 1), (1, 2));
-        assert_eq!(visible_window(2, 1, 1, 3), (1, 2));
-        assert_eq!(visible_window(3, 1, 1, 1), (1, 2));
-        assert_eq!(visible_window(3, 2, 1, 1), (2, 3));
-        assert_eq!(visible_window(4, 1, 1, 2), (1, 3));
+        assert_eq!(visible_window(3, 0, 1), (0, 1));
+        assert_eq!(visible_window(3, 1, 1), (1, 2));
+        assert_eq!(visible_window(3, 2, 1), (2, 3));
+        assert_eq!(visible_window(2, 1, 1), (1, 2));
         // Degenerate input is clamped, never a panic.
-        assert_eq!(visible_window(0, 0, 0, 3), (0, 0));
-        assert_eq!(visible_window(3, 1, 0, 0), (1, 2));
-        assert_eq!(visible_window(2, 0, 5, 1), (2, 2));
+        assert_eq!(visible_window(0, 0, 3), (0, 0));
+        assert_eq!(visible_window(3, 1, 0), (1, 2));
     }
 
     /// Draw Library › Following's pane row alone at `width`, with pane `focus` focused.

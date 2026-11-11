@@ -58,16 +58,22 @@ pub(crate) fn run(command: Command, state: &mut AppState) {
             state.settings.hint_line = !state.settings.hint_line;
             format!("Hint line {}", if state.settings.hint_line { "on" } else { "off" })
         }
-        Command::ToggleCredit => {
-            state.settings.soundcloud_credit = state.settings.soundcloud_credit.next();
-            format!("SoundCloud credit: {}", state.settings.soundcloud_credit.label())
-        }
         Command::ToggleHideUnplayable => {
             // The loop notices the change and filters the lists.
             state.settings.hide_unplayable = !state.settings.hide_unplayable;
             format!("Hide unplayable tracks {}", if state.settings.hide_unplayable { "on" } else { "off" })
         }
         Command::SetupWizard => return crate::tui::logic::wizard::start(state),
+        Command::Help(page) => {
+            state.help_visible = true;
+            state.help_page = page;
+            state.help_selected = 0;
+            state.help_settings_selected = 0;
+            state.help_eq_selected = 0;
+            state.help_capture = None;
+            state.help_message = None;
+            return;
+        }
     };
     match crate::config::save(
         state.config_load_failed,

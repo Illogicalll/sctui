@@ -3,7 +3,6 @@
 pub mod classic;
 pub mod columns;
 pub mod panel;
-pub mod sidebar;
 pub mod tighten;
 
 use std::collections::VecDeque;
@@ -31,7 +30,6 @@ pub fn draw(
     match state.settings.layout {
         Layout::Classic => classic::draw(frame, state, data, views, np, cover),
         Layout::Tighten => tighten::draw(frame, state, data, views, np, cover),
-        Layout::Sidebar => sidebar::draw(frame, state, data, views, np, cover),
         Layout::Columns => columns::draw(frame, state, data, views, np, cover),
         Layout::PlayerPanel => panel::draw(frame, state, data, views, np, cover, wave),
     }

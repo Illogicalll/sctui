@@ -12,8 +12,7 @@ use crate::tui::logic::state::AppState;
 use crate::tui::render::widgets::{fit, put, put_right, text_width};
 
 /// The command palette: the query on the first row, then the matching commands, each
-/// with its keys (or `current` / `on`) at the right. Near the top of the screen, so
-/// the list grows downwards from where the user is typing.
+/// with its keys (or `current` / `on`) at the right. In the middle of the screen.
 pub fn render_palette(frame: &mut Frame, state: &AppState, palette: &PaletteState) {
     let t = theme::current();
     let screen = frame.area();
@@ -22,12 +21,7 @@ pub fn render_palette(frame: &mut Frame, state: &AppState, palette: &PaletteStat
     if width < 6 || height < 3 {
         return;
     }
-    let area = Rect {
-        x: screen.x + (screen.width - width) / 2,
-        y: screen.y + 2.min(screen.height - height),
-        width,
-        height,
-    };
+    let area = super::utils::centered_rect_fixed(width, height, screen);
     crate::tui::render::widgets::clear(frame, area);
     let accent = Style::new().fg(t.accent).add_modifier(Modifier::BOLD);
     let dim = Style::new().fg(t.dim);

@@ -90,7 +90,7 @@ pub fn render(
             cover,
             &state.lyrics,
         );
-        visualizer::render_credit(frame, area, state.settings.soundcloud_credit);
+        visualizer::render_credit(frame, area);
     } else {
         layouts::draw(frame, state, data, views, np, cover, wave_buffer);
     }

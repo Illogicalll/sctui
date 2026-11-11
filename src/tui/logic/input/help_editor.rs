@@ -141,7 +141,7 @@ fn handle_settings_input(
                 apply_settings(state, data, player);
                 let on = if value { "on" } else { "off" };
                 state.help_message = Some(saved(state, format!("{label}: {on}")));
-            } else if let SettingRow::Choice(..) | SettingRow::Credit(..) = row {
+            } else if let SettingRow::Choice(..) = row {
                 adjust(row, state, data, player, 1);
             }
         }
@@ -178,11 +178,6 @@ fn adjust(row: SettingRow, state: &mut AppState, data: &mut AppData, player: &Pl
 /// Move a choice row one option back (`steps` < 0) or forward, wrapping; the message
 /// names what it is now. `None` for any other kind of row.
 fn cycle(row: SettingRow, settings: &mut Settings, steps: i8) -> Option<String> {
-    if let SettingRow::Credit(_, field) = row {
-        let credit = field(settings);
-        *credit = credit.next();
-        return Some(format!("SoundCloud credit: {}", credit.label()));
-    }
     let SettingRow::Choice(label, field) = row else { return None };
     let layout = field(settings);
     *layout = if steps < 0 { layout.prev() } else { layout.next() };
@@ -369,22 +364,16 @@ mod tests {
         let row = *Settings::ROWS.iter().find(|r| r.label() == "Layout").expect("a Layout row");
         let mut settings = Settings::default();
         assert_eq!(row.display(settings), ("‹ classic ›".to_string(), true));
-        // Right (and Enter / Space) goes forward through all five and wraps; Left goes back.
-        let seen: Vec<Layout> = (0..5).map(|_| { cycle(row, &mut settings, 1); settings.layout }).collect();
-        assert_eq!(seen, [Layout::Tighten, Layout::Sidebar, Layout::Columns, Layout::PlayerPanel, Layout::Classic]);
+        // Right (and Enter / Space) goes forward through all four and wraps; Left goes back.
+        let seen: Vec<Layout> = (0..4).map(|_| { cycle(row, &mut settings, 1); settings.layout }).collect();
+        assert_eq!(seen, [Layout::Tighten, Layout::Columns, Layout::PlayerPanel, Layout::Classic]);
         assert_eq!(cycle(row, &mut settings, -1).as_deref(), Some("Layout: player-panel"));
         assert_eq!(settings.layout, Layout::PlayerPanel);
         assert_eq!(row.display(settings).0, "‹ player-panel ›");
         // Only a choice row cycles; the others keep their own keys.
-        for other in Settings::ROWS.iter().filter(|r| !matches!(r, SettingRow::Choice(..) | SettingRow::Credit(..))) {
+        for other in Settings::ROWS.iter().filter(|r| !matches!(r, SettingRow::Choice(..))) {
             assert_eq!(cycle(*other, &mut settings, 1), None);
         }
-        // The credit row switches between its two styles either way.
-        let row = *Settings::ROWS.iter().find(|r| matches!(r, SettingRow::Credit(..))).expect("a credit row");
-        assert_eq!(row.display(settings).0, "‹ text ›");
-        assert_eq!(cycle(row, &mut settings, 1).as_deref(), Some("SoundCloud credit: glyph"));
-        assert_eq!(cycle(row, &mut settings, -1).as_deref(), Some("SoundCloud credit: text"));
-        assert!(Settings::ROWS.iter().any(|r| r.label().starts_with("Dock the queue")));
         assert!(!Settings::ROWS.iter().any(|r| r.label().to_lowercase().contains("onboard")));
     }
 

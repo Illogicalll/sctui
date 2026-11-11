@@ -117,14 +117,13 @@ Run it again any time with `sctui --setup`, or `Setup wizard` in the command pal
 <details>
 <summary><b>Layouts</b></summary>
 
-Five layouts over the same panes, keys and player. Pick one in the wizard, on the Settings page of the `?` popup, or from the command palette (`Layout: sidebar`, ...). The choice is saved.
+Four layouts over the same panes, keys and player. Pick one in the wizard, on the Settings page of the `?` popup, or from the command palette (`Layout: columns`, ...). The choice is saved.
 
 | Layout | What it looks like |
 |---|---|
 | `classic` | The original look: boxed tabs and sub-tabs, 7-row player bar with the sine wave |
 | `tighten` | Two header rows, then as many list rows as fit, and a 4-row player bar |
-| `sidebar` | Library sections and your playlists in a column on the left; optional docked queue on wide terminals |
-| `columns` | Miller columns with a breadcrumb: `[` steps out, `]` or `Enter` steps in; a track card on very wide terminals |
+| `columns` | Miller columns with a breadcrumb: `[` steps out, `]` or `Enter` steps in |
 | `player-panel` | Lists on the left, a permanent player on the right that pages between Up next, Lyrics, Spectrum and History (`o`) |
 
 Every layout adapts to the terminal: panes drop from three to two to one as the width shrinks (reach the hidden ones with `[` `]`), track columns drop, the player bar shrinks to one line, and below 36×8 sctui just says the terminal is too small. Existing installs stay on `classic` until you change it; new installs that skip the wizard get `tighten`.
@@ -176,7 +175,7 @@ While you type (a filter, a search, the palette, a playlist name) every key type
 
 **Hint line.** The bottom row lists the keys that apply to whatever has focus, read from your own bindings, and shows a half-typed sequence (`g …`) at the right. Turn it off on the Settings page or with `Hint line: toggle` in the palette.
 
-**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle, the SoundCloud credit style and the setup wizard. Type a few letters (`lay sb` finds `Layout: sidebar`), `Enter` runs the highlighted one.
+**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle, the SoundCloud credit style and the setup wizard. Type a few letters (`lay col` finds `Layout: columns`), `Enter` runs the highlighted one.
 
 **Notices.** Likes, queue additions, playlist edits, shuffle / repeat and failures show for a few seconds in the top-right corner, and the playing track is marked `▶` (`⏸` when paused) in every list.
 
@@ -193,19 +192,17 @@ Press `t` to pick a colour theme with a live preview: `default`, `tokyonight`, `
 
 ### Settings
 
-`?` then `Tab` opens the Settings page (layout, hint line, SoundCloud credit, docked queue, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. In the file they are under `[settings]`:
+`?` then `Tab` opens the Settings page (layout, hint line, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. In the file they are under `[settings]`:
 
 ```toml
 [settings]
-layout = "tighten"      # classic, tighten, sidebar, columns, player-panel
+layout = "tighten"      # classic, tighten, columns, player-panel
 hint_line = true
-soundcloud_credit = "text"   # text, or glyph (needs a Nerd Font)
-dock_queue = false      # sidebar layout, 120+ columns: show the queue as a column
 ```
 
 An unknown layout name falls back to `classic` with a warning at startup.
 
-Everything sctui plays and lists comes from SoundCloud, and its API terms ask apps to say so. `soundcloud_credit = "text"` (the default) shows `via SoundCloud` on the player's border; `"glyph"` shows the SoundCloud mark (Nerd Font U+F1BE) beside `sctui` instead. Use the glyph only with a Nerd Font: without one it is an empty box. `b` opens any track, playlist, album or person on soundcloud.com.
+Everything sctui plays and lists comes from SoundCloud, and its API terms ask apps to say so: the SoundCloud mark (Nerd Font U+F1BE) sits beside `sctui` in every layout. It needs a Nerd Font, or a terminal that falls back to one; without it the mark is an empty box. `b` opens any track, playlist, album or person on soundcloud.com.
 
 ### Keybindings
 

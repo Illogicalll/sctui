@@ -127,7 +127,6 @@ fn layout_list(frame: &mut Frame, selected: usize) {
         let what = match layout {
             Layout::Classic => "the original look",
             Layout::Tighten => "less chrome, more rows",
-            Layout::Sidebar => "sections and playlists on the left",
             Layout::Columns => "Miller columns you step through",
             Layout::PlayerPanel => "a permanent player on the right",
         };
@@ -221,7 +220,7 @@ fn card(state: &AppState) -> Option<Card> {
 
 /// Bottom-right, above the hint line, the player bar and the border (with its position
 /// counter) of whatever is there: over the last rows of the rightmost pane (or of the
-/// Player panel / track card), never over a whole pane.
+/// Player panel), never over a whole pane.
 fn card_area(state: &AppState, screen: Rect) -> Rect {
     let layout = state.settings.layout;
     let player = match layout {

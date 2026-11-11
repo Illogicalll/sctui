@@ -93,7 +93,7 @@ pub fn pairs(state: &AppState, data: &AppData, cols: u16) -> Vec<(String, &'stat
         let id = nav::focused(state);
         let mut out = Vec::new();
         // `[` also reaches the navigation column where there is one.
-        if nav::panes(state).len() - nav::first_pane(state) > 1 || nav::has_nav(state.settings.layout) {
+        if nav::panes(state).len() > 1 || nav::has_nav(state.settings.layout) {
             // Columns reads as a path: `[` steps out of a column, `]` into the next.
             let what = if state.settings.layout == Layout::Columns { "out / in" } else { "pane" };
             out.push(two(Action::PaneLeft, Action::PaneRight, what));
@@ -130,8 +130,6 @@ pub fn pairs(state: &AppState, data: &AppData, cols: u16) -> Vec<(String, &'stat
             }
         }
         match state.selected_tab {
-            // Sidebar's column is how its Library sections are reached.
-            0 if state.settings.layout == Layout::Sidebar => out.push(k(Action::Search, "filter")),
             0 => out.extend([sides("sub-tab"), k(Action::Search, "filter")]),
             1 => out.extend([sides("sub-tab"), k(Action::Search, "search")]),
             _ => {}
@@ -223,18 +221,12 @@ mod tests {
         assert_eq!(described(&state, &data), ["pane", "open", "commands", "keys"]);
 
         // A navigation column is one more thing `[` reaches, so the pane keys show even
-        // with one pane; Sidebar's Library has no sub-tab row to step through.
+        // with one pane. Columns: they step out of and into a column.
         go(&mut state, &mut data, 0, 0, 0);
-        state.settings.layout = Layout::Sidebar;
-        assert_eq!(described(&state, &data), ["pane", "play", "queue", "next", "like", "playlist", "station", "filter", "commands", "keys"]);
-        go(&mut state, &mut data, 1, 0, 0);
-        assert_eq!(described(&state, &data)[6..], ["station", "sub-tab", "search", "commands", "keys"]);
-        // The column itself: move, open, and the two ways to everything else.
-        state.nav_focused = true;
-        assert_eq!(described(&state, &data), ["move", "open", "commands", "keys"]);
-        // Columns: the pane keys step out of and into a column.
-        (state.settings.layout, state.nav_focused) = (Layout::Columns, false);
+        state.settings.layout = Layout::Columns;
+        assert_eq!(described(&state, &data), ["out / in", "play", "queue", "next", "like", "playlist", "station", "sub-tab", "filter", "commands", "keys"]);
         assert_eq!(pairs(&state, &data, u16::MAX)[0], ("[ ]".to_string(), "out / in"));
+        // The column itself: move, open, and the two ways to everything else.
         state.nav_focused = true;
         assert_eq!(described(&state, &data), ["move", "open", "commands", "keys"]);
         state.settings.layout = Layout::Classic;

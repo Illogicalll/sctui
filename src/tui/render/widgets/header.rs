@@ -12,7 +12,7 @@ use crate::keymap::Action;
 use crate::theme;
 use crate::tui::logic::state::{AppData, AppState, SEARCHFILTERS, SUBTAB_TITLES, visible_tabs};
 
-use super::{brand_mark, fit, put, put_right, text_width};
+use super::{BRAND_MARK, fit, put, put_right, text_width};
 
 /// Rows the compact header takes.
 pub const ROWS: u16 = 2;
@@ -35,7 +35,7 @@ pub fn draw_compact(frame: &mut Frame, area: Rect, state: &AppState, _data: &App
         return 0;
     }
 
-    let mut spans = vec![Span::styled(format!(" {}sctui", brand_mark(state)), accent), Span::styled(" │", dim)];
+    let mut spans = vec![Span::styled(format!(" {}sctui", BRAND_MARK), accent), Span::styled(" │", dim)];
     let tab_keys = [Action::TabLibrary, Action::TabSearch, Action::TabFeed];
     for (i, title) in visible_tabs(state).iter().enumerate() {
         spans.push(Span::raw("  "));
@@ -79,8 +79,7 @@ pub fn find_text(state: &AppState) -> (String, Style) {
 }
 
 /// The header's second row on its own, in the one-row `area`: the sub-tabs (search
-/// types on Search) as pills and the filter or search query right-aligned. Sidebar
-/// draws it above the panes on Search.
+/// types on Search) as pills and the filter or search query right-aligned.
 pub fn draw_subtabs(frame: &mut Frame, area: Rect, state: &AppState) {
     let t = theme::current();
     let (titles, selected): (&[&str], usize) = match state.selected_tab {
@@ -123,23 +122,23 @@ mod tests {
         let (mut state, mut data, ..) = fixture();
         go(&mut state, &mut data, 0, 1, 0);
         let (lines, buf) = header(120, &state, &data);
-        assert!(lines[0].starts_with(" sctui │  1 Library  2 Search  3 Feed") && lines[0].ends_with(": commands   ? keys"), "{lines:?}");
+        assert!(lines[0].starts_with(" \u{f1be} sctui │  1 Library  2 Search  3 Feed") && lines[0].ends_with(": commands   ? keys"), "{lines:?}");
         assert_eq!(lines[1], "  Likes   Playlists   Albums   Following");
         // The selected sub-tab is the filled pill; the selected main tab is accented.
         let x = lines[1].find("Playlists").unwrap() as u16;
         let t = theme::current();
         assert!(buf[(x, 1)].modifier.contains(Modifier::REVERSED) && !buf[(2, 1)].modifier.contains(Modifier::REVERSED));
-        assert_eq!((buf[(12, 0)].fg, buf[(23, 0)].fg), (t.accent, t.fg));
+        assert_eq!((buf[(14, 0)].fg, buf[(25, 0)].fg), (t.accent, t.fg));
 
         // Narrower: no help key, then no tab numbers. The keys are the live ones.
-        assert_eq!(header(89, &state, &data).0[0], " sctui │  1 Library  2 Search  3 Feed");
-        assert_eq!(header(69, &state, &data).0[0], " sctui │  Library  Search  Feed");
+        assert_eq!(header(89, &state, &data).0[0], " \u{f1be} sctui │  1 Library  2 Search  3 Feed");
+        assert_eq!(header(69, &state, &data).0[0], " \u{f1be} sctui │  Library  Search  Feed");
         state.keymap.apply_toml("[keys]\ntab_search = \"F2\"\ntab_feed = []\npalette = []\n");
         let wide = &header(120, &state, &data).0[0];
         assert!(wide.ends_with("  ? keys") && !wide.contains("commands"), "an unbound key is not advertised: {wide:?}");
-        assert_eq!(header(89, &state, &data).0[0], " sctui │  1 Library  f2 Search  Feed");
+        assert_eq!(header(89, &state, &data).0[0], " \u{f1be} sctui │  1 Library  f2 Search  Feed");
         state.settings.hide_feed_tab = true;
-        assert_eq!(header(89, &state, &data).0[0], " sctui │  1 Library  f2 Search");
+        assert_eq!(header(89, &state, &data).0[0], " \u{f1be} sctui │  1 Library  f2 Search");
 
         // A kept Library filter and the Search query sit at the right of row 1.
         (state.search_popup_visible, state.search_query) = (true, "listed".into());
@@ -152,7 +151,7 @@ mod tests {
         assert!(lines[1].starts_with("  Tracks   Albums   Playlists   People") && lines[1].ends_with("/ found"), "{lines:?}");
         // One row of room draws one row; none draws nothing.
         let buf = draw_buffer(80, 1, |f| assert_eq!(draw_compact(f, f.area(), &state, &data), 1));
-        assert!(text(&buf).starts_with(" sctui │"));
+        assert!(text(&buf).starts_with(" \u{f1be} sctui │"));
         draw_buffer(80, 2, |f| assert_eq!(draw_compact(f, Rect::new(0, 0, 80, 0), &state, &data), 0));
     }
 }

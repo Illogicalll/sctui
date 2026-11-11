@@ -9,7 +9,6 @@ use ratatui::text::{Line, Span};
 use ratatui_image::thread::ThreadProtocol;
 
 use crate::api::Track;
-use crate::config::Credit;
 use crate::tui::logic::state::{LyricsStatus, VisualizerMode};
 use crate::tui::render::widgets::{SOUNDCLOUD_GLYPH, put};
 
@@ -71,17 +70,14 @@ pub fn render_visualizer(
 }
 
 /// The SoundCloud credit in the frame's top border, where every mode has `sctui`:
-/// `sctui · via SoundCloud`, or the mark in front of `sctui` in the glyph style. The
+/// the mark in front of `sctui`. The
 /// player and the headers that carry it elsewhere are hidden while the visualiser is up.
-pub fn render_credit(frame: &mut Frame, area: Rect, credit: Credit) {
+pub fn render_credit(frame: &mut Frame, area: Rect) {
     if area.width < 4 || area.height == 0 {
         return;
     }
     let t = theme::current();
-    let line = match credit {
-        Credit::Text => Line::from(vec![Span::raw("sctui"), Span::styled(" · via SoundCloud", Style::new().fg(t.dim))]),
-        Credit::Glyph => Line::from(vec![Span::styled(SOUNDCLOUD_GLYPH, Style::new().fg(t.accent)), Span::raw(" sctui")]),
-    };
+    let line = Line::from(vec![Span::styled(SOUNDCLOUD_GLYPH, Style::new().fg(t.accent)), Span::raw(" sctui")]);
     // Centred like the block's own title, which is shorter and ends up underneath.
     put(frame, Rect { x: area.x + 1, y: area.y, width: area.width - 2, height: 1 }, line.centered());
 }
