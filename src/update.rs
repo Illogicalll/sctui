@@ -179,7 +179,7 @@ fn make_staging_dir(base: &Path) -> io::Result<PathBuf> {
 }
 
 /// `mkdir` with mode 0700; fails if anything already exists at `dir`.
-fn create_private_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
