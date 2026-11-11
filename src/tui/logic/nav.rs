@@ -466,6 +466,7 @@ pub fn set_location(state: &mut AppState, tab: usize, sub: Option<usize>) {
     } else if tab == 1 && state.selected_searchfilter != sub {
         state.selected_searchfilter = sub;
         state.search_needs_fetch = true;
+        state.search_edited_at = None;
         reset_search(state);
     }
     state.selected_row = state.primary_rows[tab][sub];

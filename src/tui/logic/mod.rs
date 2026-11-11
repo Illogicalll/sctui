@@ -817,7 +817,7 @@ fn start(
             }));
         }
 
-        if state.selected_tab == 1 && state.search_needs_fetch {
+        if state.selected_tab == 1 && state.search_due(Instant::now()) {
             state.search_results_fetch.cancel();
             state.search_playlist_tracks_fetch.cancel();
             state.search_album_tracks_fetch.cancel();

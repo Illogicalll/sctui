@@ -483,6 +483,11 @@ pub struct AppState {
     pub query: String,
     pub selected_searchfilter: usize,
     pub search_needs_fetch: bool,
+    /// When the query was last edited: its search waits for [`SEARCH_DEBOUNCE`] of quiet.
+    /// `None` (Enter, a change of search type) sends at once.
+    pub search_edited_at: Option<Instant>,
+    /// Search type and trimmed query of the last search dispatched, so it is not sent twice.
+    pub search_last_sent: Option<(usize, String)>,
     pub info_pane_selected: bool,
     pub selected_info_row: usize,
     pub selected_playlist_track_row: usize,
@@ -617,8 +622,28 @@ pub struct AppState {
 
 /// How many tracks the listening history keeps; the oldest are dropped first.
 pub const HISTORY_CAP: usize = 500;
+/// How long the Search query must go unedited before its request is sent.
+pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
 impl AppState {
+    /// Whether the main loop should dispatch a search at `now`. Not while the query was
+    /// edited less than [`SEARCH_DEBOUNCE`] ago, and never for the search (type and
+    /// trimmed query) that was dispatched last.
+    pub fn search_due(&mut self, now: Instant) -> bool {
+        let typing = self.search_edited_at.is_some_and(|at| now.duration_since(at) < SEARCH_DEBOUNCE);
+        if !self.search_needs_fetch || typing {
+            return false;
+        }
+        self.search_needs_fetch = false;
+        self.search_edited_at = None;
+        let search = (self.selected_searchfilter, self.query.trim().to_string());
+        if self.search_last_sent.as_ref() == Some(&search) {
+            return false;
+        }
+        self.search_last_sent = Some(search);
+        true
+    }
+
     /// Record a track that has stopped being the one playing. History replays a track on
     /// its own, never the list it came from, so the entry's copy of that list is dropped
     /// rather than kept once per track heard.
