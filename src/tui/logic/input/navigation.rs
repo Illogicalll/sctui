@@ -40,7 +40,7 @@ pub(crate) fn handle_next_track(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
-    if state.current_playing_index.is_some() {
+    if state.current_playing_index.is_some() && !state.stream_held() {
         if state.manual_queue.is_empty() && state.auto_queue.is_empty() {
             rebuild_auto_queue(state, data);
         }
@@ -57,6 +57,7 @@ pub(crate) fn handle_prev_track(
     player: &Player,
 ) -> InputOutcome {
     if state.current_playing_index.is_some()
+        && !state.stream_held()
         && let Some(prev) = state.playback_history.pop() {
             if let Some(current) = crate::tui::logic::utils::queued_from_current(state, data) {
                 let mut current = current;

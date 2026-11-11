@@ -3,6 +3,7 @@ use crate::api::Lyrics;
 use crate::keymap::Keymap;
 use super::nav::PaneId;
 use crate::theme::{Overrides, Theme};
+use chrono::{DateTime, Local};
 use ratatui::widgets::TableState;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -567,6 +568,11 @@ pub struct AppState {
     /// Notices on screen, oldest first. Added with `toast` / `toast_err`; the loop
     /// drops each when its time is up.
     pub toasts: Vec<super::toast::Toast>,
+    /// When SoundCloud's rate limit lifts, while one is in force: the loop copies it in
+    /// from `api::rate_limit` on every pass. Nothing is requested before then.
+    pub rate_limited_until: Option<DateTime<Local>>,
+    /// The track the rate limit kept from starting; it starts when the limit lifts.
+    pub held_track: Option<Track>,
     /// `config::Loaded::load_failed`: saving the config is refused while set.
     pub config_load_failed: bool,
     /// Insert mode: keys type into the Search query (Search tab) or the Library
@@ -635,6 +641,38 @@ impl AppState {
     pub fn cancel_artist_station(&mut self) {
         self.artist_station_request = None;
         self.artist_station_fetch.cancel();
+    }
+
+    /// Take in the rate limit as it now stands, with one toast when it starts and one
+    /// when it lifts. Returns the track that was waiting on it, once it can start.
+    pub fn set_rate_limit(&mut self, until: Option<DateTime<Local>>) -> Option<Track> {
+        match (self.rate_limited_until, until) {
+            (None, Some(at)) => self.toast_err(format!("Rate limited by SoundCloud until {}", at.format("%H:%M:%S"))),
+            (Some(_), None) => self.toast("Rate limit lifted"),
+            _ => {}
+        }
+        self.rate_limited_until = until;
+        if until.is_some() { None } else { self.held_track.take() }
+    }
+
+    /// Whether a new stream has to wait for the rate limit, saying so if it does. Asked
+    /// by the keys that would start one: nothing is sent, and what is playing carries on.
+    pub fn stream_held(&mut self) -> bool {
+        let Some(at) = self.rate_limited_until else { return false };
+        self.toast_err(format!("Rate limited · next track starts {}", at.format("%H:%M:%S")));
+        true
+    }
+
+    /// What the player says while rate limited, with the time left as of `now`.
+    pub fn rate_limit_notice(&self, now: DateTime<Local>) -> Option<String> {
+        let until = self.rate_limited_until?;
+        let left = (until - now).num_seconds().max(0);
+        Some(format!(
+            "Rate limited by SoundCloud · resumes {} ({}:{:02})",
+            until.format("%H:%M:%S"),
+            left / 60,
+            left % 60
+        ))
     }
 }
 
@@ -776,6 +814,37 @@ pub fn visible_tabs(state: &AppState) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #55: one toast when the rate limit starts and one when it lifts, however many
+    /// loop passes come between; a key that would start a stream gets a toast and a
+    /// refusal; the track the limit held is handed back when it lifts.
+    #[test]
+    fn the_rate_limit_is_announced_once_each_way_and_holds_new_streams() {
+        use chrono::TimeZone;
+        let mut state = AppState::default();
+        let until = Local.with_ymd_and_hms(2026, 9, 4, 14, 32, 10).unwrap();
+        let said = |state: &AppState| state.toasts.iter().map(|t| t.msg.clone()).collect::<Vec<_>>();
+
+        assert!(state.set_rate_limit(None).is_none() && !state.stream_held());
+        assert!(state.toasts.is_empty() && state.rate_limit_notice(until).is_none());
+
+        state.held_track = Some(crate::tui::render::testkit::track(7, "Held"));
+        for _ in 0..3 {
+            assert!(state.set_rate_limit(Some(until)).is_none(), "held for as long as the limit is");
+        }
+        assert_eq!(said(&state), ["Rate limited by SoundCloud until 14:32:10"]);
+        assert!(state.stream_held() && state.stream_held());
+        assert_eq!(said(&state)[1..], ["Rate limited · next track starts 14:32:10"], "said once, then renewed");
+
+        let notice = |secs_before| state.rate_limit_notice(until - chrono::Duration::seconds(secs_before)).unwrap();
+        assert_eq!(notice(135), "Rate limited by SoundCloud · resumes 14:32:10 (2:15)");
+        assert_eq!(notice(3_725), "Rate limited by SoundCloud · resumes 14:32:10 (62:05)");
+        assert_eq!(notice(-4), "Rate limited by SoundCloud · resumes 14:32:10 (0:00)");
+
+        assert_eq!(state.set_rate_limit(None).map(|t| t.title), Some("Held".to_string()), "starts at T");
+        assert!(state.set_rate_limit(None).is_none() && !state.stream_held());
+        assert_eq!(said(&state)[2..], ["Rate limit lifted"]);
+    }
 
     /// T11: a refused like or follow is taken back and reported, not left looking done.
     #[test]

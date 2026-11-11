@@ -10,6 +10,7 @@ use serde_json::json;
 use super::super::utils::{access_token, parse_next_href, parse_str, response_items};
 use super::playlists::parse_playlist;
 use crate::api::Playlist;
+use crate::api::rate_limit::SendGatedAsync;
 use crate::auth::Token;
 
 fn playlist_url(playlist_id: u64) -> String {
@@ -36,9 +37,8 @@ async fn fetch_all_track_urns(
         let resp: serde_json::Value = client
             .get(&url)
             .bearer_auth(&access)
-            .send()
+            .send_gated()
             .await?
-            .error_for_status()?
             .json()
             .await?;
         urns.extend(response_items(&resp).iter().map(|v| parse_str(v, "urn")));
@@ -71,9 +71,8 @@ async fn put_tracks(
         .put(playlist_url(playlist_id))
         .bearer_auth(access_token(token))
         .json(&body)
-        .send()
-        .await?
-        .error_for_status()
+        .send_gated()
+        .await
         .context("updating playlist tracks")?;
     Ok(())
 }
@@ -115,9 +114,8 @@ pub async fn create_playlist(
         .post("https://api.soundcloud.com/playlists")
         .bearer_auth(access_token(&token))
         .json(&body)
-        .send()
-        .await?
-        .error_for_status()
+        .send_gated()
+        .await
         .context("creating playlist")?
         .json()
         .await?;
@@ -128,9 +126,8 @@ pub async fn delete_playlist(token: Arc<Mutex<Token>>, playlist_id: u64) -> anyh
     reqwest::Client::new()
         .delete(playlist_url(playlist_id))
         .bearer_auth(access_token(&token))
-        .send()
-        .await?
-        .error_for_status()
+        .send_gated()
+        .await
         .context("deleting playlist")?;
     Ok(())
 }

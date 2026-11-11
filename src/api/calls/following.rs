@@ -1,5 +1,7 @@
 use reqwest::blocking::Client;
 
+use crate::api::rate_limit::SendGated;
+
 use crate::auth::Token;
 
 use super::super::utils::{access_token, fetch_tracks, parse_str};
@@ -19,8 +21,7 @@ impl API {
         let resp: serde_json::Value = Client::new()
             .get(&url)
             .bearer_auth(&access_token)
-            .send()?
-            .error_for_status()?
+            .send_gated()?
             .json()?;
 
         self.following_page = Page::from_response(&resp);

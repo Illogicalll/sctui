@@ -23,6 +23,9 @@ pub(crate) fn handle_enter(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
+    if state.stream_held() {
+        return InputOutcome::Continue;
+    }
     if state.selected_tab == 1 {
         handle_search_enter(state, data, player);
     } else if state.selected_tab == 0 && state.selected_subtab == 0 {
@@ -47,6 +50,9 @@ pub(crate) fn handle_station(
     data: &mut AppData,
     player: &Player,
 ) -> InputOutcome {
+    if state.stream_held() {
+        return InputOutcome::Continue;
+    }
     if let Some(artist) = focused_artist(state, data) {
         state.toast(format!("Starting station from {}", artist.name));
         state.artist_station_request = Some(artist);

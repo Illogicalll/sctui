@@ -1,5 +1,6 @@
 //! The player readout in its three sizes: Classic's 7-row bar, a 4-row bar, one line.
 
+use chrono::Local;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -74,6 +75,14 @@ pub fn rule(width: u16, ratio: f64) -> Line<'static> {
         Span::styled("━".repeat(done), Style::new().fg(t.accent)),
         Span::styled("─".repeat(width as usize - done), Style::new().fg(t.dim)),
     ])
+}
+
+/// The rate-limit notice as the title of a player box `width` wide, for the left of its
+/// top border; `None` while there is no limit.
+pub fn rate_limit_title(state: &AppState, width: u16) -> Option<Line<'static>> {
+    let notice = state.rate_limit_notice(Local::now())?;
+    let style = Style::new().fg(theme::current().warning).add_modifier(Modifier::BOLD);
+    Some(Line::styled(format!(" {} ", fit(&notice, width.saturating_sub(4) as usize)), style))
 }
 
 /// The track that plays after this one: the manual queue first, then the list.
@@ -155,7 +164,10 @@ fn classic7(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying, co
     }
 
     let mid = Rect { x: area.x + side, width: area.width - 2 * side, ..area };
-    let block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded);
+    let mut block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded);
+    if let Some(title) = rate_limit_title(state, mid.width) {
+        block = block.title(title);
+    }
     let inner = block.inner(mid);
     frame.render_widget(block, mid);
     if inner.width < 4 || inner.height < 5 {
@@ -215,10 +227,13 @@ fn bar4(
     cover: Option<&mut ThreadProtocol>,
 ) {
     let t = theme::current();
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(t.dim));
+    if let Some(title) = rate_limit_title(state, area.width) {
+        block = block.title(title);
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width < 6 || inner.height == 0 {
@@ -294,14 +309,18 @@ fn line1(frame: &mut Frame, area: Rect, state: &AppState, np: &NowPlaying) {
     let rule_w = if area.width >= 70 { area.width / 5 } else { 0 };
     let right = area.right().saturating_sub(1);
     let text_w = area.width.saturating_sub(4 + tail_w + rule_w + 2);
-    let text = fit(&format!("{} · {}", np.track.title, np.track.artists), text_w as usize);
+    // No box to carry the rate-limit notice here: it takes the title's place.
+    let notice = state.rate_limit_notice(Local::now());
+    let colour = if notice.is_some() { t.warning } else { t.fg };
+    let text = notice.unwrap_or_else(|| format!("{} · {}", np.track.title, np.track.artists));
+    let text = fit(&text, text_w as usize);
     put(
         frame,
         Rect::new(area.x + 1, area.y, 2 + text_w, 1),
         Line::from(vec![
             Span::styled(glyph(np), Style::new().fg(t.accent).add_modifier(Modifier::BOLD)),
             Span::raw(" "),
-            Span::styled(text, Style::new().fg(t.fg).add_modifier(Modifier::BOLD)),
+            Span::styled(text, Style::new().fg(colour).add_modifier(Modifier::BOLD)),
         ]),
     );
     if rule_w > 0 {
@@ -368,5 +387,42 @@ mod tests {
         let classic = |w: u16| text(&draw_buffer(w, 7, |f| draw_player(f, f.area(), PlayerSize::Classic7, &state, &data, &np, None)));
         assert!(classic(89).starts_with('╭'), "{}", classic(89));
         assert!(!classic(90).starts_with('╭'), "{}", classic(90));
+    }
+
+    /// #55: while rate limited, both boxes say so at the left of their top border and
+    /// the one-line player says so in place of the title, in the warning colour.
+    #[test]
+    fn every_size_says_when_the_rate_limit_lifts() {
+        use chrono::TimeZone;
+        let (mut state, data, _, np) = fixture();
+        let draw = |state: &AppState, size: PlayerSize, width: u16| {
+            draw_buffer(width, size.height(), |f| draw_player(f, f.area(), size, state, &data, &np, None))
+        };
+        let sizes = [PlayerSize::Classic7, PlayerSize::Bar4, PlayerSize::Line1];
+        for size in sizes {
+            assert!(!text(&draw(&state, size, 80)).contains("Rate limited"), "{size:?}");
+        }
+
+        state.rate_limited_until = Some(Local.with_ymd_and_hms(2100, 1, 1, 14, 32, 10).unwrap());
+        const NOTICE: &str = "Rate limited by SoundCloud · resumes 14:32:10 (";
+        for size in sizes {
+            // Under 90 columns Classic's box starts at the left edge; the one-line
+            // player needs more room for the whole notice.
+            let buf = draw(&state, size, if size == PlayerSize::Line1 { 160 } else { 88 });
+            let screen = text(&buf);
+            let top = screen.lines().next().unwrap();
+            let at = top.chars().position(|c| c == 'R').unwrap_or_else(|| panic!("{size:?}:\n{screen}")) as u16;
+            assert_eq!(buf[(at, 0)].fg, theme::current().warning, "{size:?}");
+            if size == PlayerSize::Line1 {
+                assert!(top.contains(NOTICE) && !screen.contains(&np.track.title), "{screen}");
+            } else {
+                assert!(top.starts_with(&format!("╭ {NOTICE}")), "{size:?}:\n{screen}");
+                assert!(screen.contains(&np.track.title), "the box still shows the track:\n{screen}");
+            }
+        }
+        // Too narrow for all of it: cut, never spilling over the corner.
+        let narrow = text(&draw(&state, PlayerSize::Bar4, 40));
+        let top = narrow.lines().next().unwrap();
+        assert!(top.starts_with("╭ Rate limited by SoundCloud") && top.contains('…') && top.ends_with('╮'), "{narrow}");
     }
 }

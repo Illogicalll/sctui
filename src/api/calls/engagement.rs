@@ -1,6 +1,7 @@
 use reqwest::Method;
 
 use super::super::utils::access_token;
+use crate::api::rate_limit::SendGatedAsync;
 use crate::auth::Token;
 use std::sync::{Arc, Mutex};
 
@@ -16,9 +17,8 @@ pub(crate) async fn engage(
     reqwest::Client::new()
         .request(method, url)
         .bearer_auth(access_token)
-        .send()
-        .await?
-        .error_for_status()?;
+        .send_gated()
+        .await?;
 
     Ok(())
 }

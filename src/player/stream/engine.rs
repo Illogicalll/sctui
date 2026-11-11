@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use reqwest::Url;
 
 use crate::api::Track;
+use crate::api::rate_limit::{RateLimited, SendGated};
 use crate::auth::Token;
 use crate::player::Position;
 use crate::player::commands::{PlayerCommand, TrackChange};
@@ -68,6 +69,9 @@ pub struct LoadFailure {
     /// Too many tracks in a row have failed (offline, most likely): stop
     /// skipping ahead rather than run through the whole queue.
     pub give_up: bool,
+    /// SoundCloud's rate limit is why: nothing is wrong with the track, which
+    /// can be started once the limit lifts.
+    pub rate_limited: bool,
 }
 
 /// What the player thread shares with [`crate::player::Player`] and with the
@@ -191,10 +195,8 @@ pub(crate) fn crossfade_applies(crossfade_ms: u64, on_user_skips: bool, change: 
 fn download_bytes(client: &reqwest::blocking::Client, url: &Url) -> anyhow::Result<Vec<u8>> {
     let bytes = client
         .get(url.as_str())
-        .send()
+        .send_gated()
         .with_context(|| format!("failed to download {}", url))?
-        .error_for_status()
-        .with_context(|| format!("download returned error status {}", url))?
         .bytes()
         .with_context(|| format!("failed to read bytes {}", url))?;
     Ok(bytes.to_vec())
@@ -528,8 +530,8 @@ impl PlaybackEngine {
                 Err(e)
             }
         };
-        if started.is_err() {
-            self.abort_switch(pending);
+        if let Err(e) = started {
+            self.abort_switch(pending, e.downcast_ref::<RateLimited>().is_some());
         }
     }
 
@@ -655,8 +657,10 @@ impl PlaybackEngine {
     /// playing — a crossfade only stops it once its replacement is running — so
     /// stop it, report the player as idle, and tell the TUI which track failed
     /// so it can say so and move on. A failed fast-forward or rewind changed
-    /// nothing, so it leaves the track that is playing alone.
-    fn abort_switch(&mut self, pending: Pending) {
+    /// nothing, so it leaves the track that is playing alone. A track held
+    /// back by the rate limit is no sign of being offline, so it does not
+    /// count towards giving up.
+    fn abort_switch(&mut self, pending: Pending, rate_limited: bool) {
         if pending.user_seek {
             return;
         }
@@ -667,10 +671,11 @@ impl PlaybackEngine {
         self.shared.is_playing.store(false, Ordering::SeqCst);
         self.shared.position.lock().unwrap().stop(Instant::now());
 
-        self.consecutive_failures += 1;
+        self.consecutive_failures += !rate_limited as u32;
         *self.shared.load_failure.lock().unwrap() = Some(LoadFailure {
             track: pending.track,
             give_up: self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES,
+            rate_limited,
         });
     }
 }
@@ -1073,6 +1078,23 @@ mod tests {
         play(&mut engine, "d", 0, TrackChange::UserSkip);
         fail(&mut engine, "e", 0, TrackChange::UserSkip);
         assert!(!engine.shared.load_failure.lock().unwrap().take().unwrap().give_up);
+    }
+
+    /// #55: a 429 is reported as such, so the TUI holds the track for when the
+    /// limit lifts instead of skipping on, and it never counts towards giving up.
+    #[test]
+    fn a_rate_limited_track_is_reported_as_held_not_as_broken() {
+        let (mut engine, _output, _rx) = engine();
+        for urn in ["a", "b", "c", "d"] {
+            let seq = engine.begin(track(urn), 0, TrackChange::Natural);
+            let refused = anyhow::Error::from(RateLimited { until: chrono::Utc::now() });
+            engine.settle(seq, Err(refused.context("failed to fetch streams endpoint")));
+            let failure = engine.shared.load_failure.lock().unwrap().take().expect("reported");
+            assert!(failure.rate_limited && !failure.give_up, "{urn}");
+        }
+        fail(&mut engine, "e", 0, TrackChange::Natural);
+        let failure = engine.shared.load_failure.lock().unwrap().take().unwrap();
+        assert!(!failure.rate_limited && !failure.give_up);
     }
 
     #[test]

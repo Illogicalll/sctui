@@ -2,6 +2,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use std::sync::{Arc, Mutex};
 
 use super::models::Track;
+use crate::api::rate_limit::SendGatedAsync;
 use crate::auth::{Token, try_refresh_token};
 
 /// Refreshes the token if needed and returns a clone of the current access token.
@@ -141,7 +142,7 @@ pub(crate) async fn fetch_tracks(
     let client = reqwest::Client::new();
     let items = collect_pages(url, max_pages, |url| {
         let request = client.get(url).bearer_auth(&access_token);
-        async move { Ok(request.send().await?.error_for_status()?.json().await?) }
+        async move { Ok(request.send_gated().await?.json().await?) }
     })
     .await?;
     Ok(items.iter().map(parse_track).collect())
