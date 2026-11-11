@@ -2,7 +2,7 @@
 
 a soundcloud client for the terminal
 
-![demo](./media/playing_demo.png)
+<p align="center"><img src="./media/readme/demo.gif" alt="Browsing the library, stepping into a playlist and opening the visualiser" width="820" /></p>
 
 ## Installation
 
@@ -63,47 +63,76 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center">Browse your own Likes, Playlists and Saved Albums as well as the Tracks and Likes of the People you follow</p>
 
-<p align="center"><img src="./media/browse.png" alt="Browse" width="480" /></p>
+<p align="center"><img src="./media/readme/browse.png" alt="Browsing playlists" width="720" /></p>
 
 <p align="center">Search for Tracks, Albums and Playlists to add to your library, as well as new People to follow</p>
 
-<p align="center"><img src="./media/search_feature.png" alt="Search" width="480" /></p>
+<p align="center"><img src="./media/readme/search.png" alt="Search" width="720" /></p>
 
 <p align="center">View the activity of everyone you follow to stay up to date with their latest releases or reposts</p>
 
-<p align="center"><img src="./media/feed_feature.png" alt="Feed" width="480" /></p>
+<p align="center"><img src="./media/readme/feed.png" alt="Feed" width="720" /></p>
 
-### 🔊 Gapless Playback
+### 🪟 Four Layouts
 
-<p align="center">Enjoy seamless transitions in your favourite albums without the buffering present on SoundCloud Web</p>
+<p align="center">The same panes, keys and player in four arrangements. Switch at any time from the command palette or the Settings page</p>
+
+<table>
+  <tr>
+    <td align="center"><img src="./media/readme/layout-columns.png" alt="Columns layout" /><br /><code>columns</code></td>
+    <td align="center"><img src="./media/readme/layout-player-panel.png" alt="Player panel layout" /><br /><code>player-panel</code></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="./media/readme/layout-tighten.png" alt="Tighten layout" /><br /><code>tighten</code></td>
+    <td align="center"><img src="./media/readme/layout-classic.png" alt="Classic layout" /><br /><code>classic</code></td>
+  </tr>
+</table>
+
+### 🔊 Gapless Playback and Crossfade
+
+<p align="center">Enjoy seamless transitions in your favourite albums without the buffering present on SoundCloud Web, or turn on crossfade to blend each track into the next</p>
 
 ### 📻 Stations
 
-<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing `S` (or Shift + Enter) on any track or artist will start a queue of related tracks</p>
+<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing <code>S</code> (or Shift + Enter) on any track or artist will start a queue of related tracks</p>
 
 ### 🎛️ Native Media Integration
 
-<p align="center">The current track shows in your system's media panel with artwork and a live position. The play/pause/ skip buttons on your keyboard, headphones integrate directly</p>
+<p align="center">The current track shows in your system's media panel with artwork and a live position. The play / pause / skip buttons on your keyboard and headphones work directly</p>
 
 ### 🎤 Lyrics
 
-<p align="center">Where available, live lyrics can be displayed in the visualiser (sourced from <a href="https://lrclib.net">LRCLIB</a>)</p>
+<p align="center">Where available, live lyrics follow the track in the visualiser and the player panel (sourced from <a href="https://lrclib.net">LRCLIB</a>)</p>
 
-<p align="center"><img src="./media/lyrics_feature.png" alt="Lyrics" width="480" /></p>
+<p align="center"><img src="./media/readme/lyrics.png" alt="Lyrics" width="720" /></p>
 
 ### 👁️ Audio Visualiser
 
 <p align="center">Choose from one of 14 modes, from oscilloscopes to spectrums and more...</p>
 
-<p align="center"><img src="./media/visualiser.gif" alt="Visualiser" width="480" /></p>
+<p align="center"><img src="./media/readme/vis-bars.gif" alt="Spectrum bars visualiser" width="720" /></p>
 
-<p align="center"><img src="./media/spectrum.gif" alt="Visualiser 2" width="480" /></p>
+<p align="center"><img src="./media/readme/vis-wave.gif" alt="Filled curve visualiser" width="720" /></p>
 
-<p align="center">+ 12 more...</p>
+<p align="center"><img src="./media/readme/vis-dots.gif" alt="LED matrix visualiser" width="720" /></p>
+
+<p align="center">+ 11 more...</p>
+
+### ⌨️ Command Palette
+
+<p align="center">Every action, layout and theme is one fuzzy search away with <code>:</code> or <code>Ctrl+P</code>, and every key can be rebound from inside the app</p>
+
+<p align="center"><img src="./media/readme/palette.png" alt="Command palette" width="720" /></p>
+
+### 🎨 Themes and Equaliser
+
+<p align="center">Nine colour themes with a live preview, and a six-band equaliser</p>
+
+<p align="center"><img src="./media/readme/themes.png" alt="Theme picker" width="720" /></p>
+
+<p align="center"><img src="./media/readme/equaliser.png" alt="Equaliser" width="720" /></p>
 
 ## Using sctui
-
-> **Upgrading from an earlier version:** the default keys changed for almost every action (they now follow vim / tmux habits, see the table below). Your own `[keys]` overrides are matched by action name and keep working. Overrides for the four actions that no longer exist (`secondary_up`, `secondary_down`, `tertiary_up`, `tertiary_down`) are ignored, with a warning at startup that names them: panes are now focused with `[` and `]` instead. The first launch asks once whether you want a two-minute tour of the new keys.
 
 <details>
 <summary><b>First run</b></summary>
@@ -123,7 +152,7 @@ Four layouts over the same panes, keys and player. Pick one in the wizard, on th
 |---|---|
 | `classic` | The original look: boxed tabs and sub-tabs, 7-row player bar with the sine wave |
 | `tighten` | Two header rows, then as many list rows as fit, and a 4-row player bar |
-| `columns` | Miller columns with a breadcrumb: `[` steps out, `]` or `Enter` steps in |
+| `columns` | A navigation column (Library, Search and Feed with their sections) beside Miller columns with a breadcrumb: `[` steps out, `]` or `Enter` steps in |
 | `player-panel` | Lists on the left, a permanent player on the right that pages between Up next, Lyrics, Spectrum and History (`o`) |
 
 Every layout adapts to the terminal: panes drop from three to two to one as the width shrinks (reach the hidden ones with `[` `]`), track columns drop, the player bar shrinks to one line, and below 36×8 sctui just says the terminal is too small. Existing installs stay on `classic` until you change it; new installs that skip the wizard get `tighten`.
@@ -175,7 +204,7 @@ While you type (a filter, a search, the palette, a playlist name) every key type
 
 **Hint line.** The bottom row lists the keys that apply to whatever has focus, read from your own bindings, and shows a half-typed sequence (`g …`) at the right. Turn it off on the Settings page or with `Hint line: toggle` in the palette.
 
-**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle, the SoundCloud credit style and the setup wizard. Type a few letters (`lay col` finds `Layout: columns`), `Enter` runs the highlighted one.
+**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle, the setup wizard, and the Keys, Settings and Equaliser pages. Type a few letters (`lay col` finds `Layout: columns`), `Enter` runs the highlighted one.
 
 **Notices.** Likes, queue additions, playlist edits, shuffle / repeat and failures show for a few seconds in the top-right corner, and the playing track is marked `▶` (`⏸` when paused) in every list.
 
@@ -192,7 +221,11 @@ Press `t` to pick a colour theme with a live preview: `default`, `tokyonight`, `
 
 ### Settings
 
-`?` then `Tab` opens the Settings page (layout, hint line, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. In the file they are under `[settings]`:
+`?` then `Tab` opens the Settings page (layout, hint line, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. Both are also in the command palette.
+
+<p align="center"><img src="./media/readme/settings.png" alt="Settings page" width="720" /></p>
+
+In the file they are under `[settings]`:
 
 ```toml
 [settings]
@@ -205,6 +238,8 @@ An unknown layout name falls back to `classic` with a warning at startup.
 Everything sctui plays and lists comes from SoundCloud, and its API terms ask apps to say so: the SoundCloud mark (Nerd Font U+F1BE) sits beside `sctui` in every layout. It needs a Nerd Font, or a terminal that falls back to one; without it the mark is an empty box. `b` opens any track, playlist, album or person on soundcloud.com.
 
 ### Keybindings
+
+<p align="center"><img src="./media/readme/keys.png" alt="Key editor" width="720" /></p>
 
 Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it (press a second key within a second to bind a sequence), `Backspace` to unbind, `r` to restore its default. Help and Quit always keep at least one key.
 
