@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
@@ -18,6 +20,9 @@ pub(crate) fn handle_insert(key: KeyEvent, state: &mut AppState, data: &AppData)
         }
         KeyCode::Esc | KeyCode::Enter | KeyCode::Up | KeyCode::Down => {
             state.search_typing = false;
+            if key.code == KeyCode::Enter {
+                state.search_edited_at = None;
+            }
             if library && state.search_query.trim().is_empty() {
                 clear_filter(state);
             }
@@ -31,6 +36,7 @@ pub(crate) fn handle_insert(key: KeyEvent, state: &mut AppState, data: &AppData)
         _ => {
             if edit_text(&key, &mut state.query) {
                 state.search_needs_fetch = true;
+                state.search_edited_at = Some(Instant::now());
                 nav::reset_search(state);
             }
         }
