@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::{list_step, lookup};
 use crate::keymap::Action;
 use crate::theme::{self, Theme};
 use crate::tui::logic::state::AppState;
@@ -17,52 +18,47 @@ pub(crate) fn open_theme_picker(state: &mut AppState) {
 /// Modal while open. Moving previews the theme; Enter keeps and saves it,
 /// Esc restores what was active before.
 pub(crate) fn handle_theme_picker_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
+    let action = lookup(state, &key);
+    if let Some(theme) = step(key, action, state) {
+        theme::set(theme);
+    }
+    InputOutcome::Continue
+}
+
+/// The picker's state change for one key, and the theme to show as a result (the
+/// preview, or the one to go back to). Applying it is the caller's job: the theme is
+/// process-wide, so tests drive this and never set it. The wizard's theme stage is
+/// this too.
+pub(crate) fn step(key: KeyEvent, action: Option<Action>, state: &mut AppState) -> Option<Theme> {
     let last = Theme::BUILTIN.len() - 1;
-    match (key.code, state.keymap.action(&key)) {
-        (KeyCode::Esc, _) => {
-            if let Some(previous) = state.theme_picker_previous.take() {
-                theme::set(previous);
-            }
+    match (key.code, action) {
+        (KeyCode::Esc, _) | (_, Some(Action::Themes)) => {
             state.theme_picker_visible = false;
+            return state.theme_picker_previous.take();
         }
         (KeyCode::Enter, _) => {
             let chosen = Theme::BUILTIN[state.theme_picker_selected.min(last)];
             state.theme_name = chosen.name.to_string();
             state.theme_picker_previous = None;
             state.theme_picker_visible = false;
-            state.help_message = crate::config::save(
+            match crate::config::save(
+                state.config_load_failed,
                 &state.keymap,
                 &state.theme_name,
                 &state.theme_overrides,
                 &state.settings,
                 &state.eq,
-            )
-                .err()
-                .map(|e| format!("theme not saved: {e}"));
+            ) {
+                Ok(()) => state.toast(format!("Theme: {}", chosen.name)),
+                Err(e) => state.toast_err(format!("Theme not saved: {e}")),
+            }
         }
-        (_, Some(Action::Up)) | (KeyCode::Up, _) => {
-            state.theme_picker_selected = state.theme_picker_selected.saturating_sub(1);
-            preview(state);
+        _ => {
+            if let Some(next) = list_step(&key, action, state.theme_picker_selected, last) {
+                state.theme_picker_selected = next;
+                return Some(Theme::BUILTIN[next].with_overrides(&state.theme_overrides).0);
+            }
         }
-        (_, Some(Action::Down)) | (KeyCode::Down, _) => {
-            state.theme_picker_selected = (state.theme_picker_selected + 1).min(last);
-            preview(state);
-        }
-        (KeyCode::Home, _) => {
-            state.theme_picker_selected = 0;
-            preview(state);
-        }
-        (KeyCode::End, _) => {
-            state.theme_picker_selected = last;
-            preview(state);
-        }
-        _ => {}
     }
-    InputOutcome::Continue
-}
-
-fn preview(state: &AppState) {
-    let base = Theme::BUILTIN[state.theme_picker_selected.min(Theme::BUILTIN.len() - 1)];
-    let (resolved, _) = base.with_overrides(&state.theme_overrides);
-    theme::set(resolved);
+    None
 }

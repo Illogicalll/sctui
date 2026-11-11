@@ -1,12 +1,18 @@
-use super::helpers::{filtered_row, insert_manual_queue};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
+
+use super::InputOutcome;
+use super::helpers::{insert_manual_queue, list_step, lookup};
+use crate::keymap::Action;
+use crate::tui::logic::nav::{self, PaneId};
 use crate::tui::logic::state::{AppData, AppState, PlaybackSource, QueuedTrack, FollowingTracksFocus};
 
 pub(crate) fn handle_add_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
-    if let Some(queued) = selected_queued(state, data) {
+    if let Some(queued) = selected_or_toast(state, data) {
         insert_manual_queue(state, queued);
+        state.toast(format!("Added to queue · {}", state.manual_queue.len()));
     }
 }
 
@@ -14,12 +20,39 @@ pub(crate) fn handle_add_next_to_queue(
     state: &mut AppState,
     data: &mut AppData,
 ) {
-    if let Some(queued) = selected_queued(state, data) {
+    if let Some(queued) = selected_or_toast(state, data) {
+        state.toast(format!("Playing next: {}", queued.track.title));
         state.manual_queue.push_front(queued);
     }
 }
 
+/// `selected_queued`, with a notice when there is nothing to act on.
+pub(crate) fn selected_or_toast(state: &mut AppState, data: &AppData) -> Option<QueuedTrack> {
+    let queued = selected_queued(state, data);
+    if queued.is_none() {
+        state.toast_err("No playable track selected");
+    }
+    queued
+}
+
+/// The queue popup is modal: movement scrolls the upcoming tracks, Esc or its own key
+/// closes it, and every other key is dropped.
+pub(crate) fn handle_queue_input(key: KeyEvent, state: &mut AppState) -> InputOutcome {
+    let last = (state.manual_queue.len() + state.auto_queue.len()).saturating_sub(1);
+    let action = lookup(state, &key);
+    match (key.code, action) {
+        (KeyCode::Esc, _) | (_, Some(Action::ToggleQueue)) => state.queue_visible = false,
+        _ => state.queue_scroll = list_step(&key, action, state.queue_scroll, last).unwrap_or(state.queue_scroll),
+    }
+    InputOutcome::Continue
+}
+
+/// The focused pane's selected track, ready to queue. `None` unless a tracks pane has
+/// focus and its selected row is playable.
 pub(crate) fn selected_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
+    if nav::focused(state).is_container() {
+        return None;
+    }
     if state.selected_tab == 0 {
         match state.selected_subtab {
             0 => get_likes_queued(state, data),
@@ -42,7 +75,7 @@ pub(crate) fn selected_queued(state: &AppState, data: &AppData) -> Option<Queued
 }
 
 fn get_feed_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = state.selected_info_row;
+    let idx = nav::cursor(state, PaneId::FeedTracks);
     let track = data.feed_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::Feed, idx, track, Some(&data.feed_tracks), None, None, None, true,
@@ -50,7 +83,7 @@ fn get_feed_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
 }
 
 fn get_search_tracks_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = state.selected_row;
+    let idx = nav::cursor(state, PaneId::SearchTracks);
     let track = data.search_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::Playlist, idx, track, Some(&data.search_tracks), None, None, None, true,
@@ -58,7 +91,7 @@ fn get_search_tracks_queued(state: &AppState, data: &AppData) -> Option<QueuedTr
 }
 
 fn get_search_playlist_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = state.search_selected_playlist_track_row;
+    let idx = nav::cursor(state, PaneId::SearchPlaylistTracks);
     let track = data.search_playlist_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::Playlist, idx, track, Some(&data.search_playlist_tracks),
@@ -67,7 +100,7 @@ fn get_search_playlist_queued(state: &AppState, data: &AppData) -> Option<Queued
 }
 
 fn get_search_album_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = state.search_selected_album_track_row;
+    let idx = nav::cursor(state, PaneId::SearchAlbumTracks);
     let track = data.search_album_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::Album, idx, track, Some(&data.search_album_tracks),
@@ -77,14 +110,14 @@ fn get_search_album_queued(state: &AppState, data: &AppData) -> Option<QueuedTra
 
 fn get_search_people_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if state.search_people_tracks_focus == FollowingTracksFocus::Likes {
-        let idx = state.search_selected_person_like_row;
+        let idx = nav::cursor(state, PaneId::SearchPeopleLikes);
         let track = data.search_people_likes_tracks.get(idx).filter(|t| t.is_playable())?;
         return Some(QueuedTrack::new(
             PlaybackSource::FollowingLikes, idx, track, Some(&data.search_people_likes_tracks),
             None, None, data.search_people_likes_user_urn.clone(), true,
         ));
     }
-    let idx = state.search_selected_person_track_row;
+    let idx = nav::cursor(state, PaneId::SearchPeopleTracks);
     let track = data.search_people_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::FollowingPublished, idx, track, Some(&data.search_people_tracks),
@@ -93,13 +126,13 @@ fn get_search_people_queued(state: &AppState, data: &AppData) -> Option<QueuedTr
 }
 
 fn get_likes_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = filtered_row(state, state.selected_row)?;
+    let idx = nav::selected_index(state, PaneId::Likes)?;
     let track = data.likes.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(PlaybackSource::Likes, idx, track, None, None, None, None, true))
 }
 
 fn get_playlist_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = filtered_row(state, state.selected_playlist_track_row)?;
+    let idx = nav::selected_index(state, PaneId::PlaylistTracks)?;
     let track = data.playlist_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::Playlist, idx, track, Some(&data.playlist_tracks),
@@ -108,7 +141,7 @@ fn get_playlist_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> 
 }
 
 fn get_album_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
-    let idx = state.selected_album_track_row;
+    let idx = nav::cursor(state, PaneId::AlbumTracks);
     let track = data.album_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::Album, idx, track, Some(&data.album_tracks),
@@ -118,14 +151,14 @@ fn get_album_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
 
 fn get_following_queued(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
     if state.following_tracks_focus == FollowingTracksFocus::Likes {
-        let idx = state.selected_following_like_row;
+        let idx = nav::cursor(state, PaneId::FollowingLikes);
         let track = data.following_likes_tracks.get(idx).filter(|t| t.is_playable())?;
         return Some(QueuedTrack::new(
             PlaybackSource::FollowingLikes, idx, track, Some(&data.following_likes_tracks),
             None, None, data.following_likes_user_urn.clone(), true,
         ));
     }
-    let idx = state.selected_following_track_row;
+    let idx = nav::cursor(state, PaneId::FollowingTracks);
     let track = data.following_tracks.get(idx).filter(|t| t.is_playable())?;
     Some(QueuedTrack::new(
         PlaybackSource::FollowingPublished, idx, track, Some(&data.following_tracks),

@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
+use rand::Rng;
 use rand::seq::SliceRandom;
 
 use crate::api::{Album, Artist, Playlist, Track};
 use crate::player::{Player, TrackChange};
 
-use super::state::{AppData, AppState, FollowingTracksFocus, PlaybackSource, QueuedTrack};
+use super::nav;
+use super::state::{AppData, AppState, PlaybackSource, QueuedTrack};
 
 fn fuzzy_score_subsequence(query: &str, candidate: &str) -> Option<i64> {
     if query.is_empty() || candidate.is_empty() {
@@ -262,20 +265,57 @@ pub fn build_queue(
     }
 }
 
+/// Rebuild the automatic queue around the playing track for the current shuffle setting.
+/// A station's list is the chain already heard plus what is still queued, so there the
+/// queue is only ever reordered: rebuilding it from the list would replay the chain (and,
+/// by refilling the queue, stop more related tracks being fetched).
+pub(crate) fn rebuild_auto_queue(state: &mut AppState, data: &AppData) {
+    let Some(current_idx) = state.current_playing_index else {
+        return;
+    };
+    if state.playback_source == PlaybackSource::Radio {
+        let queued = state.auto_queue.make_contiguous();
+        if state.shuffle_enabled {
+            queued.shuffle(&mut rand::thread_rng());
+        } else {
+            queued.sort_unstable();
+        }
+    } else {
+        state.auto_queue = build_queue(current_idx, active_tracks(state, data), state.shuffle_enabled);
+    }
+}
+
 /// Extend the playing list with `incoming`, queueing each new playable track after what is
-/// already queued. Tracks already present (by urn) or unplayable are dropped.
+/// already queued, or somewhere at random among it when `shuffle` is set. Tracks already
+/// present (by urn) or unplayable are dropped.
 pub(crate) fn append_feed_tracks(
     playback_tracks: &mut Vec<Track>,
     auto_queue: &mut VecDeque<usize>,
-    incoming: Vec<Track>,
+    incoming: impl IntoIterator<Item = Track>,
+    shuffle: bool,
 ) {
     for track in incoming {
         let seen = playback_tracks.iter().any(|t| t.track_urn == track.track_urn);
         if seen || !track.is_playable() {
             continue;
         }
-        auto_queue.push_back(playback_tracks.len());
+        let at = if shuffle { rand::thread_rng().gen_range(0..=auto_queue.len()) } else { auto_queue.len() };
+        auto_queue.insert(at, playback_tracks.len());
         playback_tracks.push(track);
+    }
+}
+
+/// A page of Likes arrived. Likes load in the background, so a queue started from them
+/// early only covers the pages loaded by then: while Likes are what is playing, the new
+/// page joins the playing list and its queue.
+pub(crate) fn extend_likes_playback(state: &mut AppState, data: &mut AppData, page: &[Track]) {
+    if state.playback_source == PlaybackSource::Likes && state.current_playing_index.is_some() {
+        append_feed_tracks(
+            &mut data.playback_tracks,
+            &mut state.auto_queue,
+            page.iter().cloned(),
+            state.shuffle_enabled,
+        );
     }
 }
 
@@ -304,7 +344,8 @@ pub fn play_queued_track(
             data.playback_playlist_uri = None;
             data.playback_album_uri = None;
             data.playback_following_user_urn = None;
-            state.auto_queue = build_queue(queued.index, &data.likes, state.shuffle_enabled);
+            data.playback_tracks = data.likes.clone();
+            state.auto_queue = build_queue(queued.index, &data.playback_tracks, state.shuffle_enabled);
             if state.selected_tab == 0 && state.selected_subtab == 0 {
                 state.selected_row = queued.index;
                 data.likes_state.select(Some(queued.index));
@@ -358,7 +399,7 @@ pub fn play_queued_track(
                 && data.playback_following_user_urn == data.following_tracks_user_urn
             {
                 state.selected_following_track_row = queued.index;
-                state.following_tracks_focus = FollowingTracksFocus::Published;
+                nav::set_focus(state, 1);
                 data.following_tracks_state.select(Some(queued.index));
             } else if queued.source == PlaybackSource::FollowingLikes
                 && state.selected_tab == 0
@@ -367,23 +408,18 @@ pub fn play_queued_track(
                 && data.playback_following_user_urn == data.following_likes_user_urn
             {
                 state.selected_following_like_row = queued.index;
-                state.following_tracks_focus = FollowingTracksFocus::Likes;
+                nav::set_focus(state, 2);
                 data.following_likes_state.select(Some(queued.index));
             }
         }
     }
 }
 
-pub(crate) fn active_tracks<'a>(state: &AppState, data: &'a AppData) -> &'a [Track] {
-    match state.playback_source {
-        PlaybackSource::Likes => &data.likes,
-        PlaybackSource::Playlist
-        | PlaybackSource::Album
-        | PlaybackSource::FollowingPublished
-        | PlaybackSource::FollowingLikes
-        | PlaybackSource::Feed
-        | PlaybackSource::Radio => &data.playback_tracks,
-    }
+/// The list `current_playing_index` and `auto_queue` index: always the copy taken when
+/// playback started, never a library list, whose rows move as tracks are liked, unliked,
+/// paged in or hidden.
+pub(crate) fn active_tracks<'a>(_state: &AppState, data: &'a AppData) -> &'a [Track] {
+    &data.playback_tracks
 }
 
 /// Hand playback over to related tracks, seeded by `seeds` (index 0 is playing now). A single
@@ -395,11 +431,104 @@ pub(crate) fn enter_radio(state: &mut AppState, data: &mut AppData, seeds: Vec<T
     state.current_playing_index = Some(0);
     state.radio_fetched_for = None;
     state.radio_waiting = false;
+    state.radio_misses = 0;
+    state.radio_seed_back = 0;
+    state.radio_retry_at = None;
+    // A fetch still out for the previous station is not this one's result.
+    state.radio_fetch.cancel();
     state.auto_queue = build_queue(0, &seeds, state.shuffle_enabled);
     data.playback_tracks = seeds;
     data.playback_playlist_uri = None;
     data.playback_album_uri = None;
     data.playback_following_user_urn = None;
+}
+
+/// Related-tracks fetches in a row that may fail or bring nothing new before the station
+/// stops asking.
+pub(crate) const RADIO_MAX_MISSES: u8 = 5;
+/// Wait this long after a failed related-tracks fetch before trying again.
+const RADIO_RETRY_DELAY: Duration = Duration::from_secs(3);
+
+/// The seed (track urn) to fetch related tracks for now, if a fetch is due: a station is
+/// playing with at most one track left queued, it has not given up, and no retry delay is
+/// running. The seed is the last track of the chain, or an earlier one once the later
+/// ones turned up nothing new, so each fetch drifts a little further from the start.
+pub(crate) fn radio_seed_due(state: &AppState, data: &AppData, now: Instant) -> Option<String> {
+    if state.playback_source != PlaybackSource::Radio
+        || !state.manual_queue.is_empty()
+        || state.auto_queue.len() > 1
+        || state.radio_misses >= RADIO_MAX_MISSES
+        || state.radio_retry_at.is_some_and(|at| now < at)
+    {
+        return None;
+    }
+    let seed = &data.playback_tracks.iter().rev().nth(state.radio_seed_back)?.track_urn;
+    (state.radio_fetched_for.as_ref() != Some(seed)).then(|| seed.clone())
+}
+
+/// A related-tracks fetch came back; `None` is a failed request. New tracks join the
+/// queue. A failure is retried with the same seed after `RADIO_RETRY_DELAY`; a result
+/// with nothing new moves the seed one track back up the chain. After
+/// `RADIO_MAX_MISSES` such results in a row (or with no seed left to try) the station
+/// stops asking, and says so if playback was waiting on it. Returns the track to start
+/// when playback was waiting and something arrived.
+pub(crate) fn radio_result(
+    state: &mut AppState,
+    data: &mut AppData,
+    tracks: Option<Vec<Track>>,
+    now: Instant,
+) -> Option<Track> {
+    let failed = tracks.is_none();
+    let before = data.playback_tracks.len();
+    append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks.unwrap_or_default(), false);
+    if data.playback_tracks.len() > before {
+        state.radio_misses = 0;
+        state.radio_seed_back = 0;
+        if !state.radio_waiting {
+            return None;
+        }
+        state.radio_waiting = false;
+        return advance(state, data);
+    }
+    state.radio_misses += 1;
+    if failed {
+        state.radio_fetched_for = None;
+        state.radio_retry_at = Some(now + RADIO_RETRY_DELAY);
+    } else {
+        state.radio_seed_back += 1;
+    }
+    if state.radio_misses >= RADIO_MAX_MISSES || state.radio_seed_back >= data.playback_tracks.len() {
+        state.radio_misses = RADIO_MAX_MISSES;
+        if state.radio_waiting {
+            state.radio_waiting = false;
+            state.toast("Nothing more to play");
+        }
+    }
+    None
+}
+
+/// A station's queue ran dry at the end of a track: play as soon as related tracks
+/// arrive. If the station had already stopped asking while that track played, it gets
+/// one more round of attempts (the network may be back).
+pub(crate) fn await_radio(state: &mut AppState) {
+    state.radio_waiting = true;
+    if state.radio_misses >= RADIO_MAX_MISSES {
+        state.radio_misses = 0;
+        state.radio_seed_back = 0;
+        state.radio_fetched_for = None;
+        state.radio_retry_at = None;
+    }
+}
+
+/// Start a station the user asked for, `seeds[0]` playing now. What was playing goes into
+/// the history; the hand-built queue is replaced by the station.
+pub(crate) fn start_station(state: &mut AppState, data: &mut AppData, seeds: Vec<Track>) {
+    if let Some(current) = queued_from_current(state, data) {
+        state.push_history(current);
+    }
+    state.cancel_artist_station();
+    state.manual_queue.clear();
+    enter_radio(state, data, seeds);
 }
 
 pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTrack> {
@@ -410,7 +539,6 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
     let source = state.playback_source;
     let track = active_tracks(state, data).get(idx)?;
     let (tracks_snapshot, playlist_uri, album_uri, following_user_urn) = match source {
-        PlaybackSource::Likes => (None, None, None, None),
         PlaybackSource::Playlist => (
             Some(&data.playback_tracks),
             data.playback_playlist_uri.clone(),
@@ -429,11 +557,61 @@ pub fn queued_from_current(state: &AppState, data: &AppData) -> Option<QueuedTra
             None,
             data.playback_following_user_urn.clone(),
         ),
-        PlaybackSource::Feed | PlaybackSource::Radio => (Some(&data.playback_tracks), None, None, None),
+        PlaybackSource::Likes | PlaybackSource::Feed | PlaybackSource::Radio => (Some(&data.playback_tracks), None, None, None),
     };
     Some(QueuedTrack::new(
         source, idx, track, tracks_snapshot, playlist_uri, album_uri, following_user_urn, false,
     ))
+}
+
+/// Move the queue on from the track that is playing and return the one to play instead:
+/// the first track queued by hand (it plays outside the list, as `override_playing`),
+/// else the next of the list. `None`, with nothing changed, when nothing is queued.
+pub(crate) fn advance(state: &mut AppState, data: &AppData) -> Option<Track> {
+    let current = queued_from_current(state, data);
+    let track = if let Some(queued) = state.manual_queue.pop_front() {
+        let track = queued.track.clone();
+        state.override_playing = Some(queued);
+        track
+    } else {
+        let next_idx = state.auto_queue.pop_front()?;
+        let track = active_tracks(state, data).get(next_idx)?.clone();
+        state.override_playing = None;
+        state.current_playing_index = Some(next_idx);
+        track
+    };
+    if let Some(current) = current {
+        state.push_history(current);
+    }
+    Some(track)
+}
+
+/// The track that is playing: not the list's current row while a queued, previous or
+/// history track plays over it.
+fn playing_track<'a>(state: &'a AppState, data: &'a AppData) -> Option<&'a Track> {
+    match &state.override_playing {
+        Some(queued) => Some(&queued.track),
+        None => active_tracks(state, data).get(state.current_playing_index?),
+    }
+}
+
+/// The playing track ran out: what plays now. With repeat on that is the same track again.
+pub(crate) fn end_of_track(state: &mut AppState, data: &AppData) -> Option<Track> {
+    if state.repeat_enabled {
+        return playing_track(state, data).cloned();
+    }
+    advance(state, data)
+}
+
+/// What `end_of_track` would play, without moving anything; for preloading.
+pub(crate) fn peek_next(state: &AppState, data: &AppData) -> Option<Track> {
+    if state.repeat_enabled {
+        playing_track(state, data).cloned()
+    } else if let Some(queued) = state.manual_queue.front() {
+        Some(queued.track.clone())
+    } else {
+        state.auto_queue.front().and_then(|&i| active_tracks(state, data).get(i).cloned())
+    }
 }
 
 /// When to start the next track. Normally that is the moment this one runs out;
@@ -488,9 +666,245 @@ mod tests {
                 track("e", ""),
                 track("d", "playable"), // duplicate within the batch: dropped
             ],
+            false,
         );
         let urns: Vec<&str> = playing.iter().map(|t| t.track_urn.as_str()).collect();
         assert_eq!(urns, ["a", "b", "d", "e"]);
         assert_eq!(queue, VecDeque::from([1, 2, 3]));
+    }
+
+    fn tracks(urns: &[&str]) -> Vec<Track> {
+        urns.iter().map(|urn| track(urn, "playable")).collect()
+    }
+
+    /// Likes playing from `playing`, at index `at`, with the rest queued in order.
+    fn likes_playing(playing: &[&str], at: usize) -> (AppState, AppData) {
+        let data = AppData { likes: tracks(playing), playback_tracks: tracks(playing), ..Default::default() };
+        let state = AppState {
+            current_playing_index: Some(at),
+            auto_queue: build_queue(at, &data.playback_tracks, false),
+            ..Default::default()
+        };
+        (state, data)
+    }
+
+    fn queued_urns(state: &AppState, data: &AppData) -> Vec<String> {
+        let list = active_tracks(state, data);
+        state.auto_queue.iter().map(|&i| list[i].track_urn.clone()).collect()
+    }
+
+    /// T2: the Likes queue indexes its own copy, so the library list changing under it
+    /// (a like inserted at the top, an unlike, the hide-unplayable filter) moves nothing.
+    #[test]
+    fn likes_playback_is_not_disturbed_by_the_library_list_changing() {
+        use crate::tui::logic::state::Engagement;
+        let (mut state, mut data) = likes_playing(&["a", "b", "c", "d"], 1);
+        let playing = |state: &AppState, data: &AppData| queued_from_current(state, data).unwrap().track.track_urn;
+
+        // Like a track from somewhere else: it lands at the top of the library.
+        data.liked_track_urns.insert("new".into());
+        Engagement::LikeTrack { track: track("new", "playable"), track_id: 1 }.apply(&mut state, &mut data);
+        assert_eq!(data.likes[0].track_urn, "new");
+        assert_eq!(playing(&state, &data), "b");
+        assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+
+        // Unlike the playing track: the next one is still next.
+        Engagement::UnlikeTrack { track_urn: "b".into(), track_id: 2 }.apply(&mut state, &mut data);
+        assert!(!data.likes.iter().any(|t| t.track_urn == "b"));
+        assert_eq!(playing(&state, &data), "b");
+        assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+
+        // Rows hidden from the library list stay where they were in the queue.
+        data.likes[0].access = "blocked".into();
+        state.settings.hide_unplayable = true;
+        crate::tui::logic::filtering::apply_unplayable_filter(&mut state, &mut data);
+        assert_eq!(playing(&state, &data), "b");
+        assert_eq!(queued_urns(&state, &data), ["c", "d"]);
+    }
+
+    /// T8: repeat replays the track that is playing, not the list row under it.
+    #[test]
+    fn repeat_replays_a_queued_track_rather_than_the_list_row_under_it() {
+        let (mut state, data) = likes_playing(&["a", "b", "c"], 0);
+        let extra = track("q", "playable");
+        state.manual_queue.push_back(QueuedTrack::new(PlaybackSource::Playlist, 5, &extra, None, None, None, None, true));
+
+        // "a" ends: the queued track plays over the list, which stays on "a".
+        assert_eq!(peek_next(&state, &data).unwrap().track_urn, "q");
+        assert_eq!(end_of_track(&mut state, &data).unwrap().track_urn, "q");
+        assert_eq!(state.current_playing_index, Some(0));
+
+        // Repeat on while it plays: it is preloaded and replayed, again and again.
+        state.repeat_enabled = true;
+        for _ in 0..2 {
+            assert_eq!(peek_next(&state, &data).unwrap().track_urn, "q");
+            assert_eq!(end_of_track(&mut state, &data).unwrap().track_urn, "q");
+        }
+        assert_eq!(state.playback_history.len(), 1, "a repeat is not a new history entry");
+        assert_eq!(queued_urns(&state, &data), ["b", "c"], "the list queue is untouched");
+
+        // Repeat off: the list carries on from where it was.
+        state.repeat_enabled = false;
+        assert_eq!(end_of_track(&mut state, &data).unwrap().track_urn, "b");
+        assert!(state.override_playing.is_none());
+        assert_eq!(state.playback_history.iter().map(|q| q.track.track_urn.as_str()).collect::<Vec<_>>(), ["a", "q"]);
+        // Nothing left to play: nothing changes.
+        state.auto_queue.clear();
+        assert!(end_of_track(&mut state, &data).is_none() && peek_next(&state, &data).is_none());
+        assert_eq!(state.playback_history.len(), 2);
+    }
+
+    /// T17: in a station nothing already heard is ever queued again.
+    #[test]
+    fn a_station_queue_is_reordered_but_never_rebuilt_from_the_heard_chain() {
+        // "a".."c" heard, "d" playing, "e" and "f" still to come.
+        let (mut state, data) = likes_playing(&["a", "b", "c", "d", "e", "f"], 3);
+        state.playback_source = PlaybackSource::Radio;
+        state.shuffle_enabled = true;
+        rebuild_auto_queue(&mut state, &data);
+        let mut queued = queued_urns(&state, &data);
+        queued.sort();
+        assert_eq!(queued, ["e", "f"]);
+        state.shuffle_enabled = false;
+        state.auto_queue = VecDeque::from([5, 4]);
+        rebuild_auto_queue(&mut state, &data);
+        assert_eq!(queued_urns(&state, &data), ["e", "f"], "shuffle off puts what is left back in order");
+
+        // Queue empty while related tracks load: Next has nothing to play and queues nothing.
+        state.shuffle_enabled = true;
+        state.auto_queue.clear();
+        rebuild_auto_queue(&mut state, &data);
+        assert!(state.auto_queue.is_empty() && advance(&mut state, &data).is_none());
+
+        // Any other source still reshuffles its whole list.
+        state.playback_source = PlaybackSource::Playlist;
+        rebuild_auto_queue(&mut state, &data);
+        assert_eq!(state.auto_queue.len(), 5);
+    }
+
+    /// A station whose chain is `chain`, the last track playing and nothing queued, as the
+    /// loop leaves it once it has asked for the last track's related tracks.
+    fn station_out_of_tracks(chain: &[&str], now: Instant) -> (AppState, AppData) {
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        enter_radio(&mut state, &mut data, tracks(chain));
+        state.auto_queue.clear();
+        state.current_playing_index = Some(chain.len() - 1);
+        state.radio_fetched_for = radio_seed_due(&state, &data, now);
+        assert_eq!(state.radio_fetched_for.as_deref(), chain.last().copied());
+        (state, data)
+    }
+
+    /// T9: a failed related-tracks fetch is retried after a pause, and playback starts
+    /// when one finally succeeds.
+    #[test]
+    fn a_failed_radio_fetch_is_retried_after_a_delay() {
+        let now = Instant::now();
+        let (mut state, mut data) = station_out_of_tracks(&["a", "b"], now);
+        await_radio(&mut state);
+
+        assert!(radio_result(&mut state, &mut data, None, now).is_none());
+        assert!(state.radio_waiting, "still waiting, not stopped");
+        assert_eq!(radio_seed_due(&state, &data, now), None, "not straight away");
+        let later = now + RADIO_RETRY_DELAY;
+        assert_eq!(radio_seed_due(&state, &data, later).as_deref(), Some("b"), "same seed again");
+
+        let next = radio_result(&mut state, &mut data, Some(tracks(&["b", "c", "d"])), later);
+        assert_eq!(next.unwrap().track_urn, "c");
+        assert!(!state.radio_waiting && state.radio_misses == 0);
+        assert_eq!(queued_urns(&state, &data), ["d"]);
+        assert_eq!(state.playback_history.last().unwrap().track.track_urn, "b");
+    }
+
+    /// T9: when a seed's related tracks are all in the chain already, earlier tracks are
+    /// tried as the seed, and the station stops cleanly once none is left.
+    #[test]
+    fn a_radio_fetch_with_nothing_new_tries_earlier_seeds_then_stops_with_a_notice() {
+        let now = Instant::now();
+        let (mut state, mut data) = station_out_of_tracks(&["a", "b", "c"], now);
+        await_radio(&mut state);
+
+        for seed in ["b", "a"] {
+            assert!(radio_result(&mut state, &mut data, Some(tracks(&["a", "c"])), now).is_none());
+            assert!(state.radio_waiting && state.toasts.is_empty());
+            let due = radio_seed_due(&state, &data, now);
+            assert_eq!(due.as_deref(), Some(seed));
+            state.radio_fetched_for = due;
+        }
+        // The last seed has nothing new either.
+        assert!(radio_result(&mut state, &mut data, Some(Vec::new()), now).is_none());
+        assert!(!state.radio_waiting, "stopped, not waiting for ever");
+        assert_eq!(state.toasts.last().unwrap().msg, "Nothing more to play");
+        assert_eq!(radio_seed_due(&state, &data, now + RADIO_RETRY_DELAY * 10), None);
+    }
+
+    /// T9: failures are bounded, quiet while a track is still playing, and the end of
+    /// that track gets one more round before giving up for good.
+    #[test]
+    fn radio_fetch_failures_are_bounded() {
+        let mut now = Instant::now();
+        let (mut state, mut data) = station_out_of_tracks(&["a"], now);
+        fn fail_until_it_stops(state: &mut AppState, data: &mut AppData, now: &mut Instant) -> u8 {
+            let mut attempts = 0;
+            while let Some(seed) = radio_seed_due(state, data, *now) {
+                state.radio_fetched_for = Some(seed);
+                radio_result(state, data, None, *now);
+                *now += RADIO_RETRY_DELAY;
+                attempts += 1;
+                assert!(attempts <= RADIO_MAX_MISSES, "kept retrying");
+            }
+            attempts
+        }
+        // The fetch made ahead of the track's end has failed once already here.
+        radio_result(&mut state, &mut data, None, now);
+        now += RADIO_RETRY_DELAY;
+        assert_eq!(fail_until_it_stops(&mut state, &mut data, &mut now), RADIO_MAX_MISSES - 1);
+        assert!(state.toasts.is_empty(), "nothing was waiting on it yet");
+
+        await_radio(&mut state);
+        assert_eq!(fail_until_it_stops(&mut state, &mut data, &mut now), RADIO_MAX_MISSES);
+        assert!(!state.radio_waiting);
+        assert_eq!(state.toasts.last().unwrap().msg, "Nothing more to play");
+    }
+
+    /// T10: a track station started while an artist station is still loading wins.
+    #[test]
+    fn starting_a_track_station_drops_a_pending_artist_station() {
+        use crate::api::Artist;
+        let (mut state, mut data) = likes_playing(&["a", "b"], 0);
+        state.artist_station_request = Some(Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() });
+        let in_flight = state.artist_station_fetch.request_id;
+        start_station(&mut state, &mut data, tracks(&["s"]));
+        assert!(state.artist_station_request.is_none());
+        assert_ne!(state.artist_station_fetch.request_id, in_flight, "the late mix is no longer current");
+        // The station replaces the queue but not the history.
+        assert_eq!(state.playback_history.len(), 1);
+        assert_eq!(queued_from_current(&state, &data).unwrap().track.track_urn, "s");
+    }
+
+    /// T14: Likes pages that load after playback started join the queue.
+    #[test]
+    fn likes_pages_arriving_during_likes_playback_extend_the_queue() {
+        let (mut state, mut data) = likes_playing(&["a", "b"], 0);
+        let page = [track("b", "playable"), track("c", "playable"), track("x", "blocked"), track("d", "playable")];
+        extend_likes_playback(&mut state, &mut data, &page);
+        assert_eq!(queued_urns(&state, &data), ["b", "c", "d"], "new playable tracks, once each, in order");
+        assert_eq!(queued_from_current(&state, &data).unwrap().track.track_urn, "a");
+
+        // Shuffle on: the new tracks are mixed in, each still queued exactly once.
+        state.shuffle_enabled = true;
+        extend_likes_playback(&mut state, &mut data, &tracks(&["e", "f", "g"]));
+        let mut queued = queued_urns(&state, &data);
+        queued.sort();
+        assert_eq!(queued, ["b", "c", "d", "e", "f", "g"]);
+
+        // Anything else playing, or nothing at all, is left alone.
+        let before = data.playback_tracks.len();
+        state.playback_source = PlaybackSource::Playlist;
+        extend_likes_playback(&mut state, &mut data, &tracks(&["h"]));
+        state.playback_source = PlaybackSource::Likes;
+        state.current_playing_index = None;
+        extend_likes_playback(&mut state, &mut data, &tracks(&["h"]));
+        assert_eq!(data.playback_tracks.len(), before);
     }
 }

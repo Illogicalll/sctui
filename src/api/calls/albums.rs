@@ -7,7 +7,7 @@ impl API {
     pub fn get_albums(&mut self) -> anyhow::Result<Vec<Album>> {
         let access_token = access_token(&self.token);
 
-        let Some(url) = self.albums_page.take_url(
+        let Some(url) = self.albums_page.url(
             "https://api.soundcloud.com/me/likes/playlists?limit=40&linked_partitioning=true",
         ) else {
             return Ok(Vec::new());

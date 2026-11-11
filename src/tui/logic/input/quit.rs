@@ -1,12 +1,15 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
-use super::helpers::toggles_binary_choice;
+use crate::keymap::Action;
+use super::helpers::{lookup, toggles_binary_choice};
 use crate::tui::logic::state::AppState;
 
 pub(crate) fn handle_quit_confirm(key: KeyEvent, state: &mut AppState) -> InputOutcome {
+    let action = lookup(state, &key);
     match key.code {
-        KeyCode::Esc => {
+        // Esc, or the key that asked, cancels.
+        _ if key.code == KeyCode::Esc || action == Some(Action::Quit) => {
             state.quit_confirm_visible = false;
             InputOutcome::Continue
         }
@@ -18,7 +21,7 @@ pub(crate) fn handle_quit_confirm(key: KeyEvent, state: &mut AppState) -> InputO
                 InputOutcome::Continue
             }
         }
-        _ if toggles_binary_choice(&key, &state.keymap) => {
+        _ if toggles_binary_choice(&key, action) => {
             state.quit_confirm_selected = if state.quit_confirm_selected == 0 { 1 } else { 0 };
             InputOutcome::Continue
         }

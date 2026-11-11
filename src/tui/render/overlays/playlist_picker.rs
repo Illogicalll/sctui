@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState},
 };
 use crate::theme;
 
@@ -39,7 +39,7 @@ pub fn render_playlist_picker(
 
     if let Some(title) = new_title {
         let popup_area = centered_rect_fixed(PROMPT_WIDTH, 7, frame.area());
-        frame.render_widget(Clear, popup_area);
+        crate::tui::render::widgets::clear(frame, popup_area);
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
         let [name, _, visibility, _, hint] = Layout::vertical([
@@ -84,7 +84,7 @@ pub fn render_playlist_picker(
     let row_count = owned.len() as u16 + 1;
     let height = (row_count + 3).min(MAX_LIST_ROWS + 3); // header + borders
     let popup_area = centered_rect_fixed(LIST_WIDTH, height, frame.area());
-    frame.render_widget(Clear, popup_area);
+    crate::tui::render::widgets::clear(frame, popup_area);
 
     let title_width = (popup_area.width as usize * 70) / 100;
     let mut rows = vec![

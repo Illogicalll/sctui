@@ -1,13 +1,18 @@
 pub(crate) mod filtering;
 mod input;
+pub(crate) mod nav;
+pub(crate) mod palette;
+mod pager;
 pub(crate) mod state;
+pub(crate) mod toast;
 pub(crate) mod utils;
+pub(crate) mod wizard;
 
 use crate::api::{
     Lyrics, fetch_lyrics,
     add_track_to_playlist, create_playlist, delete_playlist, remove_track_from_playlist,
     fetch_related_tracks, fetch_related_users,
-    API, Activity, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks,
+    API, Activity, List, MAX_PAGES, Album, Artist, Playlist, Track, engage, fetch_playlist_tracks, has_playable_tracks,
     fetch_search_albums, fetch_search_people, fetch_search_playlists, fetch_search_tracks,
     fetch_user_tracks,
 };
@@ -37,19 +42,23 @@ use ratatui_image::{
 use reqwest::Method;
 use image::DynamicImage;
 
-use super::render::render;
-use self::filtering::{apply_unplayable_filter, build_filtered_views, clamp_selection, is_filter_active};
-use self::input::helpers::reset_search_rows;
-use self::input::{InputOutcome, handle_key_event, next_track, prev_track, toggle_play_pause};
+use super::render::{NowPlaying, render};
+use self::filtering::{FilteredViews, apply_unplayable_filter, build_filtered_views, rebuild_matches_if_active};
+use self::nav::PaneId;
+use self::pager::Pagers;
+use self::input::{InputOutcome, expire_pending, handle_key_event, next_track, prev_track, toggle_play_pause};
 use crate::media::{Media, MediaCommand};
 use self::state::{AppData, AppState, Engagement, LyricsStatus, PlaybackSource, PlaylistEdit};
 use self::utils::{
     enter_radio,
-    active_tracks, append_feed_tracks, next_track_trigger_ms, play_queued_track, queued_from_current,
+    append_feed_tracks, await_radio, end_of_track, extend_likes_playback, next_track_trigger_ms, peek_next,
+    radio_result, radio_seed_due, start_station,
 };
 
 /// How long a track must have been playing before its lyrics are looked up.
 const LYRICS_DEBOUNCE: Duration = Duration::from_millis(400);
+/// How many playlists/albums are asked "anything playable?" at once.
+const CONTAINER_PROBES: usize = 6;
 
 enum AppEvent {
     Redraw(Result<ResizeResponse, Errors>),
@@ -91,23 +100,36 @@ enum Msg {
     FeedTracks(u64, Vec<Track>),
     /// Tracks of one later feed item, to append to the queue while the feed plays.
     FeedQueue(u64, Vec<Track>),
-    /// Related tracks for the radio seed, to append to the queue.
-    Related(u64, Vec<Track>),
+    /// Related tracks for the radio seed, to append to the queue; `None` when the
+    /// request failed.
+    Related(u64, Option<Vec<Track>>),
     /// A mix built for an artist station: the seed artist plus a few related artists,
     /// one playable track apiece.
     ArtistStation(u64, Vec<Track>),
     /// A playlist the user just created, to show at the top of the library.
     PlaylistCreated(Playlist),
     /// Lyrics lookup result for a track URN (`None` = nothing found).
-    Lyrics(String, Option<Lyrics>),
+    /// `Err` when the lyrics service could not be asked; that is not remembered as a miss.
+    Lyrics(String, Result<Option<Lyrics>, String>),
     Engagement(Engagement),
+    /// A like or follow the server refused, and why; the optimistic change is undone.
+    EngagementFailed(Engagement, String),
+    /// A playlist write the server refused; the text is ready to show.
+    PlaylistEditFailed(String),
+    /// A fetch that failed; the text is ready to show.
+    FetchFailed(String),
+    /// A page fetch for a list finished: whether more pages remain, or why it failed.
+    PageSettled(List, Result<bool, String>),
+    /// A playlist or album (by `tracks_uri`) and whether anything in it can be played.
+    /// `None` when the check itself failed; nothing is concluded from that.
+    ContainerProbed(String, Option<bool>),
 }
 
-pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded) -> anyhow::Result<()> {
+pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loaded, setup: bool) -> anyhow::Result<()> {
     color_eyre::install().map_err(|e| anyhow::anyhow!(e))?;
     let terminal = ratatui::init();
     // Lets terminals that speak the kitty keyboard protocol report Shift+Enter; others still
-    // send a plain Enter (Shift+G covers them).
+    // send a plain Enter (S covers them).
     let enhanced_keys = supports_keyboard_enhancement().unwrap_or(false);
     if enhanced_keys {
         let _ = execute!(
@@ -115,7 +137,7 @@ pub fn run(api: &mut Arc<Mutex<API>>, player: Player, config: crate::config::Loa
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         );
     }
-    let result = start(terminal, api, player, config);
+    let result = start(terminal, api, player, config, setup);
     if enhanced_keys {
         let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     }
@@ -135,20 +157,68 @@ fn invalidate_screen(terminal: &mut DefaultTerminal) {
     terminal.swap_buffers();
 }
 
-fn spawn_fetch<F>(api: Arc<Mutex<API>>, tx: Sender<Msg>, fetch_fn: F)
+/// Bring filter matches, cursors and table states in line with the lists as they are
+/// now. Run before every draw.
+fn settle(state: &mut AppState, data: &mut AppData) -> FilteredViews {
+    if !nav::has_nav(state.settings.layout) {
+        state.nav_focused = false;
+    }
+    rebuild_matches_if_active(state, data);
+    let views = build_filtered_views(state, data);
+    nav::clamp(state, data, &views);
+    nav::sync_tables(state, data);
+    views
+}
+
+/// Fetch the next page of `list` on its own thread, unless `pagers` says not yet:
+/// one is already out, the last one failed too recently, or the list has ended.
+fn spawn_fetch<F>(pagers: &mut Pagers, list: List, api: &Arc<Mutex<API>>, tx: &Sender<Msg>, fetch_fn: F)
 where
     F: FnOnce(&mut API) -> anyhow::Result<Msg> + Send + 'static,
 {
-    std::thread::spawn(move || {
-        let result = {
-            let mut api_guard = api.lock().unwrap();
-            fetch_fn(&mut api_guard)
-        };
+    if !pagers.start(list, Instant::now()) {
+        return;
+    }
+    let (api, tx) = (Arc::clone(api), tx.clone());
+    std::thread::spawn(move || fetch_and_settle(list, &api, &tx, fetch_fn));
+}
 
-        if let Ok(item) = result {
-            let _ = tx.send(item);
+/// The library's lists, in sub-tab order.
+const LIBRARY: [List; 4] = [List::Likes, List::Playlists, List::Albums, List::Following];
+
+/// `spawn_fetch` for `list`'s next page.
+fn fetch_next_page(pagers: &mut Pagers, list: List, api: &Arc<Mutex<API>>, tx: &Sender<Msg>) {
+    match list {
+        List::Likes => spawn_fetch(pagers, list, api, tx, |api| api.get_liked_tracks().map(Msg::Likes)),
+        List::Playlists => spawn_fetch(pagers, list, api, tx, |api| api.get_playlists().map(Msg::Playlists)),
+        List::Albums => spawn_fetch(pagers, list, api, tx, |api| api.get_albums().map(Msg::Albums)),
+        List::Following => spawn_fetch(pagers, list, api, tx, |api| api.get_following().map(Msg::Following)),
+        List::Feed => spawn_fetch(pagers, list, api, tx, |api| api.get_activities().map(Msg::Feed)),
+    }
+}
+
+/// Run one page fetch and always report how it went: `pagers` holds the list back
+/// until its `PageSettled` arrives, so a fetch that panics counts as one that failed.
+/// A panic poisons the `api` lock on its way out; the cursors in there only move once
+/// a page has been read, so the lock is taken regardless.
+fn fetch_and_settle<F>(list: List, api: &Mutex<API>, tx: &Sender<Msg>, fetch_fn: F)
+where
+    F: FnOnce(&mut API) -> anyhow::Result<Msg>,
+{
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut api_guard = api.lock().unwrap_or_else(|e| e.into_inner());
+        let result = fetch_fn(&mut api_guard);
+        (result, api_guard.has_more(list))
+    }));
+    let settled = match outcome {
+        Ok((Ok(rows), more)) => {
+            let _ = tx.send(rows);
+            Ok(more)
         }
-    });
+        Ok((Err(e), _)) => Err(format!("Fetch failed: {e:#}")),
+        Err(_) => Err("Fetch failed: internal error".to_string()),
+    };
+    let _ = tx.send(Msg::PageSettled(list, settled));
 }
 
 /// Runs `fut` on the runtime and forwards its tracks tagged with `request_id`.
@@ -161,9 +231,10 @@ fn spawn_tracks(
 ) -> tokio::task::JoinHandle<()> {
     let tx = tx.clone();
     rt.spawn(async move {
-        if let Ok(tracks) = fut.await {
-            let _ = tx.send(wrap(request_id, tracks));
-        }
+        let _ = tx.send(match fut.await {
+            Ok(tracks) => wrap(request_id, tracks),
+            Err(e) => Msg::FetchFailed(format!("Could not load tracks: {e:#}")),
+        });
     })
 }
 
@@ -182,7 +253,8 @@ const ARTIST_STATION_TRACKS_PER_RELATED_ARTIST: usize = 3;
 /// SoundCloud's own (private-API) "Artist station". Failures for individual sources are
 /// swallowed; a partial mix (down to just the seed artist) still beats none.
 async fn fetch_artist_station_tracks(token: Arc<Mutex<Token>>, seed_urn: String) -> anyhow::Result<Vec<Track>> {
-    let seed_tracks = fetch_user_tracks(Arc::clone(&token), seed_urn.clone(), "tracks")
+    // One page of each artist is plenty to pick a handful of tracks from.
+    let seed_tracks = fetch_user_tracks(Arc::clone(&token), seed_urn.clone(), "tracks", 1)
         .await
         .unwrap_or_default();
 
@@ -204,7 +276,7 @@ async fn fetch_artist_station_tracks(token: Arc<Mutex<Token>>, seed_urn: String)
     for artist_urn in related_users.into_iter().take(ARTIST_STATION_RELATED_ARTISTS).map(|a| a.urn) {
         let token = Arc::clone(&token);
         fetches.spawn(async move {
-            let mut tracks = fetch_user_tracks(token, artist_urn, "tracks").await.unwrap_or_default();
+            let mut tracks = fetch_user_tracks(token, artist_urn, "tracks", 1).await.unwrap_or_default();
             tracks.retain(Track::is_playable);
             tracks.truncate(ARTIST_STATION_TRACKS_PER_RELATED_ARTIST);
             tracks
@@ -234,42 +306,80 @@ fn start(
     api: &mut Arc<Mutex<API>>,
     player: Player,
     config: crate::config::Loaded,
+    setup: bool,
 ) -> anyhow::Result<()> {
     let mut state = AppState::default();
     state.keymap = config.keymap;
     state.theme_name = config.theme_name;
     state.theme_overrides = config.theme_overrides;
     state.settings = config.settings;
+    state.config_load_failed = config.load_failed;
+    wizard::on_start(&mut state, config.fresh, setup);
     player.set_crossfade(state.settings.crossfade_ms(), state.settings.crossfade_user_skips);
     state.eq = config.eq;
     crate::player::eq::set(state.eq.gains);
 
-    let mut api_guard = api.lock().unwrap();
-    let mut data = AppData::new(&mut api_guard, state.selected_row)?;
-    drop(api_guard);
-    apply_unplayable_filter(&mut state, &mut data);
+    let mut data = AppData::loading();
 
     let async_rt = tokio::runtime::Runtime::new().unwrap();
     // Fetch threads hold the `api` lock for whole HTTP requests, so the UI thread must never
-    // take it. The token Arc is stable across re-auth (main.rs rebuilds the API around the
-    // same Arc), so clone it once here.
-    let token = api.lock().unwrap().token_clone();
+    // take it. The token Arc is stable across re-auth (main.rs swaps the token inside
+    // it), so clone it once here.
+    let token = api.lock().unwrap_or_else(|e| e.into_inner()).token_clone();
     let auth = || Arc::clone(&token);
 
     let (tx, rx) = mpsc::channel::<Msg>();
 
-    spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-        api.get_playlists().map(Msg::Playlists)
-    });
-    // Later feed pages are only fetched while the feed tab is on screen, so a hidden
-    // feed tab costs nothing beyond this first page - skip that too.
-    if !state.settings.hide_feed_tab {
-        spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-            api.get_activities().map(Msg::Feed)
+    // Playlist writes run one at a time, in the order they were made: add and remove
+    // each read the whole track list and write it back, so two at once on the same
+    // playlist would lose one of them.
+    let (edit_tx, mut edit_rx) = tokio::sync::mpsc::unbounded_channel::<PlaylistEdit>();
+    {
+        let token = auth();
+        let tx = tx.clone();
+        async_rt.spawn(async move {
+            while let Some(edit) = edit_rx.recv().await {
+                let token = Arc::clone(&token);
+                let (what, result) = match edit {
+                    PlaylistEdit::Add { playlist_id, tracks_uri, track_urn } => (
+                        "Adding to playlist",
+                        add_track_to_playlist(token, playlist_id, tracks_uri, track_urn).await,
+                    ),
+                    PlaylistEdit::Remove { playlist_id, tracks_uri, track_urn } => (
+                        "Removing from playlist",
+                        remove_track_from_playlist(token, playlist_id, tracks_uri, track_urn).await,
+                    ),
+                    PlaylistEdit::Create { title, track_urn, public } => (
+                        "Creating playlist",
+                        create_playlist(token, title, track_urn, public).await.map(|playlist| {
+                            let _ = tx.send(Msg::PlaylistCreated(playlist));
+                        }),
+                    ),
+                    PlaylistEdit::Delete { playlist_id } => {
+                        ("Deleting playlist", delete_playlist(token, playlist_id).await)
+                    }
+                };
+                if let Err(e) = result {
+                    let _ = tx.send(Msg::PlaylistEditFailed(format!("{what} failed: {e:#}")));
+                }
+            }
         });
     }
 
-    let mut picker = Picker::from_query_stdio()?;
+    // Launch waits for none of these: the lists start empty and fill in as pages land.
+    let mut pagers = Pagers::default();
+    for list in LIBRARY {
+        fetch_next_page(&mut pagers, list, api, &tx);
+    }
+    // Later feed pages are only fetched while the feed tab is on screen, so a hidden
+    // feed tab costs nothing beyond this first page - skip that too.
+    if !state.settings.hide_feed_tab {
+        fetch_next_page(&mut pagers, List::Feed, api, &tx);
+    }
+
+    // A terminal that does not answer the query gets half-block cover art at a guessed
+    // cell size (the size ratatui-image itself assumes when it has to) instead of no app.
+    let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((10, 20)));
 
     let (tx_worker, rx_worker) = mpsc::channel::<ResizeRequest>();
     let (tx_main, rx_main) = mpsc::channel::<AppEvent>();
@@ -310,6 +420,7 @@ fn start(
     let mut media_synced_at = Instant::now();
     let mut media_synced_pos: u64 = 0;
 
+    let mut hiding_unplayable = state.settings.hide_unplayable;
     loop {
         // Rows that arrived this iteration; the hide-unplayable setting prunes them
         // once here rather than in each of the arms below.
@@ -318,31 +429,12 @@ fn start(
             fetched = true;
             match msg {
                 Msg::Likes(new) => {
-                    for t in &new {
-                        data.liked_track_urns.insert(t.track_urn.clone());
-                    }
-                    data.likes.extend(new);
+                    extend_likes_playback(&mut state, &mut data, &new);
+                    data.add_likes(new);
                 }
-                Msg::Playlists(new) => {
-                    for p in &new {
-                        if !p.is_owned {
-                            data.liked_playlist_uris.insert(p.tracks_uri.clone());
-                        }
-                    }
-                    data.playlists.extend(new);
-                }
-                Msg::Albums(new) => {
-                    for a in &new {
-                        data.liked_album_uris.insert(a.tracks_uri.clone());
-                    }
-                    data.albums.extend(new);
-                }
-                Msg::Following(new) => {
-                    for a in &new {
-                        data.followed_user_urns.insert(a.urn.clone());
-                    }
-                    data.following.extend(new);
-                }
+                Msg::Playlists(new) => data.add_playlists(new),
+                Msg::Albums(new) => data.add_albums(new),
+                Msg::Following(new) => data.add_following(new),
                 Msg::PlaylistTracks(id, t) => state.playlist_tracks_fetch.accept(
                     id, t, &mut data.playlist_tracks, &mut data.playlist_tracks_state,
                 ),
@@ -387,62 +479,99 @@ fn start(
                     if id == state.feed_queue_fetch.request_id
                         && state.playback_source == PlaybackSource::Feed
                     {
-                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, t);
+                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, t, false);
                     }
                 }
                 Msg::Related(id, tracks) => {
                     if id == state.radio_fetch.request_id
                         && state.playback_source == PlaybackSource::Radio
+                        && let Some(track) = radio_result(&mut state, &mut data, tracks, Instant::now())
                     {
-                        append_feed_tracks(&mut data.playback_tracks, &mut state.auto_queue, tracks);
-                        if state.radio_waiting
-                            && let Some(next_idx) = state.auto_queue.pop_front()
-                            && let Some(track) = data.playback_tracks.get(next_idx).cloned()
-                        {
-                            if let Some(current) = queued_from_current(&state, &data) {
-                                state.playback_history.push(current);
-                            }
-                            player.play(track, TrackChange::Natural);
-                            state.override_playing = None;
-                            state.current_playing_index = Some(next_idx);
-                            state.radio_waiting = false;
-                        }
+                        player.play(track, TrackChange::Natural);
                     }
                 }
                 Msg::ArtistStation(id, tracks) => {
-                    if id == state.artist_station_fetch.request_id
-                        && let Some(seed) = tracks.first().cloned()
-                    {
-                        if let Some(current) = queued_from_current(&state, &data) {
-                            state.playback_history.push(current);
-                        }
-                        state.manual_queue.clear();
+                    if id != state.artist_station_fetch.request_id {
+                        // Superseded by a later request.
+                    } else if let Some(seed) = tracks.first().cloned() {
                         player.play(seed, TrackChange::UserSkip);
-                        enter_radio(&mut state, &mut data, tracks);
+                        player.resume();
+                        start_station(&mut state, &mut data, tracks);
+                    } else {
+                        state.toast_err("No tracks found for that station");
                     }
                 }
                 Msg::PlaylistCreated(playlist) => {
                     // Keep the cursor on the same playlist as the list shifts down by one.
-                    if state.selected_tab == 0 && state.selected_subtab == 1 && !data.playlists.is_empty() {
-                        state.selected_row += 1;
-                        data.playlists_state.select(Some(state.selected_row));
+                    if !data.playlists.is_empty() {
+                        *nav::cursor_mut(&mut state, PaneId::Playlists) += 1;
                     }
+                    state.toast(format!("Created {}", playlist.title));
                     data.playlists.insert(0, playlist);
                 }
                 Msg::Lyrics(urn, found) => {
-                    lyrics_cache.insert(urn.clone(), found.clone());
+                    if let Ok(found) = &found {
+                        lyrics_cache.insert(urn.clone(), found.clone());
+                    }
                     if state.lyrics_track_urn.as_deref() == Some(urn.as_str()) {
                         state.lyrics = match found {
-                            Some(l) => LyricsStatus::Found(l),
-                            None => LyricsStatus::NotFound,
+                            Ok(Some(l)) => LyricsStatus::Found(l),
+                            Ok(None) => LyricsStatus::NotFound,
+                            // Not cached, so the next time this track plays it is looked up again.
+                            Err(_) => LyricsStatus::Unavailable,
                         };
                     }
                 }
                 Msg::Engagement(done) => done.apply(&mut state, &mut data),
+                Msg::EngagementFailed(refused, why) => refused.failed(&why, &mut state, &mut data),
+                Msg::PlaylistEditFailed(why) => state.toast_err(why),
+                Msg::FetchFailed(why) => state.toast_err(toast::brief_fetch_error(&why)),
+                Msg::PageSettled(list, outcome) => {
+                    let first_page = outcome.is_ok() && std::mem::take(&mut data.loading[list as usize]);
+                    // One notice per run of failures; the retries after it are silent.
+                    let why = outcome.as_ref().err().cloned();
+                    if pagers.settled(list, outcome.ok(), Instant::now())
+                        && let Some(why) = why
+                    {
+                        state.toast_err(toast::brief_fetch_error(&why));
+                    }
+                    // Playlists have always had two pages in before their tab is opened.
+                    if first_page && list == List::Playlists {
+                        fetch_next_page(&mut pagers, list, api, &tx);
+                    }
+                }
+                Msg::ContainerProbed(uri, playable) => {
+                    data.containers.probing = data.containers.probing.saturating_sub(1);
+                    if playable == Some(false) {
+                        data.containers.none_playable.insert(uri);
+                    }
+                }
             }
         }
-        if fetched {
+        // A fresh token that could not be written to disk (it is still the one in use).
+        if let Some(warning) = crate::auth::take_save_warning() {
+            state.toast_err(warning);
+        }
+        // New rows, or the setting changed (from the settings page or the palette).
+        if fetched || hiding_unplayable != state.settings.hide_unplayable {
+            hiding_unplayable = state.settings.hide_unplayable;
             apply_unplayable_filter(&mut state, &mut data);
+        }
+
+        // With "hide unplayable tracks" on, ask about each listed playlist and album once
+        // per session, a few at a time, so the ones with nothing playable can be dropped.
+        if state.settings.hide_unplayable && data.containers.probing < CONTAINER_PROBES {
+            let room = CONTAINER_PROBES - data.containers.probing;
+            let next: Vec<String> = filtering::containers_to_probe(&data).take(room).map(str::to_string).collect();
+            for uri in next {
+                data.containers.probed.insert(uri.clone());
+                data.containers.probing += 1;
+                let (token, tx) = (auth(), tx.clone());
+                async_rt.spawn(async move {
+                    let playable = has_playable_tracks(token, uri.clone()).await.ok();
+                    let _ = tx.send(Msg::ContainerProbed(uri, playable));
+                });
+            }
         }
 
         while let Some(action) = state.engagement_queue.pop_front() {
@@ -471,40 +600,26 @@ fn start(
                 }
             };
             async_rt.spawn(async move {
-                if engage(token, method, path).await.is_ok() {
-                    let _ = tx.send(Msg::Engagement(action));
-                }
+                let _ = tx.send(match engage(token, method, path).await {
+                    Ok(()) => Msg::Engagement(action),
+                    Err(e) => Msg::EngagementFailed(action, format!("{e:#}")),
+                });
             });
         }
 
         while let Some(edit) = state.playlist_edit_queue.pop_front() {
-            let token = auth();
-            let tx = tx.clone();
-            async_rt.spawn(async move {
-                match edit {
-                    PlaylistEdit::Add { playlist_id, tracks_uri, track_urn } => {
-                        let _ = add_track_to_playlist(token, playlist_id, tracks_uri, track_urn).await;
-                    }
-                    PlaylistEdit::Remove { playlist_id, tracks_uri, track_urn } => {
-                        let _ = remove_track_from_playlist(token, playlist_id, tracks_uri, track_urn).await;
-                    }
-                    PlaylistEdit::Create { title, track_urn, public } => {
-                        if let Ok(playlist) = create_playlist(token, title, track_urn, public).await {
-                            let _ = tx.send(Msg::PlaylistCreated(playlist));
-                        }
-                    }
-                    PlaylistEdit::Delete { playlist_id } => {
-                        let _ = delete_playlist(token, playlist_id).await;
-                    }
-                }
-            });
+            let _ = edit_tx.send(edit);
         }
 
         let current_artwork_url = player.current_track().artwork_url;
         while let Ok(app_ev) = rx_main.try_recv() {
             match app_ev {
                 AppEvent::Redraw(completed) => {
-                    let _ = cover_art_async.update_resized_protocol(completed?);
+                    // An image that could not be encoded is simply not shown: the
+                    // protocol gave its image up for encoding and stays empty.
+                    if let Ok(completed) = completed {
+                        let _ = cover_art_async.update_resized_protocol(completed);
+                    }
                 }
                 AppEvent::Artwork(url, image, file) => {
                     if artwork_pending.as_deref() == Some(url.as_str()) {
@@ -550,53 +665,13 @@ fn start(
             });
         }
 
-        let filter_active = is_filter_active(&state);
-        let filtered = build_filtered_views(&state, &data);
-        let likes_len = if filter_active && state.selected_subtab == 0 {
-            filtered.likes.len()
-        } else {
-            data.likes.len()
-        };
-        let playlist_tracks_len = if filter_active && state.selected_subtab == 1 {
-            filtered.playlist_tracks.len()
-        } else {
-            data.playlist_tracks.len()
-        };
-        let albums_len = if filter_active && state.selected_subtab == 2 {
-            filtered.albums.len()
-        } else {
-            data.albums.len()
-        };
-        let following_len = if filter_active && state.selected_subtab == 3 {
-            filtered.following.len()
-        } else {
-            data.following.len()
-        };
-
-        clamp_selection(
-            &mut state,
-            &mut data,
-            filter_active,
-            likes_len,
-            playlist_tracks_len,
-            albums_len,
-            following_len,
-        );
-
-        let albums_ref = if filter_active && state.selected_subtab == 2 {
-            &filtered.albums
-        } else {
-            &data.albums
-        };
-        let following_ref = if filter_active && state.selected_subtab == 3 {
-            &filtered.following
-        } else {
-            &data.following
-        };
+        let filtered = settle(&mut state, &mut data);
 
         if state.selected_tab == 0 && state.selected_subtab == 1 {
-            let selected = data.playlists.get(state.selected_row).map(|p| p.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::Playlists).and_then(|i| data.playlists.get(i)).map(|p| p.tracks_uri.clone());
             state.playlist_tracks_fetch.refetch(
+                PaneId::PlaylistTracks,
+                &mut state.child_cursors,
                 &mut data.playlist_tracks,
                 &mut data.playlist_tracks_state,
                 &mut data.playlist_tracks_uri,
@@ -611,8 +686,10 @@ fn start(
         }
 
         if state.selected_tab == 0 && state.selected_subtab == 2 {
-            let selected = albums_ref.get(state.selected_row).map(|a| a.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::Albums).and_then(|i| data.albums.get(i)).map(|a| a.tracks_uri.clone());
             state.album_tracks_fetch.refetch(
+                PaneId::AlbumTracks,
+                &mut state.child_cursors,
                 &mut data.album_tracks,
                 &mut data.album_tracks_state,
                 &mut data.album_tracks_uri,
@@ -627,10 +704,10 @@ fn start(
         }
 
         if state.selected_tab == 0 && state.selected_subtab == 3 {
-            let selected = following_ref.get(state.selected_row).map(|a| a.urn.clone());
-            // Switching artists only happens via Shift+Up/Down, which already sets the focus
-            // (Artists, or a stale Published/Likes from before); nothing here should override it.
+            let selected = nav::selected_index(&state, PaneId::Following).and_then(|i| data.following.get(i)).map(|a| a.urn.clone());
             state.following_tracks_fetch.refetch(
+                PaneId::FollowingTracks,
+                &mut state.child_cursors,
                 &mut data.following_tracks,
                 &mut data.following_tracks_state,
                 &mut data.following_tracks_user_urn,
@@ -638,11 +715,13 @@ fn start(
                 selected.clone(),
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "tracks"),
+                    fetch_user_tracks(auth(), urn, "tracks", MAX_PAGES),
                     Msg::FollowingTracks,
                 ),
             );
             state.following_likes_fetch.refetch(
+                PaneId::FollowingLikes,
+                &mut state.child_cursors,
                 &mut data.following_likes_tracks,
                 &mut data.following_likes_state,
                 &mut data.following_likes_user_urn,
@@ -650,17 +729,19 @@ fn start(
                 selected,
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "likes/tracks"),
+                    fetch_user_tracks(auth(), urn, "likes/tracks", MAX_PAGES),
                     Msg::FollowingLikes,
                 ),
             );
         }
 
         if state.selected_tab == 2 {
-            let selected = data.feed.get(state.selected_row);
+            let selected = nav::selected_index(&state, PaneId::Feed).and_then(|i| data.feed.get(i));
             let single = selected.and_then(|a| a.track.clone());
             let key = selected.map(|a| a.key.clone());
             state.feed_tracks_fetch.refetch(
+                PaneId::FeedTracks,
+                &mut state.child_cursors,
                 &mut data.feed_tracks,
                 &mut data.feed_tracks_state,
                 &mut data.feed_tracks_key,
@@ -683,22 +764,17 @@ fn start(
             );
         }
 
-        // Radio: keep related tracks queued behind whatever is playing. Seeded by the last
-        // track in the chain so each fetch drifts a little further from the start.
-        if state.playback_source == PlaybackSource::Radio
-            && state.manual_queue.is_empty()
-            && state.auto_queue.len() <= 1
-            && let Some(seed) = data.playback_tracks.last().map(|t| t.track_urn.clone())
-                && state.radio_fetched_for.as_deref() != Some(seed.as_str()) {
-                    state.radio_fetched_for = Some(seed.clone());
-                    state.radio_fetch.cancel();
-                    let id = state.radio_fetch.request_id;
-                    state.radio_fetch.task = Some(spawn_tracks(
-                        &async_rt, &tx, id,
-                        fetch_related_tracks(auth(), seed),
-                        Msg::Related,
-                    ));
-                }
+        // Radio: keep related tracks queued behind whatever is playing. A failure comes
+        // back as `None` (not a toast) so `radio_result` can retry it.
+        if let Some(seed) = radio_seed_due(&state, &data, Instant::now()) {
+            state.radio_fetched_for = Some(seed.clone());
+            state.radio_fetch.cancel();
+            let id = state.radio_fetch.request_id;
+            let (token, tx) = (auth(), tx.clone());
+            state.radio_fetch.task = Some(async_rt.spawn(async move {
+                let _ = tx.send(Msg::Related(id, fetch_related_tracks(token, seed).await.ok()));
+            }));
+        }
 
         // Shift+Enter on a focused artist row: fetch its station mix in the background, then
         // Msg::ArtistStation starts playback once it lands.
@@ -753,7 +829,7 @@ fn start(
             let query = state.query.clone();
             let filter = state.selected_searchfilter;
 
-            reset_search_rows(&mut state);
+            nav::reset_search(&mut state);
 
             data.search_tracks.clear();
             data.search_tracks_state.select(Some(0));
@@ -785,68 +861,23 @@ fn start(
             if !query.trim().is_empty() {
                 let tx = tx.clone();
                 state.search_results_fetch.task = Some(async_rt.spawn(async move {
-                    match filter {
-                        0 => {
-                            if let Ok(tracks) = fetch_search_tracks(token, query).await {
-                                let _ = tx.send(Msg::SearchTracks(request_id, tracks));
-                            }
-                        }
-                        1 => {
-                            if let Ok(albums) = fetch_search_albums(token, query).await {
-                                let _ = tx.send(Msg::SearchAlbums(request_id, albums));
-                            }
-                        }
-                        2 => {
-                            if let Ok(playlists) = fetch_search_playlists(token, query).await {
-                                let _ = tx.send(Msg::SearchPlaylists(request_id, playlists));
-                            }
-                        }
-                        3 => {
-                            if let Ok(people) = fetch_search_people(token, query).await {
-                                let _ = tx.send(Msg::SearchPeople(request_id, people));
-                            }
-                        }
-                        _ => {}
-                    }
+                    let found = match filter {
+                        0 => fetch_search_tracks(token, query).await.map(|t| Msg::SearchTracks(request_id, t)),
+                        1 => fetch_search_albums(token, query).await.map(|a| Msg::SearchAlbums(request_id, a)),
+                        2 => fetch_search_playlists(token, query).await.map(|p| Msg::SearchPlaylists(request_id, p)),
+                        3 => fetch_search_people(token, query).await.map(|p| Msg::SearchPeople(request_id, p)),
+                        _ => return,
+                    };
+                    let _ = tx.send(found.unwrap_or_else(|e| Msg::FetchFailed(format!("Search failed: {e:#}"))));
                 }));
             }
         }
 
-        if state.selected_tab == 1 {
-            match state.selected_searchfilter {
-                0 => {
-                    if !data.search_tracks.is_empty() && state.selected_row >= data.search_tracks.len() {
-                        state.selected_row = data.search_tracks.len() - 1;
-                    }
-                    data.search_tracks_state.select(Some(state.selected_row));
-                }
-                1 => {
-                    if !data.search_albums.is_empty() && state.selected_row >= data.search_albums.len() {
-                        state.selected_row = data.search_albums.len() - 1;
-                        data.search_albums_state.select(Some(state.selected_row));
-                    }
-                }
-                2 => {
-                    if !data.search_playlists.is_empty()
-                        && state.selected_row >= data.search_playlists.len()
-                    {
-                        state.selected_row = data.search_playlists.len() - 1;
-                        data.search_playlists_state.select(Some(state.selected_row));
-                    }
-                }
-                3 => {
-                    if !data.search_people.is_empty() && state.selected_row >= data.search_people.len() {
-                        state.selected_row = data.search_people.len() - 1;
-                        data.search_people_state.select(Some(state.selected_row));
-                    }
-                }
-                _ => {}
-            }
-        }
-
         if state.selected_tab == 1 && state.selected_searchfilter == 2 {
-            let selected = data.search_playlists.get(state.selected_row).map(|p| p.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::SearchPlaylists).and_then(|i| data.search_playlists.get(i)).map(|p| p.tracks_uri.clone());
             state.search_playlist_tracks_fetch.refetch(
+                PaneId::SearchPlaylistTracks,
+                &mut state.child_cursors,
                 &mut data.search_playlist_tracks,
                 &mut data.search_playlist_tracks_state,
                 &mut data.search_playlist_tracks_uri,
@@ -861,8 +892,10 @@ fn start(
         }
 
         if state.selected_tab == 1 && state.selected_searchfilter == 1 {
-            let selected = data.search_albums.get(state.selected_row).map(|a| a.tracks_uri.clone());
+            let selected = nav::selected_index(&state, PaneId::SearchAlbums).and_then(|i| data.search_albums.get(i)).map(|a| a.tracks_uri.clone());
             state.search_album_tracks_fetch.refetch(
+                PaneId::SearchAlbumTracks,
+                &mut state.child_cursors,
                 &mut data.search_album_tracks,
                 &mut data.search_album_tracks_state,
                 &mut data.search_album_tracks_uri,
@@ -877,10 +910,10 @@ fn start(
         }
 
         if state.selected_tab == 1 && state.selected_searchfilter == 3 {
-            let selected = data.search_people.get(state.selected_row).map(|a| a.urn.clone());
-            // Switching people only happens via Shift+Up/Down, which already sets the focus;
-            // nothing here should override it.
+            let selected = nav::selected_index(&state, PaneId::SearchPeople).and_then(|i| data.search_people.get(i)).map(|a| a.urn.clone());
             state.search_people_tracks_fetch.refetch(
+                PaneId::SearchPeopleTracks,
+                &mut state.child_cursors,
                 &mut data.search_people_tracks,
                 &mut data.search_people_tracks_state,
                 &mut data.search_people_tracks_user_urn,
@@ -888,11 +921,13 @@ fn start(
                 selected.clone(),
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "tracks"),
+                    fetch_user_tracks(auth(), urn, "tracks", MAX_PAGES),
                     Msg::SearchPeopleTracks,
                 ),
             );
             state.search_people_likes_fetch.refetch(
+                PaneId::SearchPeopleLikes,
+                &mut state.child_cursors,
                 &mut data.search_people_likes_tracks,
                 &mut data.search_people_likes_state,
                 &mut data.search_people_likes_user_urn,
@@ -900,7 +935,7 @@ fn start(
                 selected,
                 |id, urn| spawn_tracks(
                     &async_rt, &tx, id,
-                    fetch_user_tracks(auth(), urn, "likes/tracks"),
+                    fetch_user_tracks(auth(), urn, "likes/tracks", MAX_PAGES),
                     Msg::SearchPeopleLikes,
                 ),
             );
@@ -916,6 +951,14 @@ fn start(
                 MediaCommand::Previous => prev_track(&mut state, &mut data, &player),
                 MediaCommand::SeekForward => player.fast_forward(),
                 MediaCommand::SeekBackward => player.rewind(),
+            }
+        }
+        if let Some(failure) = player.take_load_failure() {
+            state.toast_err(format!("Couldn't play {}", failure.track.title));
+            // Move on to the next track, unless several in a row have failed
+            // (offline, most likely): then stop instead of emptying the queue.
+            if !failure.give_up {
+                next_track(&mut state, &mut data, &player);
             }
         }
         {
@@ -998,23 +1041,31 @@ fn start(
             state.queue_visible,
             state.history_visible,
             state.help_visible,
+            // A layout change moves the cover art; so does each wizard screen.
+            state.settings.layout,
+            state.wizard.as_ref().map(|w| w.stage),
         );
         if last_view != Some(view) {
             invalidate_screen(&mut terminal);
             last_view = Some(view);
         }
+        expire_pending(&mut state);
+        toast::expire(&mut state.toasts, Instant::now());
+        nav::sync_tables(&state, &mut data);
+        let now_playing = NowPlaying::from_player(&player);
         terminal.draw(|frame| {
             render(
                 frame,
-                &state,
+                &mut state,
                 &mut data,
                 &filtered,
-                &player,
-                &mut cover_art_async,
+                &now_playing,
+                Some(&mut cover_art_async),
                 &wave_buffer,
             )
         })?;
 
+        let mut resized = false;
         while event::poll(Duration::from_millis(10))? {
             match event::read()? {
                 Event::Key(key) => {
@@ -1024,17 +1075,24 @@ fn start(
                         return Ok(());
                     }
                 }
-                Event::Resize(_, _) => {
-                    picker = Picker::from_query_stdio()?;
-                    if let Some(image) = last_artwork_image.as_ref() {
-                        let resize_proto = picker.new_resize_protocol(image.clone());
-                        cover_art_async =
-                            ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
-                    } else {
-                        cover_art_async.empty_protocol();
-                    }
-                }
+                Event::Resize(_, _) => resized = true,
                 _ => {}
+            }
+        }
+        // Once per burst of resize events, and only after the pending input has been
+        // read: the query's answer comes in on stdin too. The font size can change
+        // with the window, so asking again is right, but a terminal that does not
+        // answer just leaves the picker as it was.
+        if resized {
+            if let Ok(queried) = Picker::from_query_stdio() {
+                picker = queried;
+            }
+            if let Some(image) = last_artwork_image.as_ref() {
+                let resize_proto = picker.new_resize_protocol(image.clone());
+                cover_art_async =
+                    ThreadProtocol::new(tx_worker.clone(), Some(resize_proto));
+            } else {
+                cover_art_async.empty_protocol();
             }
         }
 
@@ -1064,21 +1122,8 @@ fn start(
                     && state.preload_triggered_for_track_urn.as_deref() != Some(current_track.track_urn.as_str());
                 
                 if should_preload
-                    && let Some(current_idx) = state.current_playing_index {
-                        let next_track = {
-                            let tracks = active_tracks(&state, &data);
-                            if state.repeat_enabled {
-                                tracks.get(current_idx).cloned()
-                            } else if let Some(queued) = state.manual_queue.front() {
-                                Some(queued.track.clone())
-                            } else if let Some(&next_idx) = state.auto_queue.front() {
-                                tracks.get(next_idx).cloned()
-                            } else {
-                                None
-                            }
-                        };
-
-                        match next_track {
+                    && state.current_playing_index.is_some() {
+                        match peek_next(&state, &data) {
                             Some(track) => {
                                 if track.track_urn != current_track.track_urn && track.is_playable() {
                                     player.preload_next(track);
@@ -1098,47 +1143,26 @@ fn start(
                     state.preload_triggered_for_track_urn = None;
                 }
 
-                let at_end = state.progress >= handover_ms && current_track.duration_ms > 0;
+                // The clock reaching the handover point, or the stream itself running
+                // out first (a preview, or a track the network gave up on).
+                let at_end = (state.progress >= handover_ms || player.track_ended())
+                    && current_track.duration_ms > 0;
 
                 if !at_end {
                     state.end_handled_track_urn = None;
                 } else if state.end_handled_track_urn.as_deref() != Some(current_track.track_urn.as_str()) {
                     state.end_handled_track_urn = Some(current_track.track_urn.clone());
 
-                    if let Some(current_idx) = state.current_playing_index {
-                        if state.repeat_enabled {
-                        if let Some(track) = active_tracks(&state, &data).get(current_idx) {
-                            player.play(track.clone(), TrackChange::Natural);
-                            state.override_playing = None;
-                        }
-                        } else if let Some(queued) = state.manual_queue.pop_front() {
-                        if let Some(current) = queued_from_current(&state, &data) {
-                            state.playback_history.push(current);
-                        }
-                            play_queued_track(
-                                queued,
-                                &mut state,
-                                &mut data,
-                                &player,
-                                true,
-                                TrackChange::Natural,
-                            );
-                        } else if let Some(next_idx) = state.auto_queue.pop_front() {
-                            if let Some(track) = active_tracks(&state, &data).get(next_idx) {
-                                if let Some(current) = queued_from_current(&state, &data) {
-                                    state.playback_history.push(current);
-                                }
-                                player.play(track.clone(), TrackChange::Natural);
-                                state.override_playing = None;
-                                state.current_playing_index = Some(next_idx);
-                            }
+                    if state.current_playing_index.is_some() {
+                        if let Some(track) = end_of_track(&mut state, &data) {
+                            player.play(track, TrackChange::Natural);
                         } else {
                             // Nothing queued: related tracks are (or are about to be) on
                             // their way; Msg::Related starts the next one.
                             if state.playback_source != PlaybackSource::Radio {
                                 enter_radio(&mut state, &mut data, vec![current_track.clone()]);
                             }
-                            state.radio_waiting = true;
+                            await_radio(&mut state);
                         }
                     }
                 }
@@ -1146,38 +1170,7 @@ fn start(
                 state.preload_triggered_for_track_urn = None;
             }
 
-            let filter_active = is_filter_active(&state);
-            let filtered = build_filtered_views(&state, &data);
-            let likes_len = if filter_active && state.selected_subtab == 0 {
-                filtered.likes.len()
-            } else {
-                data.likes.len()
-            };
-            let playlist_tracks_len = if filter_active && state.selected_subtab == 1 {
-                filtered.playlist_tracks.len()
-            } else {
-                data.playlist_tracks.len()
-            };
-            let albums_len = if filter_active && state.selected_subtab == 2 {
-                filtered.albums.len()
-            } else {
-                data.albums.len()
-            };
-            let following_len = if filter_active && state.selected_subtab == 3 {
-                filtered.following.len()
-            } else {
-                data.following.len()
-            };
-
-            clamp_selection(
-                &mut state,
-                &mut data,
-                filter_active,
-                likes_len,
-                playlist_tracks_len,
-                albums_len,
-                following_len,
-            );
+            let filtered = settle(&mut state, &mut data);
 
             let view = (
                 state.selected_tab,
@@ -1188,19 +1181,22 @@ fn start(
                 state.queue_visible,
                 state.history_visible,
                 state.help_visible,
+                state.settings.layout,
+                state.wizard.as_ref().map(|w| w.stage),
             );
             if last_view != Some(view) {
                 invalidate_screen(&mut terminal);
                 last_view = Some(view);
             }
+            let now_playing = NowPlaying::from_player(&player);
             terminal.draw(|frame| {
                 render(
                     frame,
-                    &state,
+                    &mut state,
                     &mut data,
                     &filtered,
-                    &player,
-                    &mut cover_art_async,
+                    &now_playing,
+                    Some(&mut cover_art_async),
                     &wave_buffer,
                 )
             })?;
@@ -1208,25 +1204,46 @@ fn start(
             last_tick = Instant::now();
 
             // Feed is unbounded: only page when the cursor nears the end of what is loaded.
-            if state.selected_tab == 2 && state.selected_row + 10 >= data.feed.len() {
-                spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-                    api.get_activities().map(Msg::Feed)
-                });
+            if state.selected_tab == 2 && nav::cursor(&state, PaneId::Feed) + 10 >= data.feed.len() {
+                fetch_next_page(&mut pagers, List::Feed, api, &tx);
             }
 
-            match state.selected_subtab {
-                0 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-                    api.get_liked_tracks().map(Msg::Likes)
-                }),
-                1 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-                    api.get_playlists().map(Msg::Playlists)
-                }),
-                2 => spawn_fetch(Arc::clone(api), tx.clone(), |api| api.get_albums().map(Msg::Albums)),
-                3 => spawn_fetch(Arc::clone(api), tx.clone(), |api| {
-                    api.get_following().map(Msg::Following)
-                }),
-                _ => {}
+            // The sub-tab on screen keeps paging to its end; the others only until
+            // their first page is in (retried here, with backoff, if launch was offline).
+            for (subtab, list) in LIBRARY.into_iter().enumerate() {
+                if subtab == state.selected_subtab || data.loading[list as usize] {
+                    fetch_next_page(&mut pagers, list, api, &tx);
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// S5: a fetch that panics still settles its pager (as a failure, so it backs off
+    /// and retries), and the lock it poisoned does not take the next fetch down too.
+    #[test]
+    fn a_panicking_fetch_settles_as_failed_and_the_next_one_still_runs() {
+        let token = Token { access_token: String::new(), refresh_token: String::new(), obtained_at: 0 };
+        let api = Mutex::new(API::init(Arc::new(Mutex::new(token))));
+        let (tx, rx) = mpsc::channel();
+        let now = Instant::now();
+        let mut pagers = Pagers::default();
+
+        assert!(pagers.start(List::Likes, now));
+        fetch_and_settle(List::Likes, &api, &tx, |_| panic!("fetch blew up (expected by this test)"));
+        let Ok(Msg::PageSettled(List::Likes, Err(why))) = rx.try_recv() else { panic!("no failed settle") };
+        assert!(why.starts_with("Fetch failed"));
+        assert!(api.is_poisoned());
+        assert!(pagers.settled(List::Likes, None, now), "announced like any first failure");
+        assert!(!pagers.start(List::Likes, now), "backing off");
+        assert!(pagers.start(List::Likes, now + Duration::from_secs(2)), "then retried");
+
+        fetch_and_settle(List::Likes, &api, &tx, |_| Ok(Msg::Likes(Vec::new())));
+        assert!(matches!(rx.try_recv(), Ok(Msg::Likes(_))));
+        assert!(matches!(rx.try_recv(), Ok(Msg::PageSettled(List::Likes, Ok(true)))));
     }
 }

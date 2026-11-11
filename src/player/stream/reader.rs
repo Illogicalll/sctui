@@ -9,8 +9,10 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rodio::Source;
 
@@ -22,22 +24,47 @@ pub(crate) struct SegmentReader {
     current: Option<Arc<Vec<u8>>>,
     offset: usize,
     position: u64,
+    /// Off while the decoder is being built: the probe runs on the thread that
+    /// holds the only sender, so waiting there for more bytes would never end.
+    /// Until this is switched on, running out of chunks reads as end of stream.
+    wait_for_more: Arc<AtomicBool>,
 }
 
 impl SegmentReader {
     pub(crate) fn new(rx: Receiver<Arc<Vec<u8>>>) -> Self {
-        Self { rx: Mutex::new(rx), current: None, offset: 0, position: 0 }
+        Self {
+            rx: Mutex::new(rx),
+            current: None,
+            offset: 0,
+            position: 0,
+            wait_for_more: Arc::new(AtomicBool::new(false)),
+        }
     }
 
-    /// Blocks until the next chunk arrives. `false` once the sender is gone.
+    /// Set to `true` once the decoder is built and something else is feeding
+    /// the channel; from then on a read waits for the next chunk.
+    pub(crate) fn wait_for_more(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.wait_for_more)
+    }
+
+    /// Moves on to the next chunk, waiting for it once `wait_for_more` is on.
+    /// `false` when there is none: the sender is gone, or nothing is queued
+    /// and waiting is still off.
     fn advance(&mut self) -> bool {
-        match self.rx.lock().unwrap().recv() {
-            Ok(chunk) => {
+        let rx = self.rx.lock().unwrap();
+        let next = if self.wait_for_more.load(Ordering::SeqCst) {
+            rx.recv().ok()
+        } else {
+            rx.try_recv().ok()
+        };
+        drop(rx);
+        match next {
+            Some(chunk) => {
                 self.current = Some(chunk);
                 self.offset = 0;
                 true
             }
-            Err(_) => false,
+            None => false,
         }
     }
 }
@@ -87,6 +114,33 @@ impl Seek for SegmentReader {
     }
 }
 
+/// What the audio thread knows about one track's output that the wall clock
+/// does not: how much of what it played was stand-in silence, and whether the
+/// track has run out. Shared with the position clock (see `Position`).
+#[derive(Clone, Default)]
+pub(crate) struct Feed {
+    starved_samples: Arc<AtomicU64>,
+    ended: Arc<AtomicBool>,
+    /// Samples per second across all channels; 0 for the empty default.
+    samples_per_sec: u64,
+}
+
+impl Feed {
+    /// Time spent playing silence because no decoded audio was ready.
+    pub(crate) fn starved(&self) -> Duration {
+        if self.samples_per_sec == 0 {
+            return Duration::ZERO;
+        }
+        let samples = self.starved_samples.load(Ordering::Relaxed);
+        Duration::from_nanos((samples as u128 * 1_000_000_000 / self.samples_per_sec as u128) as u64)
+    }
+
+    /// The decoder has finished and everything it produced has been played.
+    pub(crate) fn ended(&self) -> bool {
+        self.ended.load(Ordering::SeqCst)
+    }
+}
+
 /// Decoded PCM handed over in chunks from the decode thread. Emits silence
 /// while starved (network stall) and ends once the sender is gone and the
 /// buffer is drained.
@@ -97,11 +151,29 @@ pub(crate) struct PcmSource {
     channels: u16,
     sample_rate: u32,
     finished: bool,
+    /// Silence samples emitted since the last whole frame. Audio only resumes
+    /// when this is back to 0, or left and right would swap.
+    off_frame: u16,
+    feed: Feed,
 }
 
 impl PcmSource {
     pub(crate) fn new(rx: Receiver<Vec<f32>>, channels: u16, sample_rate: u32) -> Self {
-        Self { rx, chunk: Vec::new(), index: 0, channels, sample_rate, finished: false }
+        let feed = Feed {
+            samples_per_sec: sample_rate as u64 * channels.max(1) as u64,
+            ..Feed::default()
+        };
+        Self { rx, chunk: Vec::new(), index: 0, channels, sample_rate, finished: false, off_frame: 0, feed }
+    }
+
+    pub(crate) fn feed(&self) -> Feed {
+        self.feed.clone()
+    }
+
+    fn silence(&mut self) -> f32 {
+        self.off_frame = (self.off_frame + 1) % self.channels.max(1);
+        self.feed.starved_samples.fetch_add(1, Ordering::Relaxed);
+        0.0
     }
 }
 
@@ -111,11 +183,16 @@ impl Iterator for PcmSource {
     fn next(&mut self) -> Option<f32> {
         loop {
             if self.index < self.chunk.len() {
+                if self.off_frame != 0 {
+                    // Audio arrived part way through a frame of silence.
+                    return Some(self.silence());
+                }
                 let s = self.chunk[self.index];
                 self.index += 1;
                 return Some(s);
             }
             if self.finished {
+                self.feed.ended.store(true, Ordering::SeqCst);
                 return None;
             }
             match self.rx.try_recv() {
@@ -123,7 +200,7 @@ impl Iterator for PcmSource {
                     self.chunk = chunk;
                     self.index = 0;
                 }
-                Err(TryRecvError::Empty) => return Some(0.0),
+                Err(TryRecvError::Empty) => return Some(self.silence()),
                 Err(TryRecvError::Disconnected) => self.finished = true,
             }
         }
@@ -186,12 +263,80 @@ mod tests {
         assert_eq!(s.next(), Some(0.5));
         assert_eq!(s.next(), Some(-0.5));
         assert_eq!(s.next(), Some(0.0), "starved: silence, not end");
-        tx.send(vec![0.25]).unwrap();
+        assert!(!s.feed().ended());
+        tx.send(vec![0.25, 0.75]).unwrap();
         drop(tx);
+        assert_eq!(s.next(), Some(0.0), "the silent frame is finished first");
         assert_eq!(s.next(), Some(0.25));
+        assert_eq!(s.next(), Some(0.75));
         assert_eq!(s.next(), None);
+        assert!(s.feed().ended(), "decoder gone and buffer drained");
         assert_eq!(s.channels(), 2);
         assert_eq!(s.sample_rate(), 44_100);
+    }
+
+    #[test]
+    fn a_reader_being_probed_reports_end_of_stream_instead_of_waiting() {
+        // The sender stays alive, as it does while the decoder is being built.
+        let (tx, rx) = mpsc::channel();
+        tx.send(Arc::new(b"not audio".to_vec())).unwrap();
+        let mut r = SegmentReader::new(rx);
+        let mut out = Vec::new();
+        r.read_to_end(&mut out).unwrap();
+        assert_eq!(out, b"not audio");
+
+        // Once the decoder is built, reads wait for the pump's next chunk.
+        r.wait_for_more().store(true, Ordering::SeqCst);
+        let feeder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            tx.send(Arc::new(b"more".to_vec())).unwrap();
+        });
+        let mut four = [0u8; 4];
+        r.read_exact(&mut four).unwrap();
+        assert_eq!(&four, b"more");
+        feeder.join().unwrap();
+    }
+
+    #[test]
+    fn audio_arriving_mid_frame_does_not_swap_left_and_right() {
+        let (tx, rx) = mpsc::sync_channel(4);
+        let mut s = PcmSource::new(rx, 2, 44_100);
+        // Left is always positive, right always negative.
+        tx.send(vec![0.1, -0.1]).unwrap();
+        assert_eq!((s.next(), s.next()), (Some(0.1), Some(-0.1)));
+        // Starved for the left sample of a frame; audio is back for the right.
+        assert_eq!(s.next(), Some(0.0));
+        tx.send(vec![0.2, -0.2, 0.3, -0.3]).unwrap();
+        let rest: Vec<f32> = (0..5).map(|_| s.next().unwrap()).collect();
+        assert_eq!(rest, [0.0, 0.2, -0.2, 0.3, -0.3]);
+    }
+
+    #[test]
+    fn starvation_is_counted_as_time_not_played() {
+        let (tx, rx) = mpsc::sync_channel(4);
+        let mut s = PcmSource::new(rx, 2, 1_000);
+        let feed = s.feed();
+        tx.send(vec![0.5; 100]).unwrap();
+        for _ in 0..100 {
+            s.next();
+        }
+        assert_eq!(feed.starved(), Duration::ZERO, "real audio is not starvation");
+        // Half a second of stereo at 1 kHz with nothing to play.
+        for _ in 0..1_000 {
+            assert_eq!(s.next(), Some(0.0));
+        }
+        assert_eq!(feed.starved(), Duration::from_millis(500));
+
+        // The position clock leaves that half second out.
+        let t0 = std::time::Instant::now();
+        let pos = crate::player::Position {
+            elapsed: Duration::from_secs(10),
+            last_start: Some(t0),
+            feed,
+            ..Default::default()
+        };
+        assert_eq!(pos.at(t0 + Duration::from_secs(2)), Duration::from_millis(11_500));
+        assert_eq!(Feed::default().starved(), Duration::ZERO);
     }
 }
 

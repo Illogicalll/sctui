@@ -46,6 +46,7 @@ impl SegmentCache {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct CachedHls {
     pub track_urn: String,
     pub fetched_at: Instant,

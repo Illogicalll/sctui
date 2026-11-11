@@ -20,6 +20,12 @@ pub struct Loaded {
     pub settings: Settings,
     pub eq: Equalizer,
     pub warnings: Vec<String>,
+    /// The file exists but could not be read in full, so what is in memory is
+    /// partly defaults. `save` refuses while this is set, or it would overwrite
+    /// the user's file with them.
+    pub load_failed: bool,
+    /// There was no config file at all: a fresh install, which gets the setup wizard.
+    pub fresh: bool,
 }
 
 /// Per-band equaliser gains in dB, edited from the EQ page of the `?` overlay.
@@ -44,26 +50,92 @@ impl Equalizer {
     }
 }
 
+/// How the main screen is arranged. Every layout draws the same panes and player
+/// from the same state; `render::layouts` has one function for each.
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Layout {
+    #[default]
+    Classic,
+    Tighten,
+    Sidebar,
+    Columns,
+    PlayerPanel,
+}
+
+impl Layout {
+    pub const ALL: [Layout; 5] =
+        [Layout::Classic, Layout::Tighten, Layout::Sidebar, Layout::Columns, Layout::PlayerPanel];
+
+    /// The name in the config file and on the settings page.
+    pub fn label(self) -> &'static str {
+        match self {
+            Layout::Classic => "classic",
+            Layout::Tighten => "tighten",
+            Layout::Sidebar => "sidebar",
+            Layout::Columns => "columns",
+            Layout::PlayerPanel => "player-panel",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Layout> {
+        Self::ALL.into_iter().find(|l| l.label() == label)
+    }
+
+    fn step(self, by: usize) -> Layout {
+        let at = Self::ALL.iter().position(|l| *l == self).unwrap_or(0);
+        Self::ALL[(at + by) % Self::ALL.len()]
+    }
+
+    /// The layout after this one, wrapping.
+    pub fn next(self) -> Layout {
+        self.step(1)
+    }
+
+    /// The layout before this one, wrapping.
+    pub fn prev(self) -> Layout {
+        self.step(Self::ALL.len() - 1)
+    }
+}
+
+/// An unknown layout name falls back to the default instead of failing the whole
+/// `[settings]` table (which would also block saving); `load_from` warns about it.
+fn de_layout<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Layout, D::Error> {
+    Ok(Layout::from_label(&String::deserialize(deserializer)?).unwrap_or_default())
+}
+
 /// Options edited from the settings page of the `?` overlay.
 #[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(deserialize_with = "de_layout")]
+    pub layout: Layout,
     pub hide_unplayable: bool,
     pub hide_feed_tab: bool,
     pub crossfade: bool,
     #[serde(deserialize_with = "de_secs")]
     pub crossfade_secs: f32,
     pub crossfade_user_skips: bool,
+    /// The row of applicable keys along the bottom.
+    pub hint_line: bool,
+    /// Sidebar on a wide terminal: show the queue as a column instead of a popup.
+    pub dock_queue: bool,
+    /// The setup wizard was finished or skipped. Not on the settings page.
+    pub onboarded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            layout: Layout::Classic,
             hide_unplayable: false,
             hide_feed_tab: false,
             crossfade: false,
             crossfade_secs: 5.0,
             crossfade_user_skips: true,
+            hint_line: true,
+            dock_queue: false,
+            onboarded: false,
         }
     }
 }
@@ -94,11 +166,16 @@ pub enum SettingRow {
     CrossfadeToggle(&'static str, fn(&mut Settings) -> &mut bool),
     /// A number of seconds in half-second steps, adjusted with left/right.
     Secs(&'static str, fn(&mut Settings) -> &mut f32),
+    /// One of the layouts: left/right cycle through them, Enter or Space goes forward.
+    Choice(&'static str, fn(&mut Settings) -> &mut Layout),
 }
 
 impl Settings {
     /// The settings page, in display order.
-    pub const ROWS: [SettingRow; 5] = [
+    pub const ROWS: [SettingRow; 8] = [
+        SettingRow::Choice("Layout", |s| &mut s.layout),
+        SettingRow::Toggle("Hint line", |s| &mut s.hint_line),
+        SettingRow::Toggle("Dock the queue (Sidebar, wide terminals)", |s| &mut s.dock_queue),
         SettingRow::Toggle("Hide unplayable tracks", |s| &mut s.hide_unplayable),
         SettingRow::Toggle("Hide feed tab", |s| &mut s.hide_feed_tab),
         SettingRow::Toggle("Crossfade between tracks", |s| &mut s.crossfade),
@@ -141,7 +218,8 @@ impl SettingRow {
         match self {
             SettingRow::Toggle(label, _)
             | SettingRow::CrossfadeToggle(label, _)
-            | SettingRow::Secs(label, _) => label,
+            | SettingRow::Secs(label, _)
+            | SettingRow::Choice(label, _) => label,
         }
     }
 
@@ -163,6 +241,7 @@ impl SettingRow {
             SettingRow::Secs(_, field) => {
                 (format!("{:.1}s", field(&mut settings)), settings.crossfade)
             }
+            SettingRow::Choice(_, field) => (format!("‹ {} ›", field(&mut settings).label()), true),
         }
     }
 }
@@ -187,14 +266,56 @@ struct ThemeSection {
 
 /// Defaults plus whatever the file overrides. Also installs the theme.
 pub fn load() -> Loaded {
-    let text = std::fs::read_to_string(path()).unwrap_or_default();
+    let text = match std::fs::read_to_string(path()) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        // There, but unreadable: not a fresh install.
+        Err(_) => Some(String::new()),
+    };
+    load_text(text.as_deref())
+}
+
+/// [`load`] given the file's text, or `None` when there is no file.
+fn load_text(text: Option<&str>) -> Loaded {
+    Loaded { fresh: text.is_none(), ..load_from(text.unwrap_or_default()) }
+}
+
+fn load_from(text: &str) -> Loaded {
     let mut warnings = Vec::new();
 
     let mut keymap = Keymap::default();
-    warnings.extend(keymap.apply_toml(&text));
+    warnings.extend(keymap.apply_toml(text));
+    // ponytail: string match on apply_toml's own message; return a flag from it if this grows.
+    let mut load_failed = warnings.iter().any(|w| w.contains("could not be parsed"));
 
-    // A parse failure was already reported by the keymap parse.
-    let file: File = toml::from_str(&text).unwrap_or_default();
+    let file: File = match toml::from_str(text) {
+        Ok(file) => file,
+        Err(e) => {
+            // A syntax error was already reported by the keymap parse; a wrong type
+            // in one of these tables was not, and resets all three.
+            if !load_failed {
+                warnings.push(format!(
+                    "[theme], [settings] and [eq] could not be read, using defaults for all three: {e}"
+                ));
+            }
+            load_failed = true;
+            File::default()
+        }
+    };
+    // `de_layout` let an unknown name through as the default; say so.
+    let layout_name = text.parse::<toml::Table>().ok().and_then(|file| {
+        file.get("settings")?.get("layout")?.as_str().map(str::to_string)
+    });
+    if let Some(name) = layout_name.filter(|name| Layout::from_label(name).is_none()) {
+        warnings.push(format!(
+            "unknown layout '{name}' (have: {}); using {}",
+            Layout::ALL.map(Layout::label).join(", "),
+            Layout::default().label()
+        ));
+    }
+    if load_failed {
+        warnings.push("in-app changes will not be saved until config.toml is fixed and sctui restarted".to_string());
+    }
     let theme_name = file.theme.name.unwrap_or_else(|| Theme::DEFAULT.name.to_string());
     let base = Theme::by_name(&theme_name).unwrap_or_else(|| {
         warnings.push(format!(
@@ -214,32 +335,38 @@ pub fn load() -> Loaded {
         settings: file.settings,
         eq: file.eq.clamped(),
         warnings,
+        load_failed,
+        fresh: false,
     }
 }
 
 /// Write the file: theme choice, any colour overrides, the settings toggles, the
 /// equaliser gains, and only the key bindings that differ from the defaults.
+/// Refused when the file failed to load (`Loaded::load_failed`): memory then holds
+/// defaults, not what the user wrote.
 pub fn save(
+    load_failed: bool,
     keymap: &Keymap,
     theme_name: &str,
     overrides: &Overrides,
     settings: &Settings,
     eq: &Equalizer,
 ) -> std::io::Result<()> {
+    if load_failed {
+        return Err(std::io::Error::other("config.toml has errors; fix it and restart sctui"));
+    }
+    // Tests drive the real input handlers; none of them may write the user's config.
+    if cfg!(test) {
+        return Ok(());
+    }
     let path = path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let mut out = String::from(
-        "# sctui configuration. Edit here or from the app (? for keys, Shift+O for themes).\n\n[theme]\n",
+        "# sctui configuration. Edit here or from the app (? for keys, t for themes).\n\n[theme]\n",
     );
-    out.push_str(&format!("name = \"{theme_name}\"\n"));
-    if !overrides.0.is_empty() {
-        out.push_str("\n[theme.colors]\n");
-        for (role, value) in &overrides.0 {
-            out.push_str(&format!("{role} = \"{value}\"\n"));
-        }
-    }
+    out.push_str(&theme_section(theme_name, overrides));
     out.push_str("\n[settings]\n");
     out.push_str(&settings_section(settings));
     out.push_str("\n[eq]\n");
@@ -259,13 +386,29 @@ pub fn template() -> String {
     out.push_str(".\n# [theme.colors] overrides single roles with \"#rrggbb\" or a colour name: ");
     out.push_str(&theme::ROLES.join(", "));
     out.push_str(".\n[theme]\nname = \"default\"\n# [theme.colors]\n# accent = \"#7aa2f7\"\n\n");
-    out.push_str("# Options also editable in the app (? then Tab). crossfade_secs is 0.5-12, in half-second steps.\n[settings]\n");
+    out.push_str("# Options also editable in the app (? then Tab). layout is one of classic, tighten, sidebar,\n# columns, player-panel. crossfade_secs is 0.5-12, in half-second steps.\n[settings]\n");
     out.push_str(&settings_section(&Settings::default()));
     out.push_str("\n# Equaliser gains in dB, one per band (60Hz 230Hz 910Hz 3kHz 8kHz 16kHz),\n");
     out.push_str("# -12 to +12. Also editable in the app (? then Tab twice).\n[eq]\n");
     out.push_str(&eq_section(&Equalizer::default()));
     out.push('\n');
     out.push_str(&Keymap::default().keys_section(false));
+    out
+}
+
+/// The body of `[theme]` and, when there are overrides, `[theme.colors]`.
+fn theme_section(theme_name: &str, overrides: &Overrides) -> String {
+    let quoted = |s: &str| toml::Value::String(s.to_string()).to_string();
+    let mut out = format!("name = {}\n", quoted(theme_name));
+    if !overrides.0.is_empty() {
+        out.push_str("\n[theme.colors]\n");
+        for (role, value) in &overrides.0 {
+            let bare = !role.is_empty()
+                && role.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            let key = if bare { role.clone() } else { quoted(role) };
+            out.push_str(&format!("{key} = {}\n", quoted(value)));
+        }
+    }
     out
 }
 
@@ -296,6 +439,8 @@ mod tests {
         assert!(!file.settings.crossfade);
         assert_eq!(file.settings.crossfade_secs, Settings::default().crossfade_secs);
         assert!(file.settings.crossfade_user_skips);
+        assert!(file.settings.hint_line);
+        assert_eq!(file.settings.layout, Layout::Classic);
         assert_eq!(file.eq.gains, [0; 6]);
     }
 
@@ -318,6 +463,7 @@ mod tests {
                     *field(&mut settings) = true
                 }
                 SettingRow::Secs(_, field) => *field(&mut settings) = 9.5,
+                SettingRow::Choice(_, field) => *field(&mut settings) = Layout::Columns,
             }
         }
         let text = format!("[settings]\n{}", settings_section(&settings));
@@ -391,6 +537,77 @@ mod tests {
         assert_eq!(row.display(settings), ("on".to_string(), true));
         settings.crossfade_user_skips = false;
         assert_eq!(row.display(settings), ("off".to_string(), false));
+    }
+
+    #[test]
+    fn only_a_missing_file_is_a_fresh_install() {
+        assert!(load_text(None).fresh);
+        // An empty file, or one written before the wizard existed, is an upgrade.
+        assert!(!load_text(Some("")).fresh);
+        let old = load_text(Some("[settings]\ncrossfade = true\n"));
+        assert!(!old.fresh && !old.settings.onboarded && old.settings.layout == Layout::Classic);
+        assert!(load_text(Some("[settings]\nonboarded = true\n")).settings.onboarded);
+    }
+
+    #[test]
+    fn layout_round_trips_in_toml() {
+        for layout in Layout::ALL {
+            let settings = Settings { layout, ..Default::default() };
+            let text = format!("[settings]\n{}", settings_section(&settings));
+            assert!(text.contains(&format!("layout = \"{}\"\n", layout.label())), "{text}");
+            let loaded = load_from(&text);
+            assert_eq!(loaded.settings.layout, layout);
+            assert!(loaded.warnings.is_empty() && !loaded.load_failed, "{:?}", loaded.warnings);
+            // The label is the serde name, so the palette and the file agree.
+            assert_eq!(toml::Value::try_from(layout).unwrap().as_str(), Some(layout.label()));
+        }
+        assert_eq!(Layout::PlayerPanel.label(), "player-panel");
+        // A config from before layouts existed stays on Classic, hint line on, not onboarded.
+        let older = load_from("[settings]\nhide_feed_tab = true\n").settings;
+        assert_eq!(older.layout, Layout::Classic);
+        assert!(older.hint_line && !older.dock_queue && !older.onboarded);
+        // dock_queue has a row on the settings page; onboarded round-trips without one.
+        let text = format!("[settings]\n{}", settings_section(&Settings { dock_queue: true, onboarded: true, ..Default::default() }));
+        let loaded = load_from(&text).settings;
+        assert!(loaded.dock_queue && loaded.onboarded);
+        assert_eq!(Layout::ALL.map(Layout::next), [Layout::Tighten, Layout::Sidebar, Layout::Columns, Layout::PlayerPanel, Layout::Classic]);
+        assert!(Layout::ALL.into_iter().all(|l| l.next().prev() == l));
+    }
+
+    #[test]
+    fn unknown_layout_warns_and_defaults() {
+        let loaded = load_from("[settings]\nlayout = \"mosaic\"\ncrossfade = true\n");
+        assert_eq!(loaded.settings.layout, Layout::Classic);
+        assert!(loaded.settings.crossfade, "the rest of [settings] still loads");
+        assert!(!loaded.load_failed, "and in-app saves are not blocked");
+        let warning = loaded.warnings.iter().find(|w| w.contains("mosaic")).expect("a warning naming it");
+        assert!(warning.contains("player-panel") && warning.contains("using classic"), "{warning}");
+        // The Rust-style name is not the config name.
+        assert!(!load_from("[settings]\nlayout = \"PlayerPanel\"\n").warnings.is_empty());
+    }
+
+    #[test]
+    fn bad_settings_type_is_reported_not_silently_defaulted() {
+        let loaded = load_from("[settings]\ncrossfade = \"yes\"\n");
+        assert!(loaded.load_failed);
+        assert!(loaded.warnings.iter().any(|w| w.contains("settings")), "{:?}", loaded.warnings);
+        assert!(!load_from("[settings]\ncrossfade = true\n").load_failed);
+        assert!(!load_from("").load_failed, "no file is not a failure");
+        assert!(load_from("[keys]\nquit = 5\n").load_failed, "nor may a bad [keys] be overwritten");
+        let err = save(true, &Keymap::default(), "default", &Overrides::default(), &Settings::default(), &Equalizer::default());
+        assert!(err.is_err(), "save is refused, and before it touches the disk");
+    }
+
+    #[test]
+    fn theme_section_round_trips_quote_and_backslash() {
+        let mut overrides = Overrides::default();
+        overrides.0.insert("accent".to_string(), "a\"b\\c".to_string());
+        overrides.0.insert("odd \"role\"".to_string(), "red".to_string());
+        let text = format!("[theme]\n{}", theme_section("na\"me", &overrides));
+        assert!(text.contains("\naccent = "), "plain role names stay bare: {text}");
+        let file: File = toml::from_str(&text).unwrap();
+        assert_eq!(file.theme.name.as_deref(), Some("na\"me"));
+        assert_eq!(file.theme.colors.0, overrides.0);
     }
 
     #[test]

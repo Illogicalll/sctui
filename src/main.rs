@@ -19,7 +19,8 @@ OPTIONS:
   -V, --version          print version and exit
   -h, --help             print this help and exit
       --dump-config      print the default config (theme + key bindings) to stdout and exit
-      --no-update-check  don't check GitHub for a newer release on startup";
+      --no-update-check  don't check GitHub for a newer release on startup
+      --setup            run the setup wizard (layout, theme, key tour) again";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -48,11 +49,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // stored token if still valid; refresh it if expired; browser login only as last resort
-    let token = match auth::load_token() {
-        Some(token) if !token.is_expired() => token,
-        Some(token) => auth::refresh_token(&token).or_else(|_| auth::authenticate())?,
-        None => auth::authenticate()?,
-    };
+    let token = auth::startup_token()?;
 
     let token = Arc::new(Mutex::new(token));
     let (reauth_tx, reauth_rx) = mpsc::channel();
@@ -61,11 +58,11 @@ fn main() -> anyhow::Result<()> {
 
     let mut api = Arc::new(Mutex::new(api::API::init(Arc::clone(&token))));
 
-    let player = Player::new(Arc::clone(&token));
+    // Before the TUI takes the terminal: with no audio output there is nothing to run.
+    let player = Player::new(Arc::clone(&token))?;
 
     // spawn a thread to handle re-authentication requests
     let token_clone = Arc::clone(&token);
-    let api_clone = Arc::clone(&api);
     std::thread::spawn(move || {
         for _ in reauth_rx.iter() {
             // re-authenticate (this will block waiting for user interaction)
@@ -74,9 +71,10 @@ fn main() -> anyhow::Result<()> {
             reauth_rx.try_iter().for_each(drop);
             match result {
                 Ok(new_token) => {
+                    // `API` and `Player` share this Arc, so this is all they need.
+                    // Rebuilding `API` here would reset its page cursors and every
+                    // library list would be fetched, and appended, a second time.
                     *token_clone.lock().unwrap() = new_token;
-                    // update API with new token
-                    *api_clone.lock().unwrap() = api::API::init(Arc::clone(&token_clone));
                 }
                 Err(_) => {
                     // re-authentication failed, will try again on next refresh failure
@@ -85,7 +83,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    tui::run(&mut api, player, loaded).map_err(|e| anyhow::anyhow!(e))?;
+    tui::run(&mut api, player, loaded, args.iter().any(|a| a == "--setup")).map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())
 }

@@ -14,9 +14,9 @@ use crate::tui::logic::state::{LyricsStatus, VisualizerMode};
 mod common;
 mod cover;
 mod oscilloscope;
-mod spectrum;
+pub mod spectrum;
 mod interference;
-mod lyrics;
+pub mod lyrics;
 mod fountain;
 mod stacked;
 mod seismograph;
@@ -34,7 +34,7 @@ pub fn render_visualizer(
     mode: VisualizerMode,
     track: &Track,
     progress_ms: u64,
-    cover_art: &mut ThreadProtocol,
+    cover_art: Option<&mut ThreadProtocol>,
     lyrics: &LyricsStatus,
 ) {
     let samples: Vec<f32> = {
@@ -134,7 +134,7 @@ mod tests {
         let mut proto = empty_protocol();
         terminal
             .draw(|f| {
-                render_visualizer(f, f.area(), &wave, VisualizerMode::Lyrics, &track, 102_000, &mut proto, &sample_lyrics())
+                render_visualizer(f, f.area(), &wave, VisualizerMode::Lyrics, &track, 102_000, Some(&mut proto), &sample_lyrics())
             })
             .unwrap();
         let buf = terminal.backend().buffer();
@@ -147,7 +147,7 @@ mod tests {
         // Nothing found: the notice.
         terminal
             .draw(|f| {
-                render_visualizer(f, f.area(), &wave, VisualizerMode::Lyrics, &track, 0, &mut proto, &LyricsStatus::NotFound)
+                render_visualizer(f, f.area(), &wave, VisualizerMode::Lyrics, &track, 0, Some(&mut proto), &LyricsStatus::NotFound)
             })
             .unwrap();
         let buf = terminal.backend().buffer();
@@ -186,7 +186,7 @@ mod tests {
                 let mut proto = empty_protocol();
                 terminal
                     .draw(|f| {
-                        render_visualizer(f, f.area(), &wave, mode, &track, 102_000, &mut proto, &sample_lyrics())
+                        render_visualizer(f, f.area(), &wave, mode, &track, 102_000, Some(&mut proto), &sample_lyrics())
                     })
                     .unwrap();
             }
@@ -222,7 +222,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
             let mut proto = empty_protocol();
             terminal
-                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track, 0, &mut proto, &LyricsStatus::NotFound))
+                .draw(|f| render_visualizer(f, f.area(), &wave, mode, &track, 0, Some(&mut proto), &LyricsStatus::NotFound))
                 .unwrap();
         }
     }

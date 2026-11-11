@@ -7,7 +7,7 @@ impl API {
     pub fn get_liked_tracks(&mut self) -> anyhow::Result<Vec<Track>> {
         let access_token = access_token(&self.token);
 
-        let Some(url) = self.liked_tracks_page.take_url(
+        let Some(url) = self.liked_tracks_page.url(
             "https://api.soundcloud.com/me/likes/tracks?limit=40&access=playable,preview,blocked&linked_partitioning=true",
         ) else {
             return Ok(Vec::new());

@@ -79,7 +79,7 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 ### 📻 Stations
 
-<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing Shift + Enter on any track or artist will start a queue of related tracks</p>
+<p align="center">When a playlist, album or your likes run out, sctui keeps going with related tracks. Alternatively, pressing `S` (or Shift + Enter) on any track or artist will start a queue of related tracks</p>
 
 ### 🎛️ Native Media Integration
 
@@ -101,18 +101,122 @@ sctui checks GitHub for a newer release every time it starts and asks before ins
 
 <p align="center">+ 12 more...</p>
 
+## Using sctui
+
+> **Upgrading from an earlier version:** the default keys changed for almost every action (they now follow vim / tmux habits, see the table below). Your own `[keys]` overrides are matched by action name and keep working. Overrides for the four actions that no longer exist (`secondary_up`, `secondary_down`, `tertiary_up`, `tertiary_down`) are ignored, with a warning at startup that names them: panes are now focused with `[` and `]` instead. The first launch asks once whether you want a two-minute tour of the new keys.
+
+<details>
+<summary><b>First run</b></summary>
+
+The first time sctui starts (after the browser login) a short setup wizard runs: choose a layout, choose a theme (both previewed live on your own library), then a ten-step tour of the important keys. Each step completes when you actually do the thing, whichever key you have it bound to. The tour only moves, plays, queues and filters; nothing in it changes your SoundCloud account. `Esc` skips it at any point.
+
+Run it again any time with `sctui --setup`, or `Setup wizard` in the command palette.
+
+</details>
+
+<details>
+<summary><b>Layouts</b></summary>
+
+Five layouts over the same panes, keys and player. Pick one in the wizard, on the Settings page of the `?` popup, or from the command palette (`Layout: sidebar`, ...). The choice is saved.
+
+| Layout | What it looks like |
+|---|---|
+| `classic` | The original look: boxed tabs and sub-tabs, 7-row player bar with the sine wave |
+| `tighten` | Two header rows, then as many list rows as fit, and a 4-row player bar |
+| `sidebar` | Library sections and your playlists in a column on the left; optional docked queue on wide terminals |
+| `columns` | Miller columns with a breadcrumb: `[` steps out, `]` or `Enter` steps in; a track card on very wide terminals |
+| `player-panel` | Lists on the left, a permanent player on the right that pages between Up next, Lyrics, Spectrum and History (`o`) |
+
+Every layout adapts to the terminal: panes drop from three to two to one as the width shrinks (reach the hidden ones with `[` `]`), track columns drop, the player bar shrinks to one line, and below 36×8 sctui just says the terminal is too small. Existing installs stay on `classic` until you change it; new installs that skip the wizard get `tighten`.
+
+</details>
+
+<details>
+<summary><b>Keys</b></summary>
+
+One pane has focus (accent border). Movement and every action on a selection (play, queue, like, add to playlist, remove, station) act on the focused pane's selected row. Deleting, liking or following a playlist, album or person needs that row focused, not one of its tracks.
+
+| Group | Keys | Action | Config name |
+|---|---|---|---|
+| Move | `j` `k`, `Down` `Up` | Move in the focused pane | `down`, `up` |
+| | `[` `]` | Focus the pane to the left / right | `pane_left`, `pane_right` |
+| | `g g`, `Home` | First row | `top` |
+| | `G`, `End` | Last row | `bottom` |
+| | `Ctrl+D` / `Ctrl+U` | Half a page down / up | `half_page_down`, `half_page_up` |
+| | `Ctrl+F`, `PageDown` / `Ctrl+B`, `PageUp` | A page down / up | `page_down`, `page_up` |
+| Views | `h` `l`, `Left` `Right` | Previous / next sub-tab or search type (wraps) | `sub_tab_left`, `sub_tab_right` |
+| | `1` `2` `3` | Library / Search / Feed | `tab_library`, `tab_search`, `tab_feed` |
+| | `Tab` / `Shift+Tab` | Next / previous main tab | `next_tab`, `prev_tab` |
+| Find | `/` | Filter the list (Library) or type a search (Search) | `search` |
+| | `:`, `Ctrl+P` | Command palette | `palette` |
+| | `?` | Keys, settings and equaliser | `help` |
+| Playback | `Enter` | Play the selected track / step into the selected playlist, album, person or feed item | `play_selected` |
+| | `Space` | Play / pause | `play_pause` |
+| | `>` `<` | Next / previous track | `next_track`, `prev_track` |
+| | `.` `,` | Seek forward / back 10 s | `seek_forward`, `seek_backward` |
+| | `+` `=` / `-` | Volume up / down | `volume_up`, `volume_down` |
+| | `s` / `r` | Shuffle / repeat | `toggle_shuffle`, `toggle_repeat` |
+| | `S`, `Shift+Enter` | Start a station from the selected track or artist | `start_station` |
+| Track | `a` / `A` | Add to queue / play next | `add_to_queue`, `play_next` |
+| | `f` / `F` | Like or unlike (follow or unfollow) the selection / the playing track | `toggle_like`, `toggle_like_playing` |
+| | `p` / `P` | Add the selection / the playing track to a playlist | `add_to_playlist`, `add_to_playlist_playing` |
+| | `d` | Remove from your playlist (asks first) | `remove_from_playlist` |
+| Playlist | `c` / `x` | New playlist / delete your playlist (asks first) | `new_playlist`, `delete_playlist` |
+| Panels | `Q` / `H` | Queue / history | `toggle_queue`, `toggle_history` |
+| | `v` | Visualiser (`Tab` cycles its modes) | `toggle_visualizer` |
+| | `t` | Theme picker | `themes` |
+| | `o` | Next page of the player panel (`player-panel` layout) | `panel_page` |
+| App | `q` | Quit (asks first) | `quit` |
+| | `Esc` | Close a popup / stop typing / clear the filter. Never quits | |
+
+A capital letter means Shift. `Shift+Enter` needs a terminal with the kitty keyboard protocol; `S` works everywhere.
+
+While you type (a filter, a search, the palette, a playlist name) every key types, capitals included: `Enter` confirms, `Esc` cancels, `Ctrl+W` deletes a word, `Ctrl+U` clears. Popups take every key until they are closed.
+
+**Hint line.** The bottom row lists the keys that apply to whatever has focus, read from your own bindings, and shows a half-typed sequence (`g …`) at the right. Turn it off on the Settings page or with `Hint line: toggle` in the palette.
+
+**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle and the setup wizard. Type a few letters (`lay sb` finds `Layout: sidebar`), `Enter` runs the highlighted one.
+
+**Notices.** Likes, queue additions, playlist edits, shuffle / repeat and failures show for a few seconds in the top-right corner, and the playing track is marked `▶` (`⏸` when paused) in every list.
+
+</details>
+
 <details>
 <summary><b>Configuration</b></summary>
 
-Configuration lives in `~/.config/sctui/config.toml` / `C:\Users\<you>\.config\sctui\config.toml`
-  
+Configuration lives in `~/.config/sctui/config.toml` / `C:\Users\<you>\.config\sctui\config.toml`. `sctui --dump-config` prints a commented template with every default.
+
 ### Themes
 
-Press `Shift+O` to pick a colour theme with a live preview: `default`, `tokyonight`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `solarized-dark`, `one-dark`, `rose-pine`.
+Press `t` to pick a colour theme with a live preview: `default`, `tokyonight`, `catppuccin-mocha`, `dracula`, `gruvbox-dark`, `nord`, `solarized-dark`, `one-dark`, `rose-pine`.
+
+### Settings
+
+`?` then `Tab` opens the Settings page (layout, hint line, docked queue, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. In the file they are under `[settings]`:
+
+```toml
+[settings]
+layout = "tighten"      # classic, tighten, sidebar, columns, player-panel
+hint_line = true
+dock_queue = false      # sidebar layout, 120+ columns: show the queue as a column
+```
+
+An unknown layout name falls back to `classic` with a warning at startup.
 
 ### Keybindings
 
-Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it, `Backspace` to unbind, `r` to restore its default.
+Press `?` to edit bindings in the app: pick an action, `Enter` then press the new key to add it (press a second key within a second to bind a sequence), `Backspace` to unbind, `r` to restore its default. Help and Quit always keep at least one key.
+
+In the file, each action under `[keys]` takes one binding or a list; a binding can be a sequence of up to three keys separated by spaces:
+
+```toml
+[keys]
+top = ["g g", "home"]
+add_to_queue = "z"
+play_next = []          # unbound
+```
+
+Only actions you list are changed; everything else keeps its default. Entries for actions that were removed are ignored with a startup warning.
 
 </details>
 

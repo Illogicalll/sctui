@@ -1,29 +1,24 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::{list_step, lookup};
 use crate::keymap::Action;
 use crate::player::{Player, TrackChange};
 use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::logic::utils::{play_queued_track, queued_from_current};
 
-/// Keys the history popup owns while it is open. Movement follows the user's
-/// keymap; Esc/Enter/Home/End are fixed. `None` lets the key fall through.
+/// The history popup is modal: it owns every key while it is open. Movement follows
+/// the user's keymap; Esc or its own key closes it.
 pub(crate) fn handle_history_input(
     key: KeyEvent,
     state: &mut AppState,
     data: &mut AppData,
     player: &Player,
-) -> Option<InputOutcome> {
+) -> InputOutcome {
     let last = state.playback_history.len().saturating_sub(1);
-    let sel = &mut state.history_selected;
-    match (key.code, state.keymap.action(&key)) {
-        (KeyCode::Esc, _) => state.history_visible = false,
-        (_, Some(Action::Up)) => *sel = sel.saturating_sub(1),
-        (_, Some(Action::Down)) => *sel = (*sel + 1).min(last),
-        (_, Some(Action::PageUp)) => *sel = sel.saturating_sub(10),
-        (_, Some(Action::PageDown)) => *sel = (*sel + 10).min(last),
-        (KeyCode::Home, _) => *sel = 0,
-        (KeyCode::End, _) => *sel = last,
+    let action = lookup(state, &key);
+    match (key.code, action) {
+        (KeyCode::Esc, _) | (_, Some(Action::ToggleHistory)) => state.history_visible = false,
         (KeyCode::Enter, _) => {
             // The popup lists newest first; map the row back to the Vec index.
             let idx = last.saturating_sub(state.history_selected);
@@ -31,13 +26,15 @@ pub(crate) fn handle_history_input(
                 // Same as "previous track": what is playing now goes into history, the
                 // chosen track plays as an override and the queue carries on after it.
                 if let Some(current) = queued_from_current(state, data) {
-                    state.playback_history.push(current);
+                    state.push_history(current);
                 }
+                state.cancel_artist_station();
                 play_queued_track(entry, state, data, player, true, TrackChange::UserSkip);
+                player.resume();
                 state.history_visible = false;
             }
         }
-        _ => return None,
+        _ => state.history_selected = list_step(&key, action, state.history_selected, last).unwrap_or(state.history_selected),
     }
-    Some(InputOutcome::Continue)
+    InputOutcome::Continue
 }

@@ -120,8 +120,8 @@ fn install(tag: &str) -> anyhow::Result<PathBuf> {
     let name = format!("sctui-{target}");
     let base = format!("https://github.com/{REPO}/releases/download/{tag}");
 
-    let tmp = std::env::temp_dir().join(format!("sctui-update-{}", std::process::id()));
-    fs::create_dir_all(&tmp)?;
+    let staging = StagingDir(make_staging_dir(&std::env::temp_dir()).context("creating a staging directory")?);
+    let tmp = &staging.0;
     let archive = tmp.join(format!("{name}.{ext}"));
 
     eprintln!("downloading {name}.{ext}...");
@@ -135,7 +135,7 @@ fn install(tag: &str) -> anyhow::Result<PathBuf> {
         .arg("-xf")
         .arg(&archive)
         .arg("-C")
-        .arg(&tmp)
+        .arg(tmp)
         .status()
         .context("running tar")?;
     if !status.success() {
@@ -148,9 +148,43 @@ fn install(tag: &str) -> anyhow::Result<PathBuf> {
     replace_binary(&new_bin, &exe)
         .with_context(|| format!("replacing {}", exe.display()))?;
 
-    let _ = fs::remove_dir_all(&tmp);
     eprintln!("updated to {tag}");
     Ok(exe)
+}
+
+/// Owns the staging directory: it is removed, with whatever is in it, however
+/// `install` returns.
+struct StagingDir(PathBuf);
+
+impl Drop for StagingDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A fresh directory under `base` that only this user can enter. The temp dir is
+/// shared on multi-user systems, so the name is not guessable and a directory (or
+/// symlink) someone else put there first is never adopted.
+fn make_staging_dir(base: &Path) -> io::Result<PathBuf> {
+    let mut last = None;
+    for _ in 0..5 {
+        let dir = base.join(format!("sctui-update-{}-{:016x}", std::process::id(), rand::random::<u64>()));
+        match create_private_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| io::ErrorKind::AlreadyExists.into()))
+}
+
+/// `mkdir` with mode 0700; fails if anything already exists at `dir`.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
 }
 
 fn verify_sha256(bytes: &[u8], sums_file: &str) -> anyhow::Result<()> {
@@ -215,6 +249,39 @@ mod tests {
     #[test]
     fn this_platform_has_a_release_target() {
         assert!(target().is_some());
+    }
+
+    /// #19: the staging directory is new, private, and never one that was already there.
+    #[test]
+    fn staging_dir_is_fresh_and_private() {
+        let dir = make_staging_dir(&std::env::temp_dir()).unwrap();
+        assert!(dir.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        let again = create_private_dir(&dir).unwrap_err();
+        assert_eq!(again.kind(), io::ErrorKind::AlreadyExists, "a pre-existing directory is refused");
+        let other = make_staging_dir(&std::env::temp_dir()).unwrap();
+        assert_ne!(other, dir, "each call gets its own name");
+        let _ = fs::remove_dir(&other);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    /// S6: a step that fails after the staging directory was made does not leave it behind.
+    #[test]
+    fn staging_dir_is_removed_when_a_step_fails() {
+        let mut made = None;
+        let failed = (|| -> anyhow::Result<()> {
+            let staging = StagingDir(make_staging_dir(&std::env::temp_dir())?);
+            fs::write(staging.0.join("archive"), b"partial")?;
+            made = Some(staging.0.clone());
+            verify_sha256(b"abc", "not the checksum")?;
+            Ok(())
+        })();
+        assert!(failed.is_err());
+        assert!(!made.unwrap().exists());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::InputOutcome;
+use super::helpers::{edit_text, list_step, lookup};
 use crate::keymap::Action;
 use crate::tui::logic::state::{AppData, AppState, PlaylistEdit};
 use crate::tui::logic::utils::{bump_track_count, soundcloud_playlist_id_from_tracks_uri};
@@ -23,7 +24,7 @@ pub(crate) fn open_picker(state: &mut AppState, track: crate::api::Track) {
     state.playlist_picker_visible = true;
 }
 
-/// Shift+C: straight to the name field, no track to add.
+/// New playlist: straight to the name field, no track to add.
 pub(crate) fn open_new_playlist_prompt(state: &mut AppState) {
     state.playlist_picker_track = None;
     state.playlist_picker_selected = 0;
@@ -38,29 +39,25 @@ fn close_picker(state: &mut AppState) {
     state.playlist_picker_track = None;
 }
 
-/// Keys the "add to playlist" popup owns. `None` lets the key fall through.
+/// The "add to playlist" popup is modal: it owns every key while it is open.
 pub(crate) fn handle_picker_input(
     key: KeyEvent,
     state: &mut AppState,
     data: &mut AppData,
-) -> Option<InputOutcome> {
+) -> InputOutcome {
     // Typing a name for a new playlist: the popup owns every key.
     if let Some(title) = state.playlist_picker_title.as_mut() {
         match key.code {
             // Back to the list when there is one to go back to, otherwise close.
             KeyCode::Esc if state.playlist_picker_track.is_some() => state.playlist_picker_title = None,
             KeyCode::Esc => close_picker(state),
-            KeyCode::Backspace => {
-                title.pop();
-            }
             KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
                 state.playlist_picker_public = !state.playlist_picker_public;
             }
-            KeyCode::Char(c) => title.push(c),
             KeyCode::Enter => {
                 let title = title.trim().to_string();
                 if title.is_empty() {
-                    return Some(InputOutcome::Continue);
+                    return InputOutcome::Continue;
                 }
                 state.playlist_edit_queue.push_back(PlaylistEdit::Create {
                     title,
@@ -69,17 +66,19 @@ pub(crate) fn handle_picker_input(
                 });
                 close_picker(state);
             }
-            _ => {}
+            _ => {
+                edit_text(&key, title);
+            }
         }
-        return Some(InputOutcome::Continue);
+        return InputOutcome::Continue;
     }
 
     let owned = owned_playlists(data);
     let last_row = owned.len(); // row 0 is "+ New playlist…"
-    match (key.code, state.keymap.action(&key)) {
-        (KeyCode::Esc, _) => close_picker(state),
-        (_, Some(Action::Up)) => state.playlist_picker_selected = state.playlist_picker_selected.saturating_sub(1),
-        (_, Some(Action::Down)) => state.playlist_picker_selected = (state.playlist_picker_selected + 1).min(last_row),
+    let action = lookup(state, &key);
+    match (key.code, action) {
+        (KeyCode::Esc, _)
+        | (_, Some(Action::AddToPlaylist | Action::AddToPlaylistPlaying | Action::NewPlaylist)) => close_picker(state),
         (KeyCode::Enter, _) => {
             if state.playlist_picker_selected == 0 {
                 state.playlist_picker_title = Some(String::new());
@@ -88,9 +87,12 @@ pub(crate) fn handle_picker_input(
                 close_picker(state);
             }
         }
-        _ => return None,
+        _ => {
+            state.playlist_picker_selected =
+                list_step(&key, action, state.playlist_picker_selected, last_row).unwrap_or(state.playlist_picker_selected);
+        }
     }
-    Some(InputOutcome::Continue)
+    InputOutcome::Continue
 }
 
 /// Optimistically append the picked track to `data.playlists[playlist_idx]`
@@ -108,6 +110,7 @@ fn add_to_playlist(playlist_idx: usize, state: &mut AppState, data: &mut AppData
         data.playlist_tracks.push(track.clone());
     }
     bump_track_count(playlist, 1);
+    state.toast(format!("Added to {}", playlist.title));
     state.playlist_edit_queue.push_back(PlaylistEdit::Add {
         playlist_id,
         tracks_uri: playlist.tracks_uri.clone(),

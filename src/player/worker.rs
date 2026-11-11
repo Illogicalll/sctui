@@ -1,16 +1,11 @@
 use crate::auth::Token;
-use rodio::Sink;
-use std::collections::VecDeque;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-    mpsc::Receiver,
+    mpsc::{Receiver, Sender},
 };
-use std::time::{Duration, Instant};
 
-use super::Position;
-use super::commands::{PlayerCommand, TrackChange};
-use super::stream::{PlaybackEngine, open_output_stream};
+use super::commands::PlayerCommand;
+use super::stream::{PlaybackEngine, Shared, open_output_stream};
 
 /// Pulls the next command to act on. Spam-skipping next/prev queues a burst of `Play`
 /// commands faster than one can load, so a run of them already waiting in the channel is
@@ -40,162 +35,43 @@ fn next_command(rx: &Receiver<PlayerCommand>, pending: &mut Option<PlayerCommand
 
 pub(crate) fn player_loop(
     rx: Receiver<PlayerCommand>,
+    results: Sender<PlayerCommand>,
     token: Arc<Mutex<Token>>,
-    is_playing_flag: Arc<AtomicBool>,
-    is_seeking_flag: Arc<AtomicBool>,
-    sink_arc: Arc<Mutex<Option<Sink>>>,
-    position: Arc<Mutex<Position>>,
-    wave_buffer: Arc<Mutex<VecDeque<f32>>>,
+    shared: Shared,
+    ready: Sender<anyhow::Result<()>>,
 ) {
-    let stream = open_output_stream();
-    let mut engine = PlaybackEngine::new(Arc::clone(&stream)).unwrap();
+    // The output stream stays on this thread for as long as the loop runs;
+    // `Player::new` waits to hear whether it could be opened at all.
+    let opened = open_output_stream()
+        .and_then(|stream| Ok((PlaybackEngine::new(stream.mixer().clone(), token, shared, results)?, stream)));
+    let (mut engine, _stream) = match opened {
+        Ok(opened) => opened,
+        Err(e) => {
+            let _ = ready.send(Err(e));
+            return;
+        }
+    };
+    let _ = ready.send(Ok(()));
 
+    // Nothing here touches the network: plays and preloads fetch on their own
+    // threads and report back with `Loaded` / `Preloaded`, so pause, resume
+    // and volume are answered straight away.
     let mut pending: Option<PlayerCommand> = None;
     while let Some(msg) = next_command(&rx, &mut pending) {
         match msg {
-            PlayerCommand::Play(track, change) => {
-                engine.play_from_position(
-                    &track,
-                    0,
-                    change,
-                    &token,
-                    &sink_arc,
-                    &is_playing_flag,
-                    &position,
-                    &wave_buffer,
-                );
-            }
-
-            PlayerCommand::PreloadNext(track) => {
-                let _ = engine.preload_next_track(&track, &token);
-            }
-
+            PlayerCommand::Play(track, change) => engine.play(track, 0, change),
+            PlayerCommand::Loaded { seq, result } => engine.finish_load(seq, result),
+            PlayerCommand::PreloadNext(track) => engine.preload(track),
+            PlayerCommand::Preloaded(hls) => engine.finish_preload(hls),
             PlayerCommand::SetCrossfade { ms, on_user_skips } => {
                 engine.set_crossfade(ms, on_user_skips)
             }
-
-            PlayerCommand::Pause => {
-                if let Some(ref s) = *sink_arc.lock().unwrap() {
-                    s.pause();
-                    is_playing_flag.store(false, Ordering::SeqCst);
-
-                    let mut pos = position.lock().unwrap();
-                    if let Some(start) = pos.last_start {
-                        pos.elapsed += start.elapsed();
-                    }
-                    pos.last_start = None;
-                }
-            }
-
-            PlayerCommand::Resume => {
-                if let Some(ref s) = *sink_arc.lock().unwrap() {
-                    s.play();
-                    is_playing_flag.store(true, Ordering::SeqCst);
-                    position.lock().unwrap().last_start = Some(Instant::now());
-                }
-            }
-
-            PlayerCommand::VolumeUp => {
-                if let Some(ref s) = *sink_arc.lock().unwrap() {
-                    let new_volume = (s.volume() + 0.1).min(2.0);
-                    s.set_volume(new_volume);
-                }
-            }
-
-            PlayerCommand::VolumeDown => {
-                if let Some(ref s) = *sink_arc.lock().unwrap() {
-                    let new_volume = (s.volume() - 0.1).max(0.0);
-                    s.set_volume(new_volume);
-                }
-            }
-
-            PlayerCommand::FastForward => {
-                if is_seeking_flag.swap(true, Ordering::SeqCst) {
-                    continue;
-                }
-                let pos = position.lock().unwrap();
-                if let Some(track) = pos.track.clone() {
-                    let current_elapsed = if is_playing_flag.load(Ordering::SeqCst) {
-                        if let Some(start) = pos.last_start {
-                            pos.elapsed + start.elapsed()
-                        } else {
-                            pos.elapsed
-                        }
-                    } else {
-                        pos.elapsed
-                    };
-
-                    let new_elapsed = current_elapsed + Duration::from_secs(10);
-                    let max_duration = Duration::from_millis(track.duration_ms);
-
-                    drop(pos);
-
-                    if new_elapsed >= max_duration {
-                        // Leave the track in the same state as a natural end-of-track
-                        // (is_playing still true, elapsed == duration) so the TUI tick's
-                        // end-of-track handling advances to the next track.
-                        if let Some(ref s) = *sink_arc.lock().unwrap() {
-                            s.stop();
-                        }
-                        let mut pos = position.lock().unwrap();
-                        pos.elapsed = max_duration;
-                        pos.last_start = None;
-                    } else {
-                        let new_position_ms = new_elapsed.as_millis() as u64;
-                        engine.play_from_position(
-                            &track,
-                            new_position_ms,
-                            TrackChange::Seek,
-                            &token,
-                            &sink_arc,
-                            &is_playing_flag,
-                            &position,
-                            &wave_buffer,
-                        );
-                    }
-                }
-                is_seeking_flag.store(false, Ordering::SeqCst);
-            }
-
-            PlayerCommand::Rewind => {
-                if is_seeking_flag.swap(true, Ordering::SeqCst) {
-                    continue;
-                }
-                let pos = position.lock().unwrap();
-                if let Some(track) = pos.track.clone() {
-                    let current_elapsed = if is_playing_flag.load(Ordering::SeqCst) {
-                        if let Some(start) = pos.last_start {
-                            pos.elapsed + start.elapsed()
-                        } else {
-                            pos.elapsed
-                        }
-                    } else {
-                        pos.elapsed
-                    };
-
-                    let rewind_duration = Duration::from_secs(10);
-                    let new_elapsed = if current_elapsed > rewind_duration {
-                        current_elapsed - rewind_duration
-                    } else {
-                        Duration::ZERO
-                    };
-
-                    drop(pos);
-
-                    let new_position_ms = new_elapsed.as_millis() as u64;
-                    engine.play_from_position(
-                        &track,
-                        new_position_ms,
-                        TrackChange::Seek,
-                        &token,
-                        &sink_arc,
-                        &is_playing_flag,
-                        &position,
-                        &wave_buffer,
-                    );
-                }
-                is_seeking_flag.store(false, Ordering::SeqCst);
-            }
+            PlayerCommand::Pause => engine.pause(),
+            PlayerCommand::Resume => engine.resume(),
+            PlayerCommand::VolumeUp => engine.change_volume(0.1),
+            PlayerCommand::VolumeDown => engine.change_volume(-0.1),
+            PlayerCommand::FastForward => engine.seek_by(true),
+            PlayerCommand::Rewind => engine.seek_by(false),
         }
     }
 }
@@ -204,6 +80,7 @@ pub(crate) fn player_loop(
 mod tests {
     use super::*;
     use crate::api::Track;
+    use crate::player::TrackChange;
     use std::sync::mpsc;
 
     fn track(urn: &str) -> Track {

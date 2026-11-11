@@ -22,7 +22,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 serde_json = "1.0.149"
 toml = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
-tokio = {version = "1.47.1", features = ["rt-multi-thread"] }
+tokio = {version = "1.47.1", features = ["rt-multi-thread", "sync", "time"] }
 rodio = "0.21.1"
 ratatui-image = "8.0.1"
 image = "0.25.9"
@@ -42,3 +42,10 @@ windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Gd
 [profile.release]
 strip = true
 lto = "thin"
+
+# Tests render every layout at every terminal size; unoptimised ratatui makes that slow.
+[profile.dev.package.ratatui]
+opt-level = 2
+
+[profile.test]
+opt-level = 1

@@ -36,6 +36,19 @@ pub fn render_lyrics(
     let block = frame_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    draw_lyrics(frame, inner, status, progress_ms, duration_ms);
+}
+
+/// The lyrics themselves filling `inner`, without the visualiser's frame: the Player
+/// panel's Lyrics page.
+pub fn draw_lyrics(
+    frame: &mut Frame,
+    inner: Rect,
+    status: &LyricsStatus,
+    progress_ms: u64,
+    duration_ms: u64,
+) {
+    let inner = inner.intersection(frame.area());
     frame.render_widget(Clear, inner);
     if inner.width == 0 || inner.height == 0 {
         return;
@@ -54,6 +67,9 @@ pub fn render_lyrics(
         }
         LyricsStatus::NotFound => {
             frame.render_widget(notice("No lyrics found for this track"), inner);
+        }
+        LyricsStatus::Unavailable => {
+            frame.render_widget(notice("Couldn't reach the lyrics service"), inner);
         }
         LyricsStatus::Found(lyrics) if lyrics.is_synced() => {
             let lines = &lyrics.synced;

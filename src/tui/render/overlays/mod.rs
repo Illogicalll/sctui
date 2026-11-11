@@ -1,11 +1,13 @@
 mod confirm;
 mod help;
 mod history;
+mod palette;
 mod playlist_picker;
 mod theme_picker;
-mod queue;
+pub mod wizard;
+pub mod queue;
 mod quit;
-mod utils;
+pub mod utils;
 
 use ratatui::Frame;
 
@@ -36,6 +38,7 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
             &state.auto_queue,
             current_playing_track,
             previous_playing_track,
+            state.queue_scroll,
         );
     }
 
@@ -60,14 +63,25 @@ pub fn render_overlays(frame: &mut Frame, state: &AppState, data: &AppData) {
     }
 
     if state.theme_picker_visible {
-        theme_picker::render_theme_picker(frame, state.theme_picker_selected, &state.theme_name);
+        let area = utils::centered_rect_fixed(theme_picker::WIDTH, theme_picker::HEIGHT, frame.area());
+        theme_picker::render_theme_picker(frame, area, state.theme_picker_selected, &state.theme_name);
     }
 
     if state.help_visible {
         help::render_help(frame, state);
     }
 
+    if let Some(open) = &state.palette {
+        palette::render_palette(frame, state, open);
+    }
+
     if state.quit_confirm_visible {
         quit::render_quit_confirm(frame, state.quit_confirm_selected);
+    }
+
+    // Last: the lesson card stays readable over the popup a lesson asks for.
+    wizard::render(frame, state);
+    if state.tour_prompt {
+        confirm::render_confirm(frame, wizard::TOUR_PROMPT, state.confirm_selected);
     }
 }

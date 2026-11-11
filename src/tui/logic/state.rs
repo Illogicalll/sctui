@@ -1,9 +1,10 @@
-use crate::api::{API, Activity, Album, Artist, Playlist, Track};
+use crate::api::{Activity, Album, Artist, Playlist, Track};
 use crate::api::Lyrics;
 use crate::keymap::Keymap;
+use super::nav::PaneId;
 use crate::theme::{Overrides, Theme};
 use ratatui::widgets::TableState;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -26,7 +27,36 @@ pub enum LyricsStatus {
     Idle,
     Loading,
     NotFound,
+    /// The lyrics service could not be reached; nothing is known either way.
+    Unavailable,
     Found(Lyrics),
+}
+
+/// What the lower part of the Player panel layout's panel shows.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum PanelPage {
+    #[default]
+    UpNext,
+    Lyrics,
+    Spectrum,
+    History,
+}
+
+impl PanelPage {
+    pub const ALL: [Self; 4] = [Self::UpNext, Self::Lyrics, Self::Spectrum, Self::History];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UpNext => "Up next",
+            Self::Lyrics => "Lyrics",
+            Self::Spectrum => "Spectrum",
+            Self::History => "History",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        Self::ALL[(self as usize + 1) % Self::ALL.len()]
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -84,12 +114,12 @@ pub struct QueuedTrack {
     pub user_added: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum FollowingTracksFocus {
-    #[default]
     Published,
     Likes,
     /// The artist name list itself, not either track pane.
+    #[default]
     Artists,
 }
 
@@ -107,30 +137,32 @@ pub enum Engagement {
     UnfollowUser { urn: String, user_id: u64 },
 }
 
-/// A destructive playlist action awaiting Yes/No in the confirm popup.
+/// A destructive playlist action awaiting Yes/No in the confirm popup. The playlist
+/// is named by its `tracks_uri`, not its row: the list can shift while the popup is open.
 #[derive(Clone)]
 pub enum ConfirmAction {
-    RemoveTrack { playlist_idx: usize, track: Track },
-    DeletePlaylist { playlist_idx: usize },
+    RemoveTrack { tracks_uri: String, track: Track },
+    DeletePlaylist { tracks_uri: String },
 }
 
 impl ConfirmAction {
     pub fn message(&self, data: &AppData) -> String {
-        let playlist_title = |idx: usize| {
+        let playlist_title = |tracks_uri: &str| {
             data.playlists
-                .get(idx)
+                .iter()
+                .find(|p| p.tracks_uri == tracks_uri)
                 .map(|p| p.title.as_str())
                 .unwrap_or("this playlist")
         };
         match self {
-            ConfirmAction::RemoveTrack { playlist_idx, track } => format!(
+            ConfirmAction::RemoveTrack { tracks_uri, track } => format!(
                 "Remove \"{}\" from \"{}\"?",
                 track.title,
-                playlist_title(*playlist_idx)
+                playlist_title(tracks_uri)
             ),
-            ConfirmAction::DeletePlaylist { playlist_idx } => format!(
+            ConfirmAction::DeletePlaylist { tracks_uri } => format!(
                 "Delete playlist \"{}\"? This cannot be undone.",
-                playlist_title(*playlist_idx)
+                playlist_title(tracks_uri)
             ),
         }
     }
@@ -157,6 +189,29 @@ pub(crate) fn clamp_row(row: &mut usize, table: &mut TableState, len: usize) {
 }
 
 impl Engagement {
+    /// The server refused this request: take the optimistic change back out of the
+    /// liked / followed set and say so. Nothing else was touched yet (`apply` only
+    /// runs on success), and if the user has since toggled the item back the set
+    /// already reads as it should.
+    pub fn failed(&self, why: &str, state: &mut AppState, data: &mut AppData) {
+        let (set, key, added, what) = match self {
+            Engagement::LikeTrack { track, .. } => (&mut data.liked_track_urns, &track.track_urn, true, "Like"),
+            Engagement::UnlikeTrack { track_urn, .. } => (&mut data.liked_track_urns, track_urn, false, "Unlike"),
+            Engagement::LikePlaylist { playlist, .. } => (&mut data.liked_playlist_uris, &playlist.tracks_uri, true, "Like"),
+            Engagement::UnlikePlaylist { tracks_uri, .. } => (&mut data.liked_playlist_uris, tracks_uri, false, "Unlike"),
+            Engagement::LikeAlbum { album, .. } => (&mut data.liked_album_uris, &album.tracks_uri, true, "Like"),
+            Engagement::UnlikeAlbum { tracks_uri, .. } => (&mut data.liked_album_uris, tracks_uri, false, "Unlike"),
+            Engagement::FollowUser { artist, .. } => (&mut data.followed_user_urns, &artist.urn, true, "Follow"),
+            Engagement::UnfollowUser { urn, .. } => (&mut data.followed_user_urns, urn, false, "Unfollow"),
+        };
+        if added {
+            set.remove(key);
+        } else {
+            set.insert(key.clone());
+        }
+        state.toast_err(format!("{what} failed: {why}"));
+    }
+
     /// Skips when the user has since toggled the same item back (its optimistic set no
     /// longer agrees with this result).
     pub fn apply(self, state: &mut AppState, data: &mut AppData) {
@@ -244,6 +299,8 @@ impl Engagement {
 pub struct FetchTask {
     pub request_id: u64,
     pub task: Option<tokio::task::JoinHandle<()>>,
+    /// Cursor to put back once the rows being fetched arrive (see `refetch`).
+    pub restore: Option<usize>,
 }
 
 impl FetchTask {
@@ -272,9 +329,14 @@ impl FetchTask {
     /// Fetch-on-select for one tracks pane. `selected` is the key (tracks_uri or user urn)
     /// of the highlighted parent row, `None` when there is none. Refetches when the key
     /// changed, clears the pane when nothing is selected, then clamps `row`.
+    /// The pane's cursor is remembered per parent: leaving a key files `row` under
+    /// (`pane`, key) in `cursors`, and coming back restores it once the rows are in.
     /// Returns true when the pane was reset (refetched or cleared).
+    #[allow(clippy::too_many_arguments)]
     pub fn refetch(
         &mut self,
+        pane: PaneId,
+        cursors: &mut HashMap<(PaneId, String), usize>,
         tracks: &mut Vec<Track>,
         table: &mut TableState,
         key: &mut Option<String>,
@@ -282,10 +344,16 @@ impl FetchTask {
         selected: Option<String>,
         spawn: impl FnOnce(u64, String) -> tokio::task::JoinHandle<()>,
     ) -> bool {
+        let same = selected.is_some() && selected == *key;
+        if !same && let Some(old_key) = key.take() {
+            // Rows that never arrived leave the cursor they were waiting for on file.
+            cursors.insert((pane, old_key), self.restore.take().unwrap_or(*row));
+        }
         let reset = match selected {
-            Some(new_key) if key.as_deref() == Some(new_key.as_str()) => false,
+            Some(_) if same => false,
             Some(new_key) => {
                 self.cancel();
+                self.restore = cursors.get(&(pane, new_key.clone())).copied();
                 *key = Some(new_key.clone());
                 tracks.clear();
                 table.select(Some(0));
@@ -301,6 +369,12 @@ impl FetchTask {
                 true
             }
         };
+        if !tracks.is_empty()
+            && let Some(saved) = self.restore.take()
+        {
+            *row = saved;
+            table.select(Some(*row));
+        }
         if !tracks.is_empty() && *row >= tracks.len() {
             *row = tracks.len() - 1;
             table.select(Some(*row));
@@ -319,32 +393,23 @@ const RAMP_SPAN: Duration = Duration::from_millis(1200);
 /// Fastest step, matching the Alt+Up/Down page jump.
 const MAX_STEP: usize = 10;
 
-/// Which cursor a held movement key is driving. Each is ramped separately, so
-/// moving to another pane mid-hold starts again at one row.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lane {
-    Primary,
-    Secondary,
-    Tertiary,
-}
-
 /// The current run of same-direction movement keypresses, so a held key scrolls
 /// faster the longer it is held.
 #[derive(Default)]
 pub struct MoveAccel {
-    /// Lane, direction, when the run started, and when its last press arrived.
-    run: Option<(Lane, isize, Instant, Instant)>,
+    /// Pane, direction, when the run started, and when its last press arrived.
+    run: Option<(PaneId, isize, Instant, Instant)>,
 }
 
 impl MoveAccel {
-    /// Records a movement press on `lane` in `dir` at `now` and returns how many rows it
-    /// should move. A pause longer than [`HOLD_GAP`], a change of direction, or a change of
-    /// lane starts a new run at one row.
+    /// Records a movement press in pane `lane` in `dir` at `now` and returns how many rows
+    /// it should move. A pause longer than [`HOLD_GAP`], a change of direction, or a change
+    /// of pane starts a new run at one row.
     // ponytail: crossterm events carry no arrival timestamp, so `now` is when the press is
     // handled, not when it was typed. A frame that stalls for longer than HOLD_GAP therefore
     // resets the ramp (it falls back to single rows, never overshoots). Upgrade path: stamp
     // each event with `Instant::now()` in the poll loop and pass that in.
-    pub fn step_rows(&mut self, lane: Lane, dir: isize, now: Instant) -> usize {
+    pub fn step_rows(&mut self, lane: PaneId, dir: isize, now: Instant) -> usize {
         let started = match self.run {
             Some((l, d, started, last))
                 if l == lane && d == dir && now.duration_since(last) <= HOLD_GAP =>
@@ -394,9 +459,27 @@ impl HelpPage {
 pub struct AppState {
     pub selected_tab: usize,
     pub selected_subtab: usize,
+    /// Cursor of the first pane of the location on screen. Like every `*_row` field
+    /// below it is storage for `nav`; read and write cursors through `nav`.
     pub selected_row: usize,
-    pub selected_playlist_row: usize,
-    pub selected_album_row: usize,
+    /// Focused pane index per location, `[main tab][sub-tab]`. Read through `nav::focus`.
+    pub focus: [[usize; 4]; 3],
+    /// The navigation column (Sidebar, Columns) has focus instead of a pane. Read it
+    /// through `nav::in_nav`, which also checks the layout has one.
+    pub nav_focused: bool,
+    /// On Library › Playlists, the navigation column's cursor is on the `Playlists`
+    /// entry itself rather than on the selected playlist beneath it.
+    pub nav_on_header: bool,
+    /// Where each child pane's cursor was for each parent item it has shown (playlist
+    /// or album `tracks_uri`, user urn, feed key). Written by `FetchTask::refetch`.
+    pub child_cursors: HashMap<(PaneId, String), usize>,
+    /// `selected_row` of each location that is not on screen, `[main tab][sub-tab]`.
+    pub primary_rows: [[usize; 4]; 3],
+    /// Visible rows of the focused pane, written by the renderer; 0 until it has drawn
+    /// (`nav::page_rows` then answers 10).
+    pub page_rows: usize,
+    /// The page the Player panel layout's panel is on. Only `Action::PanelPage` moves it.
+    pub panel_page: PanelPage,
     pub query: String,
     pub selected_searchfilter: usize,
     pub search_needs_fetch: bool,
@@ -428,6 +511,14 @@ pub struct AppState {
     pub radio_fetched_for: Option<String>,
     /// The radio queue ran dry before related tracks arrived; play as soon as they do.
     pub radio_waiting: bool,
+    /// Related-tracks fetches in a row that failed or brought nothing new. Fetching stops
+    /// at `utils::RADIO_MAX_MISSES`.
+    pub radio_misses: u8,
+    /// How far back from the end of the chain the next seed is taken; steps back each
+    /// time a seed's related tracks were all in the chain already.
+    pub radio_seed_back: usize,
+    /// Earliest time for the next fetch, after one failed.
+    pub radio_retry_at: Option<Instant>,
     /// Set by Shift+Enter on a focused artist row; the loop fetches its station tracks from here.
     pub artist_station_request: Option<Artist>,
     pub artist_station_fetch: FetchTask,
@@ -465,11 +556,25 @@ pub struct AppState {
     pub help_eq_selected: usize,
     /// Equaliser gains in dB; `player::eq` holds the copy the audio thread reads.
     pub eq: crate::config::Equalizer,
+    /// The action the key editor is capturing a binding for. The keys captured so far
+    /// wait in `pending_keys`.
     pub help_capture: Option<crate::keymap::Action>,
+    /// Keys of a sequence typed so far (`g` of `g g`) and when the last one arrived.
+    /// Fed through `input::helpers::lookup`; the loop drops them after a second.
+    pub pending_keys: Vec<crate::keymap::Chord>,
+    pub pending_since: Option<Instant>,
     pub help_message: Option<String>,
-    /// Search tab: printable keys go to the query until Enter/Esc.
+    /// Notices on screen, oldest first. Added with `toast` / `toast_err`; the loop
+    /// drops each when its time is up.
+    pub toasts: Vec<super::toast::Toast>,
+    /// `config::Loaded::load_failed`: saving the config is refused while set.
+    pub config_load_failed: bool,
+    /// Insert mode: keys type into the Search query (Search tab) or the Library
+    /// filter (`search_popup_visible`) until Enter/Esc.
     pub search_typing: bool,
     pub queue_visible: bool,
+    /// Upcoming tracks scrolled off the top of the queue popup.
+    pub queue_scroll: usize,
     pub history_visible: bool,
     pub playlist_picker_visible: bool,
     /// Row in the picker: 0 = "+ New playlist…", then owned playlists in order.
@@ -486,11 +591,22 @@ pub struct AppState {
     /// Row in the history popup, 0 = newest.
     pub history_selected: usize,
     pub help_visible: bool,
+    /// The command palette, while it is open.
+    pub palette: Option<super::palette::PaletteState>,
+    /// The setup wizard, while it is running.
+    pub wizard: Option<super::wizard::Wizard>,
+    /// The one-time "take the tour?" popup for a config that predates the wizard.
+    /// Its Yes / No cursor is `confirm_selected`: no other confirm can be open with it.
+    pub tour_prompt: bool,
     pub quit_confirm_visible: bool,
     pub quit_confirm_selected: usize,
+    /// A Library filter exists (being typed or kept); its box is drawn.
     pub search_popup_visible: bool,
     pub search_query: String,
     pub search_matches: Vec<usize>,
+    /// Row and identity (urn / tracks_uri) of the highlighted filtered row as of the last
+    /// loop pass, so the highlight can follow that item when the list changes under it.
+    pub filter_anchor: Option<(usize, String)>,
     pub visualizer_mode: bool,
     pub visualizer_view: VisualizerMode,
     /// Ramp for held Up/Down, so long lists scroll faster the longer the key is held.
@@ -499,6 +615,55 @@ pub struct AppState {
     pub preload_triggered_for_track_urn: Option<String>,
 }
 
+/// How many tracks the listening history keeps; the oldest are dropped first.
+pub const HISTORY_CAP: usize = 500;
+
+impl AppState {
+    /// Record a track that has stopped being the one playing. History replays a track on
+    /// its own, never the list it came from, so the entry's copy of that list is dropped
+    /// rather than kept once per track heard.
+    pub fn push_history(&mut self, mut entry: QueuedTrack) {
+        entry.tracks_snapshot = None;
+        if self.playback_history.len() >= HISTORY_CAP {
+            self.playback_history.remove(0);
+        }
+        self.playback_history.push(entry);
+    }
+
+    /// The user started something else: drop an artist station that is still being
+    /// asked for or fetched, so its mix cannot take over when it lands seconds later.
+    pub fn cancel_artist_station(&mut self) {
+        self.artist_station_request = None;
+        self.artist_station_fetch.cancel();
+    }
+}
+
+/// What is known about which playlists and albums have any playable track, and the
+/// ones the "hide unplayable tracks" setting has taken out of the Library lists.
+#[derive(Default)]
+pub struct Containers {
+    /// `tracks_uri` of every container found to hold no playable track.
+    pub none_playable: HashSet<String>,
+    /// `tracks_uri` already checked, or being checked now.
+    pub probed: HashSet<String>,
+    /// Checks in flight.
+    pub probing: usize,
+    /// Order each container was first seen in, so restored rows go back in place.
+    pub seq: std::collections::HashMap<String, usize>,
+    pub hidden_playlists: Vec<Playlist>,
+    pub hidden_albums: Vec<Album>,
+}
+
+/// The rows "hide unplayable tracks" took out of one pane.
+#[derive(Default)]
+pub struct HiddenTracks {
+    /// Which list they came out of (see `filtering::apply_unplayable_filter`). Once the
+    /// pane shows a different list they are dropped, not restored.
+    pub list: (u64, bool),
+    pub rows: Vec<(usize, Track)>,
+}
+
+#[derive(Default)]
 pub struct AppData {
     pub likes: Vec<Track>,
     pub likes_state: TableState,
@@ -557,98 +722,41 @@ pub struct AppData {
     /// held in its full list, so switching the setting back off puts them back where
     /// they were. One slot per pane, in the order `filtering::apply_unplayable_filter`
     /// lists them.
-    pub hidden_tracks: Vec<Vec<(usize, Track)>>,
+    pub hidden_tracks: Vec<HiddenTracks>,
     pub hidden_feed: Vec<(usize, Activity)>,
+    /// Playlists and albums with nothing playable in them (see `filtering::apply_container_filter`).
+    pub containers: Containers,
+    /// Lists whose first page has not arrived yet, by `api::List`: an empty one of
+    /// these is not known to be empty.
+    pub loading: [bool; 5],
 }
 
 impl AppData {
-    pub fn new(api: &mut API, selected_row: usize) -> anyhow::Result<Self> {
-        let likes: Vec<Track> = api.get_liked_tracks()?.into_iter().collect();
-        let liked_track_urns: HashSet<String> =
-            likes.iter().map(|t| t.track_urn.clone()).collect();
-
-        let playlists: Vec<Playlist> = api.get_playlists()?.into_iter().collect();
-        let liked_playlist_uris: HashSet<String> = playlists
-            .iter()
-            .filter(|p| !p.is_owned)
-            .map(|p| p.tracks_uri.clone())
-            .collect();
-
-        let albums: Vec<Album> = api.get_albums()?.into_iter().collect();
-        let liked_album_uris: HashSet<String> =
-            albums.iter().map(|a| a.tracks_uri.clone()).collect();
-
-        let following: Vec<Artist> = api.get_following()?.into_iter().collect();
-        let followed_user_urns: HashSet<String> =
-            following.iter().map(|a| a.urn.clone()).collect();
-
-        Ok(Self {
-            likes,
-            likes_state: TableState::default().with_selected(selected_row),
-            liked_track_urns,
-            playlists,
-            playlists_state: TableState::default().with_selected(selected_row),
-            liked_playlist_uris,
-            playlist_tracks: Vec::new(),
-            playlist_tracks_state: TableState::default().with_selected(0),
-            playlist_tracks_uri: None,
-            album_tracks: Vec::new(),
-            album_tracks_state: TableState::default().with_selected(0),
-            album_tracks_uri: None,
-            following_tracks: Vec::new(),
-            following_tracks_state: TableState::default().with_selected(0),
-            following_tracks_user_urn: None,
-            following_likes_tracks: Vec::new(),
-            following_likes_state: TableState::default().with_selected(0),
-            following_likes_user_urn: None,
-            playback_tracks: Vec::new(),
-            playback_playlist_uri: None,
-            playback_album_uri: None,
-            playback_following_user_urn: None,
-            albums,
-            albums_state: TableState::default().with_selected(selected_row),
-            liked_album_uris,
-            following,
-            following_state: TableState::default().with_selected(selected_row),
-            followed_user_urns,
-            search_tracks: Vec::new(),
-            search_tracks_state: TableState::default().with_selected(0),
-            search_playlists: Vec::new(),
-            search_playlists_state: TableState::default().with_selected(0),
-            search_playlist_tracks: Vec::new(),
-            search_playlist_tracks_state: TableState::default().with_selected(0),
-            search_playlist_tracks_uri: None,
-            search_albums: Vec::new(),
-            search_albums_state: TableState::default().with_selected(0),
-            search_album_tracks: Vec::new(),
-            search_album_tracks_state: TableState::default().with_selected(0),
-            search_album_tracks_uri: None,
-            search_people: Vec::new(),
-            search_people_state: TableState::default().with_selected(0),
-            search_people_tracks: Vec::new(),
-            search_people_tracks_state: TableState::default().with_selected(0),
-            search_people_tracks_user_urn: None,
-            search_people_likes_tracks: Vec::new(),
-            search_people_likes_state: TableState::default().with_selected(0),
-            search_people_likes_user_urn: None,
-            feed: Vec::new(),
-            feed_state: TableState::default().with_selected(0),
-            feed_tracks: Vec::new(),
-            feed_tracks_state: TableState::default().with_selected(0),
-            feed_tracks_key: None,
-            hidden_tracks: Vec::new(),
-            hidden_feed: Vec::new(),
-        })
+    /// What the app starts with: nothing, and every list still to be fetched. Launch
+    /// makes no request; first pages arrive like any other page.
+    pub fn loading() -> Self {
+        Self { loading: [true; 5], ..Self::default() }
     }
-}
 
-pub fn table_rows_count(selected_subtab: usize, data: &AppData) -> usize {
-    match selected_subtab {
-        0 => data.likes.len(),
-        1 => data.playlists.len(),
-        2 => data.albums.len(),
-        3 => data.following.len(),
-        _ => 0,
+    /// A page of each library list: its rows, and what marks them liked or followed.
+    pub fn add_likes(&mut self, page: Vec<Track>) {
+        self.liked_track_urns.extend(page.iter().map(|t| t.track_urn.clone()));
+        self.likes.extend(page);
+    }
+
+    pub fn add_playlists(&mut self, page: Vec<Playlist>) {
+        self.liked_playlist_uris.extend(page.iter().filter(|p| !p.is_owned).map(|p| p.tracks_uri.clone()));
+        self.playlists.extend(page);
+    }
+
+    pub fn add_albums(&mut self, page: Vec<Album>) {
+        self.liked_album_uris.extend(page.iter().map(|a| a.tracks_uri.clone()));
+        self.albums.extend(page);
+    }
+
+    pub fn add_following(&mut self, page: Vec<Artist>) {
+        self.followed_user_urns.extend(page.iter().map(|a| a.urn.clone()));
+        self.following.extend(page);
     }
 }
 
@@ -669,12 +777,172 @@ pub fn visible_tabs(state: &AppState) -> &'static [&'static str] {
 mod tests {
     use super::*;
 
+    /// T11: a refused like or follow is taken back and reported, not left looking done.
+    #[test]
+    fn engagement_failure_rolls_back_and_toasts() {
+        use crate::tui::logic::toast::ToastKind;
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        let artist = Artist { name: "Someone".into(), urn: "soundcloud:users:7".into() };
+        // What the follow key does, then the server saying no.
+        data.followed_user_urns.insert(artist.urn.clone());
+        Engagement::FollowUser { artist: artist.clone(), user_id: 7 }.failed("403 Forbidden", &mut state, &mut data);
+        assert!(data.followed_user_urns.is_empty() && data.following.is_empty());
+        let toast = state.toasts.last().unwrap();
+        assert_eq!((toast.kind, toast.msg.as_str()), (ToastKind::Err, "Follow failed: 403 Forbidden"));
+        // A refused unfollow or unlike puts the item back.
+        Engagement::UnfollowUser { urn: artist.urn.clone(), user_id: 7 }.failed("offline", &mut state, &mut data);
+        assert!(data.followed_user_urns.contains(&artist.urn));
+        Engagement::UnlikeTrack { track_urn: "soundcloud:tracks:1".into(), track_id: 1 }.failed("offline", &mut state, &mut data);
+        assert!(data.liked_track_urns.contains("soundcloud:tracks:1"));
+        assert_eq!(state.toasts.last().unwrap().msg, "Unlike failed: offline");
+    }
+
+    /// S2: first pages arrive like any other page, and mark what is liked and followed
+    /// just as the lists fetched before launch used to.
+    #[test]
+    fn pages_build_the_liked_and_followed_sets() {
+        use crate::tui::render::testkit::{albums, people, playlists, tracks};
+        let mut data = AppData::loading();
+        assert!(data.likes.is_empty() && data.loading.iter().all(|&l| l));
+
+        let (likes, mut lists, records, friends) = (tracks(0, "Song", 3), playlists("List", 3), albums("Album", 2), people("Friend", 2));
+        lists[0].is_owned = true;
+        lists[1].is_owned = false;
+        lists[2].is_owned = false;
+        // Two pages of likes, one of everything else.
+        data.add_likes(likes[..2].to_vec());
+        data.add_likes(likes[2..].to_vec());
+        data.add_playlists(lists.clone());
+        data.add_albums(records.clone());
+        data.add_following(friends.clone());
+
+        let set = |it: Vec<String>| it.into_iter().collect::<HashSet<_>>();
+        assert_eq!(data.likes.len(), 3);
+        assert_eq!(data.liked_track_urns, set(likes.iter().map(|t| t.track_urn.clone()).collect()));
+        assert_eq!(data.playlists.len(), 3);
+        assert_eq!(data.liked_playlist_uris, set(lists[1..].iter().map(|p| p.tracks_uri.clone()).collect()), "not the user's own");
+        assert_eq!(data.liked_album_uris, set(records.iter().map(|a| a.tracks_uri.clone()).collect()));
+        assert_eq!(data.followed_user_urns, set(friends.iter().map(|a| a.urn.clone()).collect()));
+    }
+
+    /// T19: history is capped and its entries do not each carry the whole playing list.
+    #[test]
+    fn history_drops_the_oldest_entries_and_does_not_keep_track_lists() {
+        let mut state = AppState::default();
+        let list: Vec<Track> = (0..3)
+            .map(|i| Track {
+                title: String::new(),
+                artists: String::new(),
+                duration: String::new(),
+                duration_ms: 0,
+                playback_count: String::new(),
+                artwork_url: String::new(),
+                access: String::new(),
+                track_urn: i.to_string(),
+            })
+            .collect();
+        for i in 0..HISTORY_CAP + 2 {
+            let mut track = list[0].clone();
+            track.track_urn = i.to_string();
+            state.push_history(QueuedTrack::new(PlaybackSource::Radio, 0, &track, Some(&list), None, None, None, false));
+        }
+        assert_eq!(state.playback_history.len(), HISTORY_CAP);
+        assert_eq!(state.playback_history[0].track.track_urn, "2", "the oldest two went");
+        assert_eq!(state.playback_history.last().unwrap().track.track_urn, (HISTORY_CAP + 1).to_string());
+        assert!(state.playback_history.iter().all(|e| e.tracks_snapshot.is_none()));
+    }
+
+    /// Identity, not position: each parent item has its own cursor in the child pane.
+    #[test]
+    fn child_cursor_is_remembered_per_parent() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut state = AppState::default();
+        let mut data = AppData::default();
+        let rows = |n: usize| -> Vec<Track> {
+            let track = |i| Track {
+                title: format!("t{i}"),
+                artists: String::new(),
+                duration: String::new(),
+                duration_ms: 0,
+                playback_count: String::new(),
+                artwork_url: String::new(),
+                access: String::new(),
+                track_urn: format!("soundcloud:tracks:{i}"),
+            };
+            (0..n).map(track).collect()
+        };
+        // One pass of the loop over Library › Playlists with playlist `uri` selected.
+        let pass = |state: &mut AppState, data: &mut AppData, uri: Option<&str>| {
+            state.playlist_tracks_fetch.refetch(
+                PaneId::PlaylistTracks,
+                &mut state.child_cursors,
+                &mut data.playlist_tracks,
+                &mut data.playlist_tracks_state,
+                &mut data.playlist_tracks_uri,
+                &mut state.selected_playlist_track_row,
+                uri.map(str::to_string),
+                |_, _| rt.spawn(async {}),
+            )
+        };
+
+        // Playlist A: its rows arrive, the cursor goes to row 5.
+        assert!(pass(&mut state, &mut data, Some("a")));
+        data.playlist_tracks = rows(10);
+        assert!(!pass(&mut state, &mut data, Some("a")));
+        state.selected_playlist_track_row = 5;
+        // Playlist B starts at the top, and gets its own cursor.
+        assert!(pass(&mut state, &mut data, Some("b")));
+        assert_eq!((state.selected_playlist_track_row, data.playlist_tracks.len()), (0, 0));
+        data.playlist_tracks = rows(4);
+        pass(&mut state, &mut data, Some("b"));
+        assert_eq!(state.selected_playlist_track_row, 0);
+        state.selected_playlist_track_row = 2;
+        // Back to A: row 0 while loading, row 5 once its rows are in.
+        assert!(pass(&mut state, &mut data, Some("a")));
+        assert_eq!(state.selected_playlist_track_row, 0);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 0, "nothing to restore onto yet");
+        data.playlist_tracks = rows(10);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 5);
+        assert_eq!(data.playlist_tracks_state.selected(), Some(5));
+        // Restored once: the cursor is the user's again afterwards.
+        state.selected_playlist_track_row = 7;
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 7);
+
+        // Leaving before the rows arrive does not forget where the cursor was.
+        pass(&mut state, &mut data, Some("b"));
+        pass(&mut state, &mut data, Some("a"));
+        pass(&mut state, &mut data, Some("b"));
+        data.playlist_tracks = rows(4);
+        pass(&mut state, &mut data, Some("b"));
+        assert_eq!(state.selected_playlist_track_row, 2);
+        pass(&mut state, &mut data, Some("a"));
+        data.playlist_tracks = rows(10);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 7);
+        // A list that came back shorter clamps the remembered row.
+        pass(&mut state, &mut data, Some("b"));
+        pass(&mut state, &mut data, Some("a"));
+        data.playlist_tracks = rows(3);
+        pass(&mut state, &mut data, Some("a"));
+        assert_eq!(state.selected_playlist_track_row, 2);
+        // Nothing selected clears the pane; the cursor is still on file for later.
+        assert!(pass(&mut state, &mut data, None));
+        assert_eq!((state.selected_playlist_track_row, data.playlist_tracks_uri.clone()), (0, None));
+        assert_eq!(state.child_cursors.get(&(PaneId::PlaylistTracks, "a".to_string())), Some(&2));
+        // Another pane's cursor for the same key is its own.
+        assert_eq!(state.child_cursors.get(&(PaneId::SearchPlaylistTracks, "a".to_string())), None);
+    }
+
     #[test]
     fn held_movement_key_ramps_then_resets() {
         let mut accel = MoveAccel::default();
         let t0 = Instant::now();
         let press = |accel: &mut MoveAccel, dir, ms: u64| {
-            accel.step_rows(Lane::Primary, dir, t0 + Duration::from_millis(ms))
+            accel.step_rows(PaneId::Likes, dir, t0 + Duration::from_millis(ms))
         };
         // Full speed is reached RAMP_DELAY + RAMP_SPAN after the run starts.
         let to_max = (RAMP_DELAY + RAMP_SPAN).as_millis() as u64;
@@ -692,7 +960,7 @@ mod tests {
         let mut grace = MoveAccel::default();
         let grace_rows: Vec<usize> = (0..=RAMP_DELAY.as_millis() as u64)
             .step_by(50)
-            .map(|ms| grace.step_rows(Lane::Primary, 1, t0 + Duration::from_millis(ms)))
+            .map(|ms| grace.step_rows(PaneId::Likes, 1, t0 + Duration::from_millis(ms)))
             .collect();
         assert!(grace_rows.iter().all(|&r| r == 1), "accelerated too early: {grace_rows:?}");
 
@@ -713,11 +981,11 @@ mod tests {
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         let mut lane_ms = reversed;
         for _ in 0..((to_max / 50) + 2) {
-            accel.step_rows(Lane::Secondary, 1, at(lane_ms));
+            accel.step_rows(PaneId::Playlists, 1, at(lane_ms));
             lane_ms += 50;
         }
-        assert_eq!(accel.step_rows(Lane::Secondary, 1, at(lane_ms)), MAX_STEP);
-        assert_eq!(accel.step_rows(Lane::Tertiary, 1, at(lane_ms + 50)), 1);
-        assert_eq!(accel.step_rows(Lane::Secondary, 1, at(lane_ms + 100)), 1);
+        assert_eq!(accel.step_rows(PaneId::Playlists, 1, at(lane_ms)), MAX_STEP);
+        assert_eq!(accel.step_rows(PaneId::PlaylistTracks, 1, at(lane_ms + 50)), 1);
+        assert_eq!(accel.step_rows(PaneId::Playlists, 1, at(lane_ms + 100)), 1);
     }
 }

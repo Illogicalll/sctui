@@ -1,8 +1,10 @@
-mod now_playing;
+mod layouts;
 mod overlays;
-mod tabs;
+#[cfg(test)]
+pub(crate) mod testkit;
 mod utils;
 mod visualizer;
+mod widgets;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -10,90 +12,92 @@ use crate::theme;
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout},
-    style::{Modifier, Style},
-    text::Span,
-    widgets::{Block, BorderType, Borders, Tabs},
+    layout::Rect,
+    style::Style,
+    text::Line,
 };
 use ratatui_image::thread::ThreadProtocol;
 
+use crate::api::Track;
 use crate::player::Player;
 use crate::tui::logic::filtering::FilteredViews;
-use crate::tui::logic::state::{AppData, AppState, visible_tabs};
+use crate::tui::logic::state::{AppData, AppState};
 use crate::tui::render::visualizer::render_visualizer;
+
+/// What the player is doing, read once per frame so drawing needs no audio device.
+pub struct NowPlaying {
+    /// The playing track, or the player's "nothing playing" placeholder.
+    pub track: Track,
+    /// 0.0 to 2.0.
+    pub volume: f32,
+    /// False while paused or stopped.
+    pub playing: bool,
+    /// False when nothing has been played yet (`track` is the placeholder).
+    pub has_track: bool,
+}
+
+impl NowPlaying {
+    pub fn from_player(player: &Player) -> Self {
+        let track = player.current_track();
+        Self {
+            has_track: !track.track_urn.is_empty(),
+            volume: player.get_volume(),
+            playing: player.is_playing(),
+            track,
+        }
+    }
+}
+
+/// Smallest terminal anything but the "too small" notice is drawn on.
+pub const MIN_COLS: u16 = 36;
+pub const MIN_ROWS: u16 = 8;
 
 pub fn render(
     frame: &mut Frame,
-    state: &AppState,
+    state: &mut AppState,
     data: &mut AppData,
     views: &FilteredViews,
-    player: &Player,
-    cover_art_async: &mut ThreadProtocol,
+    np: &NowPlaying,
+    cover: Option<&mut ThreadProtocol>,
     wave_buffer: &Arc<Mutex<VecDeque<f32>>>,
 ) {
-    let width = frame.area().width as usize;
-
-    let chunks = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(3),
-                Constraint::Min(0),
-                Constraint::Length(7),
-            ]
-            .as_ref(),
-        )
-        .split(frame.area());
-
-    if state.visualizer_mode {
-        render_visualizer(
+    let area = frame.area();
+    if area.width < MIN_COLS || area.height < MIN_ROWS {
+        // Nothing else, overlays included: they stay open and come back with the room.
+        let t = theme::current();
+        let y = area.y + area.height.saturating_sub(2) / 2;
+        let row = |dy: u16| Rect { y: y + dy, height: 1, ..area };
+        widgets::put(frame, row(0), Line::styled("terminal too small", Style::new().fg(t.warning)).centered());
+        widgets::put(
             frame,
-            frame.area(),
-            wave_buffer,
-            state.visualizer_view,
-            &player.current_track(),
-            state.progress,
-            cover_art_async,
-            &state.lyrics,
+            row(1),
+            Line::styled(format!("{}×{}", area.width, area.height), Style::new().fg(t.dim)).centered(),
         );
-        overlays::render_overlays(frame, state, data);
         return;
     }
 
-    render_tabs(frame, chunks[0], visible_tabs(state), state.selected_tab);
-
-    if state.selected_tab == 0 {
-        tabs::render_library(frame, chunks[1], width, state, data, views);
-    } else if state.selected_tab == 1 {
-        tabs::render_search(frame, chunks[1], width, state, data);
-    } else {
-        tabs::render_feed(frame, chunks[1], state, data);
-    }
-
-    now_playing::render_now_playing(frame, chunks[2], state, player, cover_art_async);
-
-    overlays::render_overlays(frame, state, data);
-}
-
-fn render_tabs(frame: &mut Frame, area: ratatui::layout::Rect, tab_titles: &[&str], selected: usize) {
-    let tabs: Vec<_> = tab_titles.iter().map(|t| Span::raw(*t)).collect();
-    let tabs_widget = Tabs::new(tabs)
-        .block(
-            Block::default()
-                .title(Span::styled(
-                    "sctui",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ))
-                .title_alignment(Alignment::Center)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded),
-        )
-        .select(selected)
-        .style(Style::default().fg(theme::current().fg))
-        .highlight_style(
-            Style::default()
-                .fg(theme::current().accent)
-                .add_modifier(Modifier::BOLD),
+    // Layouts leave the last row free for the hint line; so does the visualiser.
+    let hint_rows = widgets::hints::rows(state, area);
+    if state.visualizer_mode {
+        render_visualizer(
+            frame,
+            Rect { height: area.height - hint_rows, ..area },
+            wave_buffer,
+            state.visualizer_view,
+            &np.track,
+            state.progress,
+            cover,
+            &state.lyrics,
         );
-    frame.render_widget(tabs_widget, area);
+    } else {
+        layouts::draw(frame, state, data, views, np, cover, wave_buffer);
+    }
+    overlays::render_overlays(frame, state, data);
+    widgets::toasts::draw(frame, &state.toasts);
+    if overlays::wizard::is_strip(state, area) {
+        // The lesson, in the hint line's place.
+        overlays::wizard::draw_strip(frame, Rect { y: area.bottom() - hint_rows, height: hint_rows, ..area }, state);
+    } else if hint_rows > 0 {
+        widgets::hints::draw(frame, Rect { y: area.bottom() - 1, height: 1, ..area }, state, data);
+    }
 }
