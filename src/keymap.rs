@@ -255,7 +255,7 @@ pub const SEQ_TIMEOUT: Duration = Duration::from_secs(1);
 /// The default bindings. None is a duplicate or the start of another; a test
 /// enforces it.
 pub const DEFAULTS: &[(Action, &[&str])] = &[
-    (Action::Quit, &["q"]),
+    (Action::Quit, &["Q"]),
     (Action::Help, &["?"]),
     (Action::NextTab, &["tab"]),
     (Action::PrevTab, &["shift+tab"]),
@@ -291,7 +291,7 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::OpenInBrowserPlaying, &["B"]),
     (Action::AddToQueue, &["a"]),
     (Action::PlayNext, &["A"]),
-    (Action::ToggleQueue, &["Q"]),
+    (Action::ToggleQueue, &["q"]),
     (Action::ToggleHistory, &["H"]),
     (Action::Search, &["/"]),
     (Action::ToggleVisualizer, &["v"]),
@@ -821,16 +821,17 @@ mod tests {
         let ctrl = |c: char| km.action(&key(KeyCode::Char(c), KeyModifiers::CONTROL));
         assert_eq!(plain('j'), Some(Action::Down));
         assert_eq!(shifted('?'), Some(Action::Help));
-        assert_eq!(plain('q'), Some(Action::Quit));
+        assert_eq!(shifted('q'), Some(Action::Quit));
         assert_eq!(km.action(&key(KeyCode::Esc, KeyModifiers::NONE)), None, "Esc is never a command");
-        // Plain letters act on the selection, capitals on what is playing or a popup.
+        // Plain letters act on the selection, capitals on what is playing or a popup
+        // (q is the exception: the queue is the plain key, so quitting takes Shift).
         for (c, lower, upper) in [
             ('a', Action::AddToQueue, Action::PlayNext),
             ('f', Action::ToggleLike, Action::ToggleLikePlaying),
             ('b', Action::OpenInBrowser, Action::OpenInBrowserPlaying),
             ('p', Action::AddToPlaylist, Action::AddToPlaylistPlaying),
             ('s', Action::ToggleShuffle, Action::StartStation),
-            ('q', Action::Quit, Action::ToggleQueue),
+            ('q', Action::ToggleQueue, Action::Quit),
             ('h', Action::SubTabLeft, Action::ToggleHistory),
         ] {
             assert_eq!(plain(c), Some(lower));
@@ -986,7 +987,7 @@ mod tests {
         }
         // With a second key the first can go, and then the new one is the last.
         assert_eq!(km.add(Action::Quit, Seq::parse("ctrl+q").unwrap()), Ok(()));
-        assert_eq!(km.unbind_one(Action::Quit), Ok(Seq::parse("q").unwrap()));
+        assert_eq!(km.unbind_one(Action::Quit), Ok(Seq::parse("Q").unwrap()));
         assert!(km.unbind_one(Action::Quit).is_err());
         assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::CONTROL)), Some(Action::Quit));
         // Any other action can be emptied, oldest key first.
@@ -1002,7 +1003,7 @@ mod tests {
     fn user_config_overrides_unbinds_and_warns() {
         let mut km = Keymap::default();
         let warnings = km.apply_toml(
-            "[keys]\nplay_pause = \"p\"\nnext_track = [\"ctrl+n\", \"n\"]\ndelete_playlist = []\nbogus = \"x\"\nvolume_up = \"q\"\nsecondary_up = \"K\"\n",
+            "[keys]\nplay_pause = \"p\"\nnext_track = [\"ctrl+n\", \"n\"]\ndelete_playlist = []\nbogus = \"x\"\nvolume_up = \"Q\"\nsecondary_up = \"K\"\n",
         );
         assert_eq!(km.action(&key(KeyCode::Char('p'), KeyModifiers::NONE)), Some(Action::PlayPause));
         assert_eq!(km.action(&key(KeyCode::Char(' '), KeyModifiers::NONE)), None, "old chord dropped");
@@ -1012,9 +1013,9 @@ mod tests {
         assert!(warnings.iter().any(|w| w.contains("unknown action 'bogus'")));
         // An action that no longer exists is named as removed, and the rest still loads.
         assert!(warnings.iter().any(|w| w.contains("action 'secondary_up' in [keys] was removed")));
-        // q stays with quit (earlier in Action::ALL); the conflict is reported.
-        assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::NONE)), Some(Action::Quit));
-        assert!(warnings.iter().any(|w| w.contains("q is bound to both quit and volume_up")));
+        // Q stays with quit (earlier in Action::ALL); the conflict is reported.
+        assert_eq!(km.action(&key(KeyCode::Char('q'), KeyModifiers::SHIFT)), Some(Action::Quit));
+        assert!(warnings.iter().any(|w| w.contains("Q is bound to both quit and volume_up")));
         // p moved to play_pause, so add_to_playlist's default p is the one reported.
         assert!(warnings.iter().any(|w| w.contains("p is bound to both play_pause and add_to_playlist")));
         assert!(km.apply_toml("this is not toml").iter().any(|w| w.contains("could not be parsed")));

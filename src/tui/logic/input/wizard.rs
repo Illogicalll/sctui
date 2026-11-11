@@ -293,7 +293,7 @@ mod tests {
         assert!(state.palette.is_none() && !state.search_typing && !state.visualizer_mode);
         assert!(wizard::practising(&state) && !state.settings.onboarded);
         // Every other key works as usual: the wizard blocks nothing.
-        type_keys(&mut state, &mut data, "sQ");
+        type_keys(&mut state, &mut data, "sq");
         assert!(state.shuffle_enabled && state.queue_visible);
 
         // The upgrade prompt: Yes starts at the practice, No and Esc just record it.

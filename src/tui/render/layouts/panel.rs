@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn panel_pages_are_display_only() {
-        // `Q` over the panel: the popup, with the panel still behind it on its page.
+        // `q` over the panel: the popup, with the panel still behind it on its page.
         let (mut state, mut data, views, np) = panel();
         state.panel_page = PanelPage::History;
         state.queue_visible = true;
