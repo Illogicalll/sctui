@@ -83,6 +83,7 @@ pub async fn fetch_search_albums(
             duration,
             track_count,
             tracks_uri,
+            permalink_url: parse_str(&playlist, "permalink_url"),
         });
     }
 
@@ -130,6 +131,7 @@ pub async fn fetch_search_playlists(
             created_at,
             tracks_uri,
             is_owned: false,
+            permalink_url: parse_str(&playlist, "permalink_url"),
         });
     }
 
@@ -164,7 +166,7 @@ pub async fn fetch_search_people(
         if name.is_empty() || urn.is_empty() {
             continue;
         }
-        people.push(Artist { name, urn });
+        people.push(Artist { name, urn, permalink_url: parse_str(&user, "permalink_url") });
     }
 
     Ok(people)

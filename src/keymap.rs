@@ -62,6 +62,8 @@ pub enum Action {
     ToggleRepeat,
     ToggleLike,
     ToggleLikePlaying,
+    OpenInBrowser,
+    OpenInBrowserPlaying,
     AddToQueue,
     PlayNext,
     ToggleQueue,
@@ -79,7 +81,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 46] = [
+    pub const ALL: [Action; 48] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
@@ -112,6 +114,8 @@ impl Action {
         Action::ToggleRepeat,
         Action::ToggleLike,
         Action::ToggleLikePlaying,
+        Action::OpenInBrowser,
+        Action::OpenInBrowserPlaying,
         Action::AddToQueue,
         Action::PlayNext,
         Action::ToggleQueue,
@@ -163,6 +167,8 @@ impl Action {
             Action::ToggleRepeat => "toggle_repeat",
             Action::ToggleLike => "toggle_like",
             Action::ToggleLikePlaying => "toggle_like_playing",
+            Action::OpenInBrowser => "open_in_browser",
+            Action::OpenInBrowserPlaying => "open_in_browser_playing",
             Action::AddToQueue => "add_to_queue",
             Action::PlayNext => "play_next",
             Action::ToggleQueue => "toggle_queue",
@@ -215,6 +221,8 @@ impl Action {
             Action::ToggleRepeat => "Toggle repeat",
             Action::ToggleLike => "Like / unlike, follow / unfollow the selection",
             Action::ToggleLikePlaying => "Like / unlike the currently playing track",
+            Action::OpenInBrowser => "Open the selection on SoundCloud",
+            Action::OpenInBrowserPlaying => "Open the currently playing track on SoundCloud",
             Action::AddToQueue => "Add the selected track to the queue",
             Action::PlayNext => "Play the selected track next",
             Action::ToggleQueue => "Toggle the queue popup",
@@ -279,6 +287,8 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::ToggleRepeat, &["r"]),
     (Action::ToggleLike, &["f"]),
     (Action::ToggleLikePlaying, &["F"]),
+    (Action::OpenInBrowser, &["b"]),
+    (Action::OpenInBrowserPlaying, &["B"]),
     (Action::AddToQueue, &["a"]),
     (Action::PlayNext, &["A"]),
     (Action::ToggleQueue, &["Q"]),
@@ -817,6 +827,7 @@ mod tests {
         for (c, lower, upper) in [
             ('a', Action::AddToQueue, Action::PlayNext),
             ('f', Action::ToggleLike, Action::ToggleLikePlaying),
+            ('b', Action::OpenInBrowser, Action::OpenInBrowserPlaying),
             ('p', Action::AddToPlaylist, Action::AddToPlaylistPlaying),
             ('s', Action::ToggleShuffle, Action::StartStation),
             ('q', Action::Quit, Action::ToggleQueue),

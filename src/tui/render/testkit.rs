@@ -121,6 +121,7 @@ pub fn track(i: usize, title: &str) -> Track {
         // Every ninth one is geo-blocked.
         access: if i % 9 == 8 { "blocked".into() } else { "playable".into() },
         track_urn: format!("soundcloud:tracks:{i}"),
+        permalink_url: format!("https://soundcloud.com/artist-{}/track-{i}", i % 7),
     }
 }
 
@@ -142,6 +143,7 @@ pub fn playlists(prefix: &str, n: usize) -> Vec<Playlist> {
             created_at: Default::default(),
             tracks_uri: playlist_uri(i),
             is_owned: i != 3,
+            permalink_url: format!("https://soundcloud.com/me/sets/playlist-{i}"),
         })
         .collect()
 }
@@ -155,12 +157,13 @@ pub fn albums(prefix: &str, n: usize) -> Vec<Album> {
             duration: format!("00:4{i}:00"),
             track_count: (8 + i).to_string(),
             tracks_uri: format!("https://api.soundcloud.com/playlists/{}/tracks", 100 + i),
+            permalink_url: format!("https://soundcloud.com/artist-{i}/sets/album-{i}"),
         })
         .collect()
 }
 
 pub fn people(prefix: &str, n: usize) -> Vec<Artist> {
-    (0..n).map(|i| Artist { name: format!("{prefix} {i}"), urn: format!("soundcloud:users:{i}") }).collect()
+    (0..n).map(|i| Artist { name: format!("{prefix} {i}"), urn: format!("soundcloud:users:{i}"), permalink_url: format!("https://soundcloud.com/person-{i}") }).collect()
 }
 
 fn queued(track: &Track) -> QueuedTrack {
@@ -184,6 +187,7 @@ pub fn fixture() -> (AppState, AppData, FilteredViews, NowPlaying) {
             created_at: (chrono::Utc::now() - chrono::Duration::hours(1 + 30 * i as i64)).fixed_offset(),
             track: None,
             key: format!("soundcloud:tracks:{}", 700 + i),
+            permalink_url: format!("https://soundcloud.com/poster-{i}/post-{i}"),
         })
         .collect();
     let mut data = AppData {
@@ -249,6 +253,7 @@ pub fn fixture_empty() -> (AppState, AppData, FilteredViews, NowPlaying) {
         artwork_url: String::new(),
         access: "playable".into(),
         track_urn: String::new(),
+        permalink_url: String::new(),
     };
     (state, data, views, NowPlaying { track, volume: 1.0, playing: false, has_track: false })
 }
@@ -402,6 +407,88 @@ mod tests {
                 }
             }
         });
+    }
+
+    /// #54: SoundCloud is credited on every screen that shows its content, in every
+    /// layout at every size, the visualiser included. Text style: `via SoundCloud` on
+    /// the player's border (`· SoundCloud` ending the one-line player). Glyph style:
+    /// the mark in front of `sctui`, or leading the top row where there is no `sctui`.
+    #[test]
+    fn soundcloud_is_credited_in_every_layout_at_every_size() {
+        use crate::config::Credit;
+        use crate::tui::render::widgets::SOUNDCLOUD_GLYPH;
+        for_all_sizes(|w, h| {
+            if w < MIN_COLS || h < MIN_ROWS {
+                return;
+            }
+            for (fixture_name, fixture, _) in FIXTURES {
+                let (mut state, mut data, views, np) = fixture();
+                for (layout, set_layout) in LAYOUTS {
+                    set_layout(&mut state);
+                    for (tab, visualizer) in [(0, false), (1, false), (2, false), (0, true)] {
+                        go(&mut state, &mut data, tab, 0, 0);
+                        state.visualizer_mode = visualizer;
+                        let at = format!("{layout}, {fixture_name}, {w}x{h}, tab {tab}, visualiser {visualizer}");
+
+                        state.settings.soundcloud_credit = Credit::Text;
+                        let screen = render_text(w, h, &mut state, &mut data, &views, &np);
+                        assert!(screen.contains("via SoundCloud") || screen.contains("· SoundCloud"), "{at}: no text credit\n{screen}");
+                        assert!(!screen.contains(SOUNDCLOUD_GLYPH), "{at}: both credits\n{screen}");
+
+                        state.settings.soundcloud_credit = Credit::Glyph;
+                        let screen = render_text(w, h, &mut state, &mut data, &views, &np);
+                        let branded = format!("{SOUNDCLOUD_GLYPH} sctui");
+                        let beside_brand = if screen.contains("sctui") { screen.contains(&branded) } else { screen.starts_with(&format!(" {SOUNDCLOUD_GLYPH} ≡")) };
+                        assert!(beside_brand, "{at}: no glyph credit\n{screen}");
+                        assert!(!screen.contains("SoundCloud"), "{at}: both credits\n{screen}");
+                    }
+                }
+            }
+        });
+    }
+
+    /// Where each style of the credit sits, layout by layout.
+    #[test]
+    fn soundcloud_credit_placement() {
+        use crate::config::Credit;
+        let (mut state, mut data, views, np) = fixture();
+        let mut lines = |state: &mut AppState, w, h| -> Vec<String> {
+            render_text(w, h, state, &mut data, &views, &np).lines().map(str::to_string).collect()
+        };
+        // Text (the default): bottom-right of the player box's border, one cell in.
+        assert_eq!(state.settings.soundcloud_credit, Credit::Text);
+        for (layout, set_layout) in LAYOUTS {
+            set_layout(&mut state);
+            let screen = lines(&mut state, 120, 32);
+            let border = screen.iter().rfind(|l| l.contains('╯')).unwrap();
+            // (Classic's 7-row player has its sine waves either side of the box.)
+            assert!(border.contains(" via SoundCloud ─╯"), "{layout}: {border:?}");
+            // A short terminal has the one-line player: the credit ends it.
+            let short = lines(&mut state, 100, 19);
+            assert!(short[17].trim_end().ends_with("vol 70% · SoundCloud"), "{layout}: {:?}", short[17]);
+        }
+        LAYOUTS[0].1(&mut state);
+        // The visualiser has no player: the credit follows `sctui` in its frame's title.
+        state.visualizer_mode = true;
+        assert!(lines(&mut state, 120, 32)[0].contains("─sctui · via SoundCloud─"));
+
+        // Glyph: in front of `sctui`, wherever each layout has it.
+        state.settings.soundcloud_credit = Credit::Glyph;
+        assert!(lines(&mut state, 120, 32)[0].contains("─\u{f1be} sctui─"));
+        state.visualizer_mode = false;
+        let mut top = |name: &str, w, h| {
+            LAYOUTS.iter().find(|(n, _)| *n == name).unwrap().1(&mut state);
+            lines(&mut state, w, h).swap_remove(0)
+        };
+        assert!(top("classic", 120, 32).contains("─\u{f1be} sctui─"));
+        assert!(top("classic", 120, 20).starts_with(" \u{f1be} sctui │  1 Library"));
+        assert!(top("tighten", 120, 32).starts_with(" \u{f1be} sctui │  1 Library"));
+        assert!(top("player-panel", 120, 32).starts_with(" \u{f1be} sctui │  1 Library"));
+        assert!(top("sidebar", 120, 32).starts_with("╭ \u{f1be} sctui ─"));
+        assert!(top("sidebar: nav focused", 80, 24).starts_with("╭ \u{f1be} sctui ─"));
+        assert!(top("columns", 120, 32).starts_with(" \u{f1be} sctui › Library › Likes"));
+        // Sidebar under 90 columns has no `sctui` on screen: the mark leads the strip.
+        assert_eq!(top("sidebar", 80, 24).trim_end(), " \u{f1be} ≡ Likes");
     }
 
     #[test]

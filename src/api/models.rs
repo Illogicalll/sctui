@@ -18,6 +18,8 @@ pub struct Activity {
     pub track: Option<Track>,
     /// Track urn, or the set's `tracks_uri` to fetch its tracks. Keys the info-pane fetch.
     pub key: String,
+    /// The posted item's page on soundcloud.com; empty when the payload had none.
+    pub permalink_url: String,
 }
 
 impl Activity {
@@ -37,6 +39,9 @@ pub struct Track {
     pub artwork_url: String,
     pub access: String,
     pub track_urn: String,
+    /// The track's page on soundcloud.com, which SoundCloud's terms ask apps to link
+    /// back to; empty when the payload had none. The other models carry theirs too.
+    pub permalink_url: String,
 }
 
 impl Track {
@@ -55,6 +60,7 @@ pub struct Playlist {
     /// True if this playlist comes from `/me/playlists` (owned by the logged-in user).
     /// False if it comes from `/me/likes/playlists` (liked playlists).
     pub is_owned: bool,
+    pub permalink_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -65,10 +71,12 @@ pub struct Album {
     pub duration: String,
     pub track_count: String,
     pub tracks_uri: String,
+    pub permalink_url: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct Artist {
     pub name: String,
     pub urn: String,
+    pub permalink_url: String,
 }

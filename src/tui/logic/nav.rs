@@ -507,6 +507,7 @@ mod tests {
             artwork_url: String::new(),
             access: String::new(),
             track_urn: format!("soundcloud:tracks:{id}"),
+            permalink_url: String::new(),
         }
     }
 
@@ -522,11 +523,12 @@ mod tests {
             created_at: Default::default(),
             tracks_uri: format!("https://api.soundcloud.com/playlists/{id}/tracks"),
             is_owned: true,
+            permalink_url: String::new(),
         }
     }
 
     fn artist(id: u64, name: &str) -> Artist {
-        Artist { name: name.to_string(), urn: format!("soundcloud:users:{id}") }
+        Artist { name: name.to_string(), urn: format!("soundcloud:users:{id}"), permalink_url: String::new() }
     }
 
     fn at(tab: usize, sub: usize) -> AppState {

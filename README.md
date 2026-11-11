@@ -161,6 +161,7 @@ One pane has focus (accent border). Movement and every action on a selection (pl
 | | `f` / `F` | Like or unlike (follow or unfollow) the selection / the playing track | `toggle_like`, `toggle_like_playing` |
 | | `p` / `P` | Add the selection / the playing track to a playlist | `add_to_playlist`, `add_to_playlist_playing` |
 | | `d` | Remove from your playlist (asks first) | `remove_from_playlist` |
+| | `b` / `B` | Open the selection (track, playlist, album or person) / the playing track on soundcloud.com | `open_in_browser`, `open_in_browser_playing` |
 | Playlist | `c` / `x` | New playlist / delete your playlist (asks first) | `new_playlist`, `delete_playlist` |
 | Panels | `Q` / `H` | Queue / history | `toggle_queue`, `toggle_history` |
 | | `v` | Visualiser (`Tab` cycles its modes) | `toggle_visualizer` |
@@ -175,7 +176,7 @@ While you type (a filter, a search, the palette, a playlist name) every key type
 
 **Hint line.** The bottom row lists the keys that apply to whatever has focus, read from your own bindings, and shows a half-typed sequence (`g …`) at the right. Turn it off on the Settings page or with `Hint line: toggle` in the palette.
 
-**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle and the setup wizard. Type a few letters (`lay sb` finds `Layout: sidebar`), `Enter` runs the highlighted one.
+**Command palette.** `:` or `Ctrl+P` lists every action with its keys, plus one entry per layout and per theme, the hint line toggle, the SoundCloud credit style and the setup wizard. Type a few letters (`lay sb` finds `Layout: sidebar`), `Enter` runs the highlighted one.
 
 **Notices.** Likes, queue additions, playlist edits, shuffle / repeat and failures show for a few seconds in the top-right corner, and the playing track is marked `▶` (`⏸` when paused) in every list.
 
@@ -192,16 +193,19 @@ Press `t` to pick a colour theme with a live preview: `default`, `tokyonight`, `
 
 ### Settings
 
-`?` then `Tab` opens the Settings page (layout, hint line, docked queue, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. In the file they are under `[settings]`:
+`?` then `Tab` opens the Settings page (layout, hint line, SoundCloud credit, docked queue, hiding unplayable tracks or the feed tab, crossfade); `Tab` again is the equaliser. In the file they are under `[settings]`:
 
 ```toml
 [settings]
 layout = "tighten"      # classic, tighten, sidebar, columns, player-panel
 hint_line = true
+soundcloud_credit = "text"   # text, or glyph (needs a Nerd Font)
 dock_queue = false      # sidebar layout, 120+ columns: show the queue as a column
 ```
 
 An unknown layout name falls back to `classic` with a warning at startup.
+
+Everything sctui plays and lists comes from SoundCloud, and its API terms ask apps to say so. `soundcloud_credit = "text"` (the default) shows `via SoundCloud` on the player's border; `"glyph"` shows the SoundCloud mark (Nerd Font U+F1BE) beside `sctui` instead. Use the glyph only with a Nerd Font: without one it is an empty box. `b` opens any track, playlist, album or person on soundcloud.com.
 
 ### Keybindings
 

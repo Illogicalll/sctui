@@ -94,6 +94,7 @@ mod tests {
                 artwork_url: String::new(),
                 access: "playable".into(),
                 track_urn: format!("urn:{title}"),
+                permalink_url: String::new(),
             },
             None,
             None,

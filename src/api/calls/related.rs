@@ -51,6 +51,10 @@ pub async fn fetch_related_users(
 
     Ok(response_items(&resp)
         .into_iter()
-        .map(|v| Artist { name: parse_str(&v, "username"), urn: parse_str(&v, "urn") })
+        .map(|v| Artist {
+            name: parse_str(&v, "username"),
+            urn: parse_str(&v, "urn"),
+            permalink_url: parse_str(&v, "permalink_url"),
+        })
         .collect())
 }

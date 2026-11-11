@@ -93,6 +93,7 @@ mod tests {
             created_at: Default::default(),
             tracks_uri: format!("https://api.soundcloud.com/playlists/{id}/tracks"),
             is_owned: true,
+            permalink_url: String::new(),
         }
     }
 

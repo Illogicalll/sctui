@@ -47,6 +47,7 @@ impl API {
                     track_count,
                     duration,
                     tracks_uri,
+                    permalink_url: parse_str(album, "permalink_url"),
                 });
             }
         }

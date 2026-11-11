@@ -13,7 +13,7 @@ use crate::theme;
 use crate::tui::logic::nav::{self, NavItem};
 use crate::tui::logic::state::{AppData, AppState};
 
-use super::{fit, put};
+use super::{brand_mark, fit, put};
 
 /// Columns the navigation column takes.
 pub const WIDTH: u16 = 26;
@@ -40,7 +40,7 @@ pub fn draw_nav_column(frame: &mut Frame, area: Rect, state: &AppState, data: &A
     let t = theme::current();
     let focused = nav::in_nav(state);
     let block = Block::default()
-        .title(Line::styled(" sctui ", Style::new().fg(t.accent).add_modifier(Modifier::BOLD)))
+        .title(Line::styled(format!(" {}sctui ", brand_mark(state)), Style::new().fg(t.accent).add_modifier(Modifier::BOLD)))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(if focused { t.accent } else { t.dim }));
