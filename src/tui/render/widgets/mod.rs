@@ -11,32 +11,13 @@ pub mod toasts;
 
 use ratatui::{Frame, layout::Rect, style::Style, text::{Line, Span}, widgets::Clear};
 
-use crate::config::Credit;
-use crate::theme;
-use crate::tui::logic::state::AppState;
 
 /// The Nerd Font SoundCloud mark (`nf-fa-soundcloud`), one cell wide.
 pub const SOUNDCLOUD_GLYPH: &str = "\u{f1be}";
 
-/// SoundCloud's terms want it credited as the source wherever its content is shown.
-/// In the glyph style that is its mark in front of every `sctui`: this is the mark and
-/// a space, or nothing in the text style.
-pub fn brand_mark(state: &AppState) -> &'static str {
-    match state.settings.soundcloud_credit {
-        Credit::Glyph => "\u{f1be} ",
-        Credit::Text => "",
-    }
-}
-
-/// The text style of the credit: a dim `via SoundCloud` set into the bottom-right of
-/// the border of the player box at `area`, so it costs no content row. Nothing in the
-/// glyph style.
-pub fn border_credit(frame: &mut Frame, area: Rect, state: &AppState) {
-    if state.settings.soundcloud_credit == Credit::Text && area.width > 4 && area.height > 0 {
-        let row = Rect { x: area.x + 1, y: area.bottom() - 1, width: area.width - 3, height: 1 };
-        put_right(frame, row, " via SoundCloud ", Style::new().fg(theme::current().dim));
-    }
-}
+/// SoundCloud's terms want it credited as the source wherever its content is shown:
+/// its mark, and a space, in front of every `sctui`.
+pub const BRAND_MARK: &str = "\u{f1be} ";
 
 /// Terminal cells `s` occupies (wide glyphs count twice).
 pub fn text_width(s: &str) -> usize {

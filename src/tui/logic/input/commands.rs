@@ -1,6 +1,5 @@
 use ratatui::crossterm::event::KeyCode;
 
-use crate::config::Layout;
 use crate::keymap::Action;
 
 use super::InputOutcome;
@@ -134,18 +133,20 @@ pub(crate) fn run_command(action: Action, state: &mut AppState, data: &mut AppDa
 }
 
 /// An action while the navigation column has focus. Movement walks its entries and
-/// changes location as it goes; `]` or Enter steps into the panes; delete and like act
-/// on the playlist entry under the cursor; the actions that need a track do nothing.
+/// changes location as it goes; `]` or Enter steps into the panes; the actions that
+/// need a row (a track, a playlist) do nothing.
 /// Returns false for everything else (tabs, sub-tabs, playback, popups), which works
 /// as it does anywhere.
-pub(crate) fn run_nav_command(action: Action, state: &mut AppState, data: &mut AppData) -> bool {
+pub(crate) fn run_nav_command(action: Action, state: &mut AppState) -> bool {
     match action {
         Action::PaneLeft
         | Action::StartStation
         | Action::AddToQueue
         | Action::PlayNext
         | Action::AddToPlaylist
-        | Action::RemoveFromPlaylist => {}
+        | Action::RemoveFromPlaylist
+        | Action::DeletePlaylist
+        | Action::ToggleLike => {}
         Action::PaneRight | Action::PlaySelected => nav::leave_nav(state),
         Action::Up
         | Action::Down
@@ -155,32 +156,15 @@ pub(crate) fn run_nav_command(action: Action, state: &mut AppState, data: &mut A
         | Action::HalfPageDown
         | Action::Top
         | Action::Bottom => {
-            let items = nav::nav_items(state, data, state.settings.layout == Layout::Sidebar);
-            let at = nav::nav_index(state, data, &items);
+            let items = nav::nav_items(state);
+            let at = nav::nav_index(state, &items);
             // `list_step` only looks at the key when there is no action.
             let key = KeyCode::Null.into();
             if let Some(to) = list_step(&key, Some(action), at, items.len() - 1) {
-                nav::nav_go(state, data, &items[to]);
-                // Two rows can share a uri (a playlist both owned and liked): the row
-                // moved onto is the one selected, whichever `nav_go` found.
-                if let Some(first) = items.iter().position(|i| i.playlist_uri.is_some())
-                    && items[to].playlist_uri.is_some()
-                {
-                    *nav::cursor_mut(state, PaneId::Playlists) = to - first;
-                }
+                nav::nav_go(state, &items[to]);
             }
         }
-        Action::DeletePlaylist => {
-            if let Some(playlist) = nav::nav_playlist(state, data).filter(|p| p.is_owned) {
-                state.confirm = Some(ConfirmAction::DeletePlaylist { tracks_uri: playlist.tracks_uri.clone() });
-                state.confirm_selected = 1;
-            }
-        }
-        Action::ToggleLike => toggle_playlist_like(nav::nav_playlist(state, data).cloned(), state, data),
-        Action::OpenInBrowser => {
-            let url = nav::nav_playlist(state, data).map(|p| p.permalink_url.clone());
-            open_on_soundcloud(url, state);
-        }
+        Action::OpenInBrowser => open_on_soundcloud(None, state),
         // The filter belongs to a pane, which takes the focus.
         Action::Search => {
             state.nav_focused = false;
@@ -357,17 +341,12 @@ mod tests {
             data.likes[0].permalink_url = bad.to_string();
             assert_eq!(said(&mut state, &mut data, Action::OpenInBrowser), ("No SoundCloud link for this item".to_string(), ToastKind::Err));
         }
-        // The navigation column: the playlist under its cursor, or nothing.
-        state.settings.layout = Layout::Sidebar;
-        go(&mut state, &mut data, 0, 1, 0);
+        // The navigation column has no row of its own to open.
+        state.settings.layout = crate::config::Layout::Columns;
         state.nav_focused = true;
-        *nav::cursor_mut(&mut state, PaneId::Playlists) = 2;
         state.toasts.clear();
-        assert!(run_nav_command(Action::OpenInBrowser, &mut state, &mut data));
-        assert_eq!(state.toasts[0].msg, "Opened in browser · https://soundcloud.com/me/sets/playlist-2");
-        state.nav_on_header = true;
-        assert!(run_nav_command(Action::OpenInBrowser, &mut state, &mut data));
-        assert_eq!(state.toasts[1].msg, "Nothing to open");
+        assert!(run_nav_command(Action::OpenInBrowser, &mut state));
+        assert_eq!(state.toasts[0].msg, "Nothing to open");
 
         // Nothing selected and nothing playing.
         let (mut state, mut data, ..) = fixture_empty();

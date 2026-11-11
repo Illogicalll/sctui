@@ -43,7 +43,7 @@ pub fn source_name(state: &AppState) -> &'static str {
 }
 
 /// The queue as a plain numbered list filling `area`, for a layout that shows it
-/// beside the panes (Sidebar's dock, the Player panel): the user's own tracks under
+/// beside the panes (the Player panel): the user's own tracks under
 /// `QUEUED BY YOU`, the rest under what they come from. Display only.
 pub fn draw_up_next(frame: &mut Frame, area: Rect, state: &AppState, data: &AppData) {
     let t = theme::current();

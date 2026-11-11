@@ -26,7 +26,7 @@ use crate::tui::render::visualizer::{lyrics::draw_lyrics, spectrum::draw_bars};
 use crate::tui::render::widgets::pane::PaneStyle;
 use crate::tui::render::widgets::pane_row::draw_pane_row;
 use crate::tui::render::widgets::player::{glyph, image, rate_limit_title, ratio, readout, rule};
-use crate::tui::render::widgets::{border_credit, fit, header, hints, put, put_right, text_width};
+use crate::tui::render::widgets::{fit, header, hints, put, put_right, text_width};
 
 use super::{take_bottom, take_top, tighten};
 
@@ -103,7 +103,6 @@ fn draw_panel(
         .border_style(dim);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    border_credit(frame, area, state);
     if inner.width < 8 || inner.height == 0 {
         return;
     }
@@ -116,6 +115,8 @@ fn draw_panel(
 
     let cover_h = cover_rows(area.height);
     if cover_h > 0 {
+        // A row of air above the cover, to match the one below it.
+        y += gap;
         // A terminal cell is about twice as tall as it is wide.
         let cover_w = (cover_h * 2).min(text.width);
         image(frame, Rect::new(text.x + (text.width - cover_w) / 2, y, cover_w, cover_h), cover);
@@ -259,7 +260,7 @@ mod tests {
         let right = |y: usize| lines[y].chars().skip(71).collect::<String>();
         assert_eq!(right(0), format!("╭ Now playing {}╮", "─".repeat(24)), "{screen}");
         assert!(right(28).starts_with('╰') && right(28).ends_with('╯'), "{screen}");
-        assert!(lines[0].starts_with(" sctui │  1 Library") && lines[1].starts_with("  Likes "), "{screen}");
+        assert!(lines[0].starts_with(" \u{f1be} sctui │  1 Library") && lines[1].starts_with("  Likes "), "{screen}");
         assert!(lines[2].starts_with('╭') && lines[28].starts_with('╰'), "the panes run to the hint line:\n{screen}");
         assert_eq!(screen.matches("Song 04").count(), 1, "one readout, in the panel:\n{screen}");
         // The hint line names the page key exactly when the panel is there.
@@ -275,9 +276,9 @@ mod tests {
     fn cover_height_thresholds() {
         assert_eq!([80, 34, 33, 26, 25, 20, 19, 8].map(cover_rows), [9, 9, 6, 6, 3, 3, 0, 0]);
         let (mut state, mut data, views, np) = panel();
-        // Panel rows are the terminal's less the hint line. The title sits under the
-        // cover's rows and a blank one; they stay empty without an image to draw.
-        for (h, title_row) in [(35, 11), (34, 8), (27, 8), (26, 5), (21, 5), (20, 1), (14, 1), (8, 1)] {
+        // Panel rows are the terminal's less the hint line. The title sits under a
+        // blank row, the cover's rows and another blank; all empty without an image.
+        for (h, title_row) in [(35, 12), (34, 9), (27, 9), (26, 6), (21, 6), (20, 1), (14, 1), (8, 1)] {
             let rows = panel_rows(130, h, &mut state, &mut data, &views, &np);
             assert_eq!(rows[title_row].trim_matches(['│', ' ']), "Song 04", "{h} rows:\n{}", rows.join("\n"));
             assert!((1..title_row).all(|y| rows[y].trim_matches(['│', ' ']).is_empty()), "{h} rows:\n{}", rows.join("\n"));
@@ -289,16 +290,16 @@ mod tests {
         let (mut state, mut data, views, mut np) = panel();
         let rows = panel_rows(130, 34, &mut state, &mut data, &views, &np);
         let row = |y: usize| rows[y].trim_matches(['│', ' ']).to_string();
-        // 34 rows less the hint line: a 6-row cover, then the track.
-        assert_eq!([row(8), row(9), row(10)], ["Song 04", "Artist 4 · from likes", ""], "{}", rows.join("\n"));
-        assert!(row(11).starts_with("01:01 ━━━") && row(11).ends_with("──── 06:52"), "{}", rows[11]);
-        assert_eq!(row(12), "▶   ⇄ off   ↻ off   vol ▮▮▮▮▯▯▯▯▯▯");
-        assert_eq!(rows[14], format!("├ Up next Lyrics Spectrum History {} o page ┤", "─".repeat(3)));
-        assert_eq!([row(15), row(16), row(17), row(18)], ["QUEUED BY YOU", "1  Song 10", "2  Song 11", "FROM LIKES"]);
+        // 34 rows less the hint line: a blank row, a 6-row cover, then the track.
+        assert_eq!([row(9), row(10), row(11)], ["Song 04", "Artist 4 · from likes", ""], "{}", rows.join("\n"));
+        assert!(row(12).starts_with("01:01 ━━━") && row(12).ends_with("──── 06:52"), "{}", rows[12]);
+        assert_eq!(row(13), "▶   ⇄ off   ↻ off   vol ▮▮▮▮▯▯▯▯▯▯");
+        assert_eq!(rows[15], format!("├ Up next Lyrics Spectrum History {} o page ┤", "─".repeat(3)));
+        assert_eq!([row(16), row(17), row(18), row(19)], ["QUEUED BY YOU", "1  Song 10", "2  Song 11", "FROM LIKES"]);
         assert!(rows[32].starts_with('╰'), "{}", rows.join("\n"));
         // The narrowest panel names the key without the word; an unbound key is not named.
         let narrow = panel_rows(110, 34, &mut state, &mut data, &views, &np);
-        assert_eq!(narrow[14], "├ Up next Lyrics Spectrum History ─ o ┤");
+        assert_eq!(narrow[15], "├ Up next Lyrics Spectrum History ─ o ┤");
         state.keymap.apply_toml("[keys]\npanel_page = []\n");
         let unbound = render_text(130, 34, &mut state, &mut data, &views, &np);
         assert!(unbound.contains("History ───────────┤") && !unbound.contains(" page"), "{unbound}");
@@ -308,24 +309,24 @@ mod tests {
         let buf = render_buffer(130, 34, &mut state, &mut data, &views, &np);
         let t = theme::current();
         let x = 130 - panel_width(130);
-        assert_eq!((buf[(x + 2, 14)].fg, buf[(x + 27, 14)].fg), (t.muted, t.accent));
+        assert_eq!((buf[(x + 2, 15)].fg, buf[(x + 27, 15)].fg), (t.muted, t.accent));
         let rows = panel_rows(130, 34, &mut state, &mut data, &views, &np);
         let row = |y: usize| rows[y].trim_matches(['│', ' ']).to_string();
-        assert_eq!([row(15), row(16), row(17), row(18)], ["Song 22", "Song 21", "Song 20", ""], "newest first");
+        assert_eq!([row(16), row(17), row(18), row(19)], ["Song 22", "Song 21", "Song 20", ""], "newest first");
         state.playback_history.clear();
-        assert!(panel_rows(130, 34, &mut state, &mut data, &views, &np)[15].contains("no history yet"));
+        assert!(panel_rows(130, 34, &mut state, &mut data, &views, &np)[16].contains("no history yet"));
 
         // Lyrics: the visualiser's drawing, in the page's rows, current line centred.
         state.panel_page = PanelPage::Lyrics;
-        assert!(panel_rows(130, 34, &mut state, &mut data, &views, &np)[23].contains("Looking for lyrics…"));
+        assert!(panel_rows(130, 34, &mut state, &mut data, &views, &np)[24].contains("Looking for lyrics…"));
         state.lyrics = LyricsStatus::Found(Lyrics {
             synced: vec![(5_000, "Intro line".into()), (60_000, "Current line".into()), (120_000, "Later line".into())],
             plain: vec![],
         });
         let rows = panel_rows(130, 34, &mut state, &mut data, &views, &np);
         let row = |y: usize| rows[y].trim_matches(['│', ' ']).to_string();
-        assert_eq!([row(22), row(23), row(24)], ["Intro line", "Current line", "Later line"], "{}", rows.join("\n"));
-        assert!(rows[14].starts_with("├ Up next") && rows[32].starts_with('╰'), "the frame is the panel's own");
+        assert_eq!([row(23), row(24), row(25)], ["Intro line", "Current line", "Later line"], "{}", rows.join("\n"));
+        assert!(rows[15].starts_with("├ Up next") && rows[32].starts_with('╰'), "the frame is the panel's own");
 
         // Spectrum: idle until there is sound, then the visualiser's bars.
         state.panel_page = PanelPage::Spectrum;
@@ -338,10 +339,10 @@ mod tests {
 
         // Paused, stopped, shuffle and repeat all show on the state row.
         (np.playing, state.shuffle_enabled, state.repeat_enabled) = (false, true, true);
-        assert!(panel_rows(130, 34, &mut state, &mut data, &views, &np)[12].contains("⏸   ⇄ on   ↻ on   vol"));
+        assert!(panel_rows(130, 34, &mut state, &mut data, &views, &np)[13].contains("⏸   ⇄ on   ↻ on   vol"));
         np.has_track = false;
         let rows = panel_rows(130, 34, &mut state, &mut data, &views, &np);
-        assert!(rows[12].contains('■') && rows[9].trim_matches(['│', ' ']) == "Artist 4", "{}", rows.join("\n"));
+        assert!(rows[13].contains('■') && rows[10].trim_matches(['│', ' ']) == "Artist 4", "{}", rows.join("\n"));
     }
 
     #[test]

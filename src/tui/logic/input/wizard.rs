@@ -102,7 +102,7 @@ mod tests {
             _ => None,
         };
         match action {
-            Some(a) if nav::in_nav(state) && commands::run_nav_command(a, state, data) => {}
+            Some(a) if nav::in_nav(state) && commands::run_nav_command(a, state) => {}
             Some(Action::PlaySelected) if nav::focused(state).is_container() => {
                 nav::focus_right(state);
             }
@@ -149,9 +149,9 @@ mod tests {
         assert_eq!(state.wizard.as_ref().unwrap().selected, 1);
         // Moving, by arrow or by the keymap, switches the real layout as it goes.
         press(&mut state, &mut data, KeyCode::Down);
-        assert_eq!(state.settings.layout, Layout::Sidebar);
-        type_keys(&mut state, &mut data, "j");
         assert_eq!(state.settings.layout, Layout::Columns);
+        type_keys(&mut state, &mut data, "j");
+        assert_eq!(state.settings.layout, Layout::PlayerPanel);
         type_keys(&mut state, &mut data, "G");
         assert_eq!(state.settings.layout, Layout::PlayerPanel);
         type_keys(&mut state, &mut data, "gg");
@@ -159,21 +159,21 @@ mod tests {
         type_keys(&mut state, &mut data, "jj");
         // Enter keeps it: skipping later no longer puts the old one back.
         press(&mut state, &mut data, KeyCode::Enter);
-        assert_eq!((at(&state).0, state.settings.layout), (Stage::Theme, Layout::Sidebar));
+        assert_eq!((at(&state).0, state.settings.layout), (Stage::Theme, Layout::Columns));
         assert!(!state.theme_picker_visible, "the wizard draws the theme list");
         // Esc there reverts the theme, not the layout. Through `step`: the theme is not applied.
         step(key(KeyCode::Esc), &mut state, &data);
         assert!(state.wizard.is_none() && state.settings.onboarded);
-        assert_eq!(state.settings.layout, Layout::Sidebar);
+        assert_eq!(state.settings.layout, Layout::Columns);
 
         // Esc while only previewing puts the layout back.
         let (mut state, mut data, ..) = fixture();
         (state.settings.onboarded, state.settings.layout) = (true, Layout::Columns);
         wizard::on_start(&mut state, false, true);
         press(&mut state, &mut data, KeyCode::Enter);
-        assert_eq!(state.wizard.as_ref().unwrap().selected, 3);
+        assert_eq!(state.wizard.as_ref().unwrap().selected, 2);
         press(&mut state, &mut data, KeyCode::Up);
-        assert_eq!(state.settings.layout, Layout::Sidebar);
+        assert_eq!(state.settings.layout, Layout::Tighten);
         press(&mut state, &mut data, KeyCode::Esc);
         assert_eq!((state.wizard.is_none(), state.settings.layout), (true, Layout::Columns));
     }

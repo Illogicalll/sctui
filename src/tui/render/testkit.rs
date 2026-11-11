@@ -28,28 +28,25 @@ pub const HEIGHTS: [u16; 14] = [6, 8, 13, 14, 19, 20, 23, 24, 29, 30, 33, 34, 45
 /// Puts a fixture's state into one named configuration.
 pub type Setup = fn(&mut AppState);
 
-/// Switch to `layout`, with or without its navigation column focused and the queue
-/// docked. Every entry of [`LAYOUTS`] sets all three, so they can be applied in turn.
-fn layout(state: &mut AppState, layout: Layout, nav_focused: bool, dock_queue: bool) {
-    (state.settings.layout, state.nav_focused, state.settings.dock_queue) = (layout, nav_focused, dock_queue);
+/// Switch to `layout`, with or without its navigation column focused. Every entry of
+/// [`LAYOUTS`] sets both, so they can be applied in turn.
+fn layout(state: &mut AppState, layout: Layout, nav_focused: bool) {
+    (state.settings.layout, state.nav_focused) = (layout, nav_focused);
 }
 
 /// The Player panel layout on one of its panel's pages.
 fn panel(state: &mut AppState, page: PanelPage) {
-    layout(state, Layout::PlayerPanel, false, false);
+    layout(state, Layout::PlayerPanel, false);
     state.panel_page = page;
 }
 
 /// Every layout (and each of its variants), as a function that switches a fixture to
 /// it. The plain variant of a layout is named by its label.
 pub const LAYOUTS: &[(&str, Setup)] = &[
-    ("classic", |s| layout(s, Layout::Classic, false, false)),
-    ("tighten", |s| layout(s, Layout::Tighten, false, false)),
-    ("sidebar", |s| layout(s, Layout::Sidebar, false, false)),
-    ("sidebar: nav focused", |s| layout(s, Layout::Sidebar, true, false)),
-    ("sidebar: docked queue", |s| layout(s, Layout::Sidebar, false, true)),
-    ("columns", |s| layout(s, Layout::Columns, false, false)),
-    ("columns: nav focused", |s| layout(s, Layout::Columns, true, false)),
+    ("classic", |s| layout(s, Layout::Classic, false)),
+    ("tighten", |s| layout(s, Layout::Tighten, false)),
+    ("columns", |s| layout(s, Layout::Columns, false)),
+    ("columns: nav focused", |s| layout(s, Layout::Columns, true)),
     ("player-panel", |s| panel(s, PanelPage::UpNext)),
     ("player-panel: lyrics", |s| panel(s, PanelPage::Lyrics)),
     ("player-panel: spectrum", |s| panel(s, PanelPage::Spectrum)),
@@ -285,8 +282,8 @@ pub fn go(state: &mut AppState, data: &mut AppData, tab: usize, sub: usize, focu
 /// While the navigation column has focus, its current entry.
 pub fn selected_label(state: &AppState, data: &AppData, views: &FilteredViews) -> Option<String> {
     if nav::in_nav(state) {
-        let items = nav::nav_items(state, data, state.settings.layout == Layout::Sidebar);
-        return Some(items[nav::nav_index(state, data, &items)].label.clone());
+        let items = nav::nav_items(state);
+        return Some(items[nav::nav_index(state, &items)].label.clone());
     }
     let id = nav::focused(state);
     pane_view(id, state, data, views).1.label(nav::cursor(state, id)).map(str::to_string)
@@ -410,12 +407,10 @@ mod tests {
     }
 
     /// #54: SoundCloud is credited on every screen that shows its content, in every
-    /// layout at every size, the visualiser included. Text style: `via SoundCloud` on
-    /// the player's border (`· SoundCloud` ending the one-line player). Glyph style:
-    /// the mark in front of `sctui`, or leading the top row where there is no `sctui`.
+    /// layout at every size, the visualiser included: its mark in front of `sctui`, or
+    /// leading the top row where there is no `sctui`.
     #[test]
     fn soundcloud_is_credited_in_every_layout_at_every_size() {
-        use crate::config::Credit;
         use crate::tui::render::widgets::SOUNDCLOUD_GLYPH;
         for_all_sizes(|w, h| {
             if w < MIN_COLS || h < MIN_ROWS {
@@ -429,51 +424,25 @@ mod tests {
                         go(&mut state, &mut data, tab, 0, 0);
                         state.visualizer_mode = visualizer;
                         let at = format!("{layout}, {fixture_name}, {w}x{h}, tab {tab}, visualiser {visualizer}");
-
-                        state.settings.soundcloud_credit = Credit::Text;
-                        let screen = render_text(w, h, &mut state, &mut data, &views, &np);
-                        assert!(screen.contains("via SoundCloud") || screen.contains("· SoundCloud"), "{at}: no text credit\n{screen}");
-                        assert!(!screen.contains(SOUNDCLOUD_GLYPH), "{at}: both credits\n{screen}");
-
-                        state.settings.soundcloud_credit = Credit::Glyph;
                         let screen = render_text(w, h, &mut state, &mut data, &views, &np);
                         let branded = format!("{SOUNDCLOUD_GLYPH} sctui");
                         let beside_brand = if screen.contains("sctui") { screen.contains(&branded) } else { screen.starts_with(&format!(" {SOUNDCLOUD_GLYPH} ≡")) };
-                        assert!(beside_brand, "{at}: no glyph credit\n{screen}");
-                        assert!(!screen.contains("SoundCloud"), "{at}: both credits\n{screen}");
+                        assert!(beside_brand, "{at}: no credit\n{screen}");
                     }
                 }
             }
         });
     }
 
-    /// Where each style of the credit sits, layout by layout.
+    /// Where the mark sits, layout by layout.
     #[test]
     fn soundcloud_credit_placement() {
-        use crate::config::Credit;
         let (mut state, mut data, views, np) = fixture();
         let mut lines = |state: &mut AppState, w, h| -> Vec<String> {
             render_text(w, h, state, &mut data, &views, &np).lines().map(str::to_string).collect()
         };
-        // Text (the default): bottom-right of the player box's border, one cell in.
-        assert_eq!(state.settings.soundcloud_credit, Credit::Text);
-        for (layout, set_layout) in LAYOUTS {
-            set_layout(&mut state);
-            let screen = lines(&mut state, 120, 32);
-            let border = screen.iter().rfind(|l| l.contains('╯')).unwrap();
-            // (Classic's 7-row player has its sine waves either side of the box.)
-            assert!(border.contains(" via SoundCloud ─╯"), "{layout}: {border:?}");
-            // A short terminal has the one-line player: the credit ends it.
-            let short = lines(&mut state, 100, 19);
-            assert!(short[17].trim_end().ends_with("vol 70% · SoundCloud"), "{layout}: {:?}", short[17]);
-        }
-        LAYOUTS[0].1(&mut state);
-        // The visualiser has no player: the credit follows `sctui` in its frame's title.
+        // The visualiser has no header: the mark is in its frame's title.
         state.visualizer_mode = true;
-        assert!(lines(&mut state, 120, 32)[0].contains("─sctui · via SoundCloud─"));
-
-        // Glyph: in front of `sctui`, wherever each layout has it.
-        state.settings.soundcloud_credit = Credit::Glyph;
         assert!(lines(&mut state, 120, 32)[0].contains("─\u{f1be} sctui─"));
         state.visualizer_mode = false;
         let mut top = |name: &str, w, h| {
@@ -484,11 +453,7 @@ mod tests {
         assert!(top("classic", 120, 20).starts_with(" \u{f1be} sctui │  1 Library"));
         assert!(top("tighten", 120, 32).starts_with(" \u{f1be} sctui │  1 Library"));
         assert!(top("player-panel", 120, 32).starts_with(" \u{f1be} sctui │  1 Library"));
-        assert!(top("sidebar", 120, 32).starts_with("╭ \u{f1be} sctui ─"));
-        assert!(top("sidebar: nav focused", 80, 24).starts_with("╭ \u{f1be} sctui ─"));
         assert!(top("columns", 120, 32).starts_with(" \u{f1be} sctui › Library › Likes"));
-        // Sidebar under 90 columns has no `sctui` on screen: the mark leads the strip.
-        assert_eq!(top("sidebar", 80, 24).trim_end(), " \u{f1be} ≡ Likes");
     }
 
     #[test]
@@ -582,7 +547,7 @@ mod tests {
         assert!(mid.starts_with('╭') && !mid.contains("shf:") && mid.contains("vol"), "{mid}");
         let short = render_text(120, 23, &mut state, &mut data, &views, &np);
         let lines: Vec<&str> = short.lines().collect();
-        assert!(lines[0].starts_with(" sctui │") && lines[1].contains("Tracks") && lines[1].contains("/ found"), "{short}");
+        assert!(lines[0].starts_with(" \u{f1be} sctui │") && lines[1].contains("Tracks") && lines[1].contains("/ found"), "{short}");
         assert!(lines[2].starts_with('╭'), "{short}");
     }
 

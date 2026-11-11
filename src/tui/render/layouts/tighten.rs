@@ -51,7 +51,7 @@ mod tests {
             let screen = render_text(120, 32, &mut state, &mut data, &views, &np);
             let lines: Vec<&str> = screen.lines().collect();
             // Two header rows, then panes from row 2 to row 26: 25 of the 32 rows.
-            assert!(lines[0].starts_with(" sctui │") && lines[1].starts_with("  "), "{screen}");
+            assert!(lines[0].starts_with(" \u{f1be} sctui │") && lines[1].starts_with("  "), "{screen}");
             assert!(lines[2].starts_with('╭') && lines[26].starts_with('╰'), "tab {tab} sub {sub}:\n{screen}");
             assert!((3..26).all(|y| lines[y].starts_with('│')), "tab {tab} sub {sub}:\n{screen}");
             // The 4-row player and the hint line under them; never Classic's 7-row bar.

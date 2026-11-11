@@ -7,7 +7,7 @@ use crate::config::Layout;
 use crate::keymap::Action;
 use crate::theme::Theme;
 
-use super::state::AppState;
+use super::state::{AppState, HelpPage};
 
 /// What a palette row does when it is run.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -17,9 +17,10 @@ pub enum Command {
     /// A built-in theme, by name.
     Theme(&'static str),
     ToggleHints,
-    ToggleCredit,
     ToggleHideUnplayable,
     SetupWizard,
+    /// The `?` popup, opened on one of its pages.
+    Help(HelpPage),
 }
 
 /// The open palette: what has been typed and the highlighted row of the matches.
@@ -66,11 +67,12 @@ pub fn items(state: &AppState) -> Vec<(String, String, Command)> {
     );
     let hints = if state.settings.hint_line { "on" } else { "off" };
     out.push(("Hint line: toggle".to_string(), hints.to_string(), Command::ToggleHints));
-    let credit = state.settings.soundcloud_credit.label();
-    out.push(("SoundCloud credit: text / glyph".to_string(), credit.to_string(), Command::ToggleCredit));
     let hiding = if state.settings.hide_unplayable { "on" } else { "off" };
     out.push(("Hide unplayable tracks: toggle".to_string(), hiding.to_string(), Command::ToggleHideUnplayable));
     out.push(("Setup wizard".to_string(), String::new(), Command::SetupWizard));
+    out.push(("Keys / keybinds".to_string(), state.keymap.hint_labels(Action::Help), Command::Help(HelpPage::Keys)));
+    out.push(("Settings".to_string(), String::new(), Command::Help(HelpPage::Settings)));
+    out.push(("Equaliser".to_string(), String::new(), Command::Help(HelpPage::Equalizer)));
     out
 }
 
@@ -109,17 +111,17 @@ mod tests {
     #[test]
     fn fuzzy_subsequence_and_ranking() {
         let state = AppState::default();
-        let found = matches(&state, "lay sb");
-        assert_eq!(found[0].0, "Layout: sidebar", "{:?}", found.iter().map(|i| &i.0).collect::<Vec<_>>());
-        assert_eq!(found[0].2, Command::Layout(Layout::Sidebar));
+        let found = matches(&state, "lay col");
+        assert_eq!(found[0].0, "Layout: columns", "{:?}", found.iter().map(|i| &i.0).collect::<Vec<_>>());
+        assert_eq!(found[0].2, Command::Layout(Layout::Columns));
         assert!(matches(&state, "zzz").is_empty());
-        assert_eq!(fuzzy("zzz", "Layout: sidebar"), None);
+        assert_eq!(fuzzy("zzz", "Layout: columns"), None);
         // In order only, case ignored.
-        assert!(fuzzy("LS", "Layout: sidebar").is_some());
+        assert!(fuzzy("LC", "Layout: columns").is_some());
         assert_eq!(fuzzy("sl", "Layout: s"), None);
         // Adjacent beats scattered, a word start beats mid-word, shorter beats longer.
         assert!(fuzzy("lay", "Layout") > fuzzy("lay", "l-a-y-out"));
-        assert!(fuzzy("s", "Layout: sidebar") > fuzzy("s", "Layout: classic"));
+        assert!(fuzzy("c", "Layout: columns") > fuzzy("c", "Layout: unicorn"));
         assert!(fuzzy("quit", "Quit") > fuzzy("quit", "Quit now"));
         assert_eq!(matches(&state, "quit")[0].2, Command::Action(Action::Quit));
         assert_eq!(matches(&state, "theme nord")[0].2, Command::Theme("nord"));
@@ -142,11 +144,13 @@ mod tests {
         assert!(all.iter().any(|i| i.2 == Command::SetupWizard));
         // The right-hand column says what is current and what the keys are.
         let right = |label: &str| all.iter().find(|i| i.0 == label).unwrap().1.clone();
-        assert_eq!((right("Layout: classic"), right("Layout: sidebar")), ("current".to_string(), String::new()));
+        assert_eq!((right("Layout: classic"), right("Layout: columns")), ("current".to_string(), String::new()));
         assert_eq!(right("Hint line: toggle"), "on");
-        assert_eq!(right("SoundCloud credit: text / glyph"), "text");
         assert_eq!((right("Open the selection on SoundCloud"), right("Open the currently playing track on SoundCloud")), ("b".to_string(), "B".to_string()));
         assert_eq!(right("Quit"), "Q");
+        for (label, page) in [("Keys / keybinds", HelpPage::Keys), ("Settings", HelpPage::Settings), ("Equaliser", HelpPage::Equalizer)] {
+            assert!(all.iter().any(|i| i.0 == label && i.2 == Command::Help(page)), "{label}");
+        }
         // The hint line's notation, not `Shift+A, Ctrl+P`.
         assert_eq!(right("Play the selected track next"), "A");
         assert_eq!(right("Start a station from the selected track (or artist)"), "S, shift+enter");

@@ -223,7 +223,7 @@ pub(crate) fn run_action(
         // Only seeks wait for an in-flight seek; every other key stays live.
         (player.is_playing() || state.current_playing_index.is_some()) && !player.is_seeking()
     };
-    if nav::in_nav(state) && commands::run_nav_command(action, state, data) {
+    if nav::in_nav(state) && commands::run_nav_command(action, state) {
         return InputOutcome::Continue;
     }
     match action {
@@ -586,7 +586,7 @@ mod tests {
         }
         // The navigation column does not swallow it.
         state.nav_focused = true;
-        assert!(!commands::run_nav_command(Action::PanelPage, &mut state, &mut data));
+        assert!(!commands::run_nav_command(Action::PanelPage, &mut state));
     }
 
     #[test]
@@ -620,11 +620,11 @@ mod tests {
         assert_eq!(state.palette, Some(Default::default()));
 
         // A layout command is applied, toasted, and the palette is gone.
-        type_into_palette(&mut state, &mut data, "lay sb");
+        type_into_palette(&mut state, &mut data, "lay col");
         assert!(matches!(press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE), Routed::Done(_)));
         assert!(state.palette.is_none());
-        assert_eq!(state.settings.layout, crate::config::Layout::Sidebar);
-        assert_eq!(state.toasts.last().unwrap().msg, "Layout: sidebar");
+        assert_eq!(state.settings.layout, crate::config::Layout::Columns);
+        assert_eq!(state.toasts.last().unwrap().msg, "Layout: columns");
 
         // An action comes back to be dispatched like its key press.
         commands::run_command(Action::Palette, &mut state, &mut data);
@@ -636,14 +636,14 @@ mod tests {
         commands::run_command(Action::Palette, &mut state, &mut data);
         type_into_palette(&mut state, &mut data, "layout:");
         let rows = crate::tui::logic::palette::matches(&state, "layout:").len();
-        assert_eq!(rows, 5);
+        assert_eq!(rows, 4);
         for (code, mods, want) in [
             (KeyCode::Down, KeyModifiers::NONE, 1),
             (KeyCode::Tab, KeyModifiers::NONE, 2),
             (KeyCode::Char('n'), KeyModifiers::CONTROL, 3),
-            (KeyCode::Char('j'), KeyModifiers::CONTROL, 4),
-            (KeyCode::Down, KeyModifiers::NONE, 4),
-            (KeyCode::Up, KeyModifiers::NONE, 3),
+            (KeyCode::Down, KeyModifiers::NONE, 3),
+            (KeyCode::Up, KeyModifiers::NONE, 2),
+            (KeyCode::Char('j'), KeyModifiers::CONTROL, 3),
             (KeyCode::BackTab, KeyModifiers::SHIFT, 2),
             (KeyCode::Char('p'), KeyModifiers::CONTROL, 1),
             (KeyCode::Char('k'), KeyModifiers::CONTROL, 0),

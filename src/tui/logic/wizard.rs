@@ -146,7 +146,7 @@ impl Wizard {
             }
             (1, Some(Action::Top)) => sub == 1,
             (2, Some(Action::SubTabRight)) => true,
-            // Either order: in Sidebar the first pane's way "in" is from the column.
+            // Either order: in Columns the first pane's way "in" is from the column.
             (3, Some(Action::PaneRight)) if before.multi_pane => {
                 self.sub |= 1;
                 self.sub == 3
@@ -308,9 +308,9 @@ mod tests {
         assert!(!state.settings.onboarded, "not until it is answered");
         // Whatever layout the file names stays.
         let mut state = AppState::default();
-        state.settings.layout = Layout::Sidebar;
+        state.settings.layout = Layout::Columns;
         on_start(&mut state, false, false);
-        assert_eq!(state.settings.layout, Layout::Sidebar);
+        assert_eq!(state.settings.layout, Layout::Columns);
     }
 
     #[test]
