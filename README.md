@@ -163,11 +163,11 @@ One pane has focus (accent border). Movement and every action on a selection (pl
 | | `d` | Remove from your playlist (asks first) | `remove_from_playlist` |
 | | `b` / `B` | Open the selection (track, playlist, album or person) / the playing track on soundcloud.com | `open_in_browser`, `open_in_browser_playing` |
 | Playlist | `c` / `x` | New playlist / delete your playlist (asks first) | `new_playlist`, `delete_playlist` |
-| Panels | `Q` / `H` | Queue / history | `toggle_queue`, `toggle_history` |
+| Panels | `q` / `H` | Queue / history | `toggle_queue`, `toggle_history` |
 | | `v` | Visualiser (`Tab` cycles its modes) | `toggle_visualizer` |
 | | `t` | Theme picker | `themes` |
 | | `o` | Next page of the player panel (`player-panel` layout) | `panel_page` |
-| App | `q` | Quit (asks first) | `quit` |
+| App | `Q` | Quit (asks first) | `quit` |
 | | `Esc` | Close a popup / stop typing / clear the filter. Never quits | |
 
 A capital letter means Shift. `Shift+Enter` needs a terminal with the kitty keyboard protocol; `S` works everywhere.

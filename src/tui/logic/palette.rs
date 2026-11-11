@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(right("Hint line: toggle"), "on");
         assert_eq!(right("SoundCloud credit: text / glyph"), "text");
         assert_eq!((right("Open the selection on SoundCloud"), right("Open the currently playing track on SoundCloud")), ("b".to_string(), "B".to_string()));
-        assert_eq!(right("Quit"), "q");
+        assert_eq!(right("Quit"), "Q");
         // The hint line's notation, not `Shift+A, Ctrl+P`.
         assert_eq!(right("Play the selected track next"), "A");
         assert_eq!(right("Start a station from the selected track (or artist)"), "S, shift+enter");

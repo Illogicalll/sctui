@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(state.queue_scroll, 2);
         press(&mut state, &mut data, KeyCode::End, KeyModifiers::NONE);
         assert_eq!(state.queue_scroll, 4);
-        ch(&mut state, &mut data, 'Q');
+        ch(&mut state, &mut data, 'q');
         assert!(!state.queue_visible);
         state.queue_visible = true;
         press(&mut state, &mut data, KeyCode::Esc, KeyModifiers::NONE);
@@ -439,7 +439,7 @@ mod tests {
         ch(&mut state, &mut data, 'x');
         press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
         assert!(!state.search_typing && state.query == "x");
-        assert!(matches!(ch(&mut state, &mut data, 'Q'), Routed::Action(Action::ToggleQueue)));
+        assert!(matches!(ch(&mut state, &mut data, 'q'), Routed::Action(Action::ToggleQueue)));
 
         // Library filter.
         let mut state = AppState::default();
@@ -455,7 +455,7 @@ mod tests {
         press(&mut state, &mut data, KeyCode::Enter, KeyModifiers::NONE);
         assert!(!state.search_typing && state.search_popup_visible);
         assert_eq!(nav::selected_index(&state, nav::PaneId::Likes), Some(1));
-        assert!(matches!(ch(&mut state, &mut data, 'Q'), Routed::Action(Action::ToggleQueue)));
+        assert!(matches!(ch(&mut state, &mut data, 'q'), Routed::Action(Action::ToggleQueue)));
         // Esc in normal mode clears it, leaving the cursor on the same track.
         press(&mut state, &mut data, KeyCode::Esc, KeyModifiers::NONE);
         assert!(!state.search_popup_visible && state.search_query.is_empty());
@@ -500,7 +500,7 @@ mod tests {
         assert!(!state.visualizer_mode);
 
         let mut state = AppState::default();
-        assert!(matches!(ch(&mut state, &mut data, 'q'), Routed::Action(Action::Quit)));
+        assert!(matches!(ch(&mut state, &mut data, 'Q'), Routed::Action(Action::Quit)));
     }
 
     #[test]
@@ -595,7 +595,7 @@ mod tests {
         let mut state = AppState::default();
         let mut data = AppData::default();
         state.settings.layout = crate::config::Layout::PlayerPanel;
-        for (key, want) in [('Q', Action::ToggleQueue), ('H', Action::ToggleHistory)] {
+        for (key, want) in [('q', Action::ToggleQueue), ('H', Action::ToggleHistory)] {
             let Routed::Action(action) = ch(&mut state, &mut data, key) else { panic!("{key} is not bound") };
             assert_eq!(action, want);
             commands::run_command(action, &mut state, &mut data);
