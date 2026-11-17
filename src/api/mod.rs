@@ -83,6 +83,12 @@ impl API {
         }
     }
 
+    /// Start every list again from its first page. Only while no fetch is out.
+    pub fn rewind(&mut self) {
+        let user_names = std::mem::take(&mut self.user_names);
+        *self = Self { user_names, ..Self::init(Arc::clone(&self.token)) };
+    }
+
     /// Whether `list` has a page left to fetch.
     pub fn has_more(&self, list: List) -> bool {
         let pages: &[&Page] = match list {

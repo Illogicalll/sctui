@@ -14,18 +14,27 @@ use crate::tui::logic::toast::{Toast, ToastKind};
 
 use super::{clear, fit, put, text_width};
 
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 /// Draw `toasts` from row 1 down, oldest first. A box is as wide as its text, up to
 /// the terminal less a cell either side; ones that do not fit below are left out.
-pub fn draw(frame: &mut Frame, toasts: &[Toast]) {
+/// While `refreshing`, a spinner box comes first and stays, whatever else is on screen.
+pub fn draw(frame: &mut Frame, toasts: &[Toast], refreshing: bool) {
     let area = frame.area();
     let t = theme::current();
     let mut y = area.y + 1;
-    for toast in toasts {
+    let spin = refreshing.then(|| {
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        (format!("{} Refreshing from SoundCloud…", SPINNER[(ms / 100) as usize % SPINNER.len()]), t.accent)
+    });
+    let toasts = toasts.iter().map(|toast| {
         let (mark, colour) = match toast.kind {
             ToastKind::Ok => ("✓", t.accent),
             ToastKind::Err => ("✗", t.warning),
         };
-        let text = format!("{mark} {}", toast.msg);
+        (format!("{mark} {}", toast.msg), colour)
+    });
+    for (text, colour) in spin.into_iter().chain(toasts) {
         let width = (text_width(&text) + 4).min(area.width.saturating_sub(2) as usize) as u16;
         if width < 5 || y + 3 > area.bottom() {
             break;
@@ -43,6 +52,19 @@ pub fn draw(frame: &mut Frame, toasts: &[Toast]) {
 mod tests {
     use crate::tui::logic::state::AppState;
     use crate::tui::render::testkit::{WIDE_TITLES, fixture, render_buffer, text};
+
+    #[test]
+    fn a_refresh_shows_a_spinner_above_the_toasts_until_it_is_done() {
+        let (mut state, mut data, views, np) = fixture();
+        state.toast("Added to queue · 3");
+        state.refreshing = true;
+        let screen = text(&render_buffer(80, 24, &mut state, &mut data, &views, &np));
+        let lines: Vec<&str> = screen.lines().collect();
+        assert!(lines[2].contains("Refreshing from SoundCloud…") && lines[5].contains("✓ Added to queue"), "{screen}");
+        state.refreshing = false;
+        let screen = text(&render_buffer(80, 24, &mut state, &mut data, &views, &np));
+        assert!(!screen.contains("Refreshing"), "{screen}");
+    }
 
     #[test]
     fn toast_box_clamps_to_width() {

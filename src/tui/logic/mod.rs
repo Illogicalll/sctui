@@ -192,6 +192,8 @@ where
 
 /// The library's lists, in sub-tab order.
 const LIBRARY: [List; 4] = [List::Likes, List::Playlists, List::Albums, List::Following];
+/// The library's lists, then the feed.
+const ALL_LISTS: [List; 5] = [List::Likes, List::Playlists, List::Albums, List::Following, List::Feed];
 
 /// `spawn_fetch` for `list`'s next page.
 fn fetch_next_page(pagers: &mut Pagers, list: List, api: &Arc<Mutex<API>>, tx: &Sender<Msg>) {
@@ -483,7 +485,7 @@ fn start(
                 Msg::SearchPeopleLikes(id, t) => state.search_people_likes_fetch.accept(
                     id, t, &mut data.search_people_likes_tracks, &mut data.search_people_likes_state,
                 ),
-                Msg::Feed(new) => data.feed.extend(new),
+                Msg::Feed(new) => data.add_feed(new),
                 Msg::FeedTracks(id, t) => state.feed_tracks_fetch.accept(
                     id, t, &mut data.feed_tracks, &mut data.feed_tracks_state,
                 ),
@@ -551,11 +553,22 @@ fn start(
                     let first_page = outcome.is_ok() && std::mem::take(&mut data.loading[list as usize]);
                     // One notice per run of failures; the retries after it are silent.
                     let why = outcome.as_ref().err().cloned();
+                    let more = outcome.as_ref().ok().copied();
                     if pagers.settled(list, outcome.ok(), Instant::now())
                         && state.rate_limited_until.is_none()
                         && let Some(why) = why
                     {
                         state.toast_err(toast::brief_fetch_error(&why));
+                    }
+                    // A refresh pages each list until its fresh copy can be swapped in.
+                    if let Some(more) = more {
+                        let was_refreshing = data.refreshing[list as usize].is_some();
+                        if data.refresh_settled(list, more) {
+                            fetch_next_page(&mut pagers, list, api, &tx);
+                        } else if was_refreshing && data.refreshing.iter().all(Option::is_none) {
+                            state.refreshing = false;
+                            state.toast("Refreshed");
+                        }
                     }
                     // Playlists have always had two pages in before their tab is opened.
                     if first_page && list == List::Playlists {
@@ -570,6 +583,43 @@ fn start(
                 }
             }
         }
+        // Refresh: let the page fetches that are out come back, then fetch every list
+        // again from its first page. The fresh pages are held back until there are as
+        // many rows as are on show (`AppData::start_refresh`), so nothing blinks.
+        if std::mem::take(&mut state.refresh_requested) {
+            if state.rate_limited_until.is_some() {
+                state.toast_err("Can't refresh while rate limited");
+            } else {
+                pagers.hold();
+                state.refreshing = true;
+            }
+        }
+        if pagers.drained() {
+            pagers = Pagers::default();
+            // Nothing is out, so the lock is free.
+            api.lock().unwrap_or_else(|e| e.into_inner()).rewind();
+            // A hidden feed tab has never fetched the feed, and still does not.
+            let lists = if state.settings.hide_feed_tab { &ALL_LISTS[..4] } else { &ALL_LISTS[..] };
+            data.start_refresh(lists);
+            // Containers that had nothing playable are asked about again.
+            let containers = &mut data.containers;
+            containers.probed.retain(|uri| !containers.none_playable.contains(uri));
+            containers.none_playable.clear();
+            // The tracks panes fetch their rows again the next time they are on screen.
+            for fetch in [
+                &mut state.playlist_tracks_fetch,
+                &mut state.album_tracks_fetch,
+                &mut state.following_tracks_fetch,
+                &mut state.following_likes_fetch,
+                &mut state.feed_tracks_fetch,
+            ] {
+                fetch.stale = true;
+            }
+            for &list in lists {
+                fetch_next_page(&mut pagers, list, api, &tx);
+            }
+        }
+
         // A fresh token that could not be written to disk (it is still the one in use).
         if let Some(warning) = crate::auth::take_save_warning() {
             state.toast_err(warning);
@@ -1232,14 +1282,16 @@ fn start(
             last_tick = Instant::now();
 
             // Feed is unbounded: only page when the cursor nears the end of what is loaded.
-            if state.selected_tab == 2 && nav::cursor(&state, PaneId::Feed) + 10 >= data.feed.len() {
+            if data.refreshing[List::Feed as usize].is_some()
+                || state.selected_tab == 2 && nav::cursor(&state, PaneId::Feed) + 10 >= data.feed.len()
+            {
                 fetch_next_page(&mut pagers, List::Feed, api, &tx);
             }
 
             // The sub-tab on screen keeps paging to its end; the others only until
             // their first page is in (retried here, with backoff, if launch was offline).
             for (subtab, list) in LIBRARY.into_iter().enumerate() {
-                if subtab == state.selected_subtab || data.loading[list as usize] {
+                if subtab == state.selected_subtab || data.loading[list as usize] || data.refreshing[list as usize].is_some() {
                     fetch_next_page(&mut pagers, list, api, &tx);
                 }
             }

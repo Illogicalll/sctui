@@ -78,10 +78,11 @@ pub enum Action {
     Themes,
     Palette,
     PanelPage,
+    Refresh,
 }
 
 impl Action {
-    pub const ALL: [Action; 48] = [
+    pub const ALL: [Action; 49] = [
         Action::Quit,
         Action::Help,
         Action::NextTab,
@@ -130,6 +131,7 @@ impl Action {
         Action::Themes,
         Action::Palette,
         Action::PanelPage,
+        Action::Refresh,
     ];
 
     /// Name used in the config file.
@@ -183,6 +185,7 @@ impl Action {
             Action::Themes => "themes",
             Action::Palette => "palette",
             Action::PanelPage => "panel_page",
+            Action::Refresh => "refresh",
         }
     }
 
@@ -237,6 +240,7 @@ impl Action {
             Action::Themes => "Choose a colour theme",
             Action::Palette => "Command palette",
             Action::PanelPage => "Next page of the player panel (Player panel layout)",
+            Action::Refresh => "Refresh your library and feed from SoundCloud",
         }
     }
 
@@ -303,6 +307,7 @@ pub const DEFAULTS: &[(Action, &[&str])] = &[
     (Action::Themes, &["t"]),
     (Action::Palette, &[":", "ctrl+p"]),
     (Action::PanelPage, &["o"]),
+    (Action::Refresh, &["R"]),
 ];
 
 /// A normalised key press: letters are lowercase with Shift as a modifier,

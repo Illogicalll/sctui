@@ -95,7 +95,7 @@ pub fn render(
         layouts::draw(frame, state, data, views, np, cover, wave_buffer);
     }
     overlays::render_overlays(frame, state, data);
-    widgets::toasts::draw(frame, &state.toasts);
+    widgets::toasts::draw(frame, &state.toasts, state.refreshing);
     if overlays::wizard::is_strip(state, area) {
         // The lesson, in the hint line's place.
         overlays::wizard::draw_strip(frame, Rect { y: area.bottom() - hint_rows, height: hint_rows, ..area }, state);

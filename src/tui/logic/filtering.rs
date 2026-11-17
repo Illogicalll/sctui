@@ -174,8 +174,9 @@ pub fn apply_unplayable_filter(state: &mut AppState, data: &mut AppData) {
         (of(&state.search_people_tracks_fetch, &data.search_people_tracks_user_urn), &mut data.search_people_tracks, &mut data.search_people_tracks_state, &mut state.search_selected_person_track_row),
         (of(&state.search_people_likes_fetch, &data.search_people_likes_user_urn), &mut data.search_people_likes_tracks, &mut data.search_people_likes_state, &mut state.search_selected_person_like_row),
         (of(&state.feed_tracks_fetch, &data.feed_tracks_key), &mut data.feed_tracks, &mut data.feed_tracks_state, &mut state.selected_info_row),
-        // Likes only ever grow; search results are replaced by each new search.
-        ((0, true), &mut data.likes, &mut data.likes_state, &mut likes_row),
+        // Likes grow until a refresh starts them over; search results are replaced by
+        // each new search.
+        ((data.likes_epoch, true), &mut data.likes, &mut data.likes_state, &mut likes_row),
         ((state.search_results_fetch.request_id, true), &mut data.search_tracks, &mut data.search_tracks_state, &mut search_row),
     ];
 

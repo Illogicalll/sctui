@@ -21,8 +21,9 @@ struct Pager {
     not_before: Option<Instant>,
 }
 
+/// The `bool` is a hold: no fetch starts while it is set (see `hold`).
 #[derive(Default)]
-pub struct Pagers([Pager; 5]);
+pub struct Pagers([Pager; 5], bool);
 
 impl Pagers {
     /// Whether to fetch `list`'s next page now. If so it counts as in flight until
@@ -30,11 +31,22 @@ impl Pagers {
     /// passed, or once the list has ended.
     pub fn start(&mut self, list: List, now: Instant) -> bool {
         let pager = &mut self.0[list as usize];
-        if pager.in_flight || pager.exhausted || pager.not_before.is_some_and(|at| now < at) {
+        if self.1 || pager.in_flight || pager.exhausted || pager.not_before.is_some_and(|at| now < at) {
             return false;
         }
         pager.in_flight = true;
         true
+    }
+
+    /// Start nothing more, so the fetches already out can drain before a refresh: a
+    /// page that lands after the lists start over would be a page of the old ones.
+    pub fn hold(&mut self) {
+        self.1 = true;
+    }
+
+    /// Held, and every fetch that was out has settled.
+    pub fn drained(&self) -> bool {
+        self.1 && self.0.iter().all(|pager| !pager.in_flight)
     }
 
     /// The fetch `start` allowed came back: `Some(more)` with whether pages remain, or
@@ -89,8 +101,15 @@ mod tests {
         assert!(pagers.settled(List::Likes, None, now));
         assert!(pagers.start(List::Likes, now + Duration::from_secs(2)));
 
+        // Held for a refresh: nothing starts, and it is drained once what was out is back.
+        assert!(!pagers.drained(), "not held");
+        pagers.hold();
+        assert!(!pagers.start(List::Albums, now) && !pagers.drained(), "Feed and Likes are still out");
+        pagers.settled(List::Feed, Some(true), now);
+
         // The last page: nothing more is ever fetched.
         assert!(!pagers.settled(List::Likes, Some(false), now));
         assert!(!pagers.start(List::Likes, now + Duration::from_secs(3600)));
+        assert!(pagers.drained());
     }
 }
