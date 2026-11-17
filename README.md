@@ -195,7 +195,8 @@ One pane has focus (accent border). Movement and every action on a selection (pl
 | | `v` | Visualiser (`Tab` cycles its modes) | `toggle_visualizer` |
 | | `t` | Theme picker | `themes` |
 | | `o` | Next page of the player panel (`player-panel` layout) | `panel_page` |
-| App | `Q` | Quit (asks first) | `quit` |
+| App | `R` | Refresh your library and feed from SoundCloud (after changing them on the website) | `refresh` |
+| | `Q` | Quit (asks first) | `quit` |
 | | `Esc` | Close a popup / stop typing / clear the filter. Never quits | |
 
 A capital letter means Shift. `Shift+Enter` needs a terminal with the kitty keyboard protocol; `S` works everywhere.

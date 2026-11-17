@@ -1,4 +1,4 @@
-use crate::api::{Activity, Album, Artist, Playlist, Track};
+use crate::api::{Activity, Album, Artist, List, Playlist, Track};
 use crate::api::Lyrics;
 use crate::keymap::Keymap;
 use super::nav::PaneId;
@@ -302,6 +302,9 @@ pub struct FetchTask {
     pub task: Option<tokio::task::JoinHandle<()>>,
     /// Cursor to put back once the rows being fetched arrive (see `refetch`).
     pub restore: Option<usize>,
+    /// Set by a refresh: the rows are fetched again for the same key, and stay on
+    /// show until the new ones replace them.
+    pub stale: bool,
 }
 
 impl FetchTask {
@@ -351,9 +354,15 @@ impl FetchTask {
             cursors.insert((pane, old_key), self.restore.take().unwrap_or(*row));
         }
         let reset = match selected {
+            Some(key) if same && std::mem::take(&mut self.stale) => {
+                self.cancel();
+                self.task = Some(spawn(self.request_id, key));
+                false
+            }
             Some(_) if same => false,
             Some(new_key) => {
                 self.cancel();
+                self.stale = false;
                 self.restore = cursors.get(&(pane, new_key.clone())).copied();
                 *key = Some(new_key.clone());
                 tracks.clear();
@@ -524,6 +533,10 @@ pub struct AppState {
     pub radio_retry_at: Option<Instant>,
     /// Set by Shift+Enter on a focused artist row; the loop fetches its station tracks from here.
     pub artist_station_request: Option<Artist>,
+    /// Set by the refresh command; the loop refetches the library and feed from here.
+    pub refresh_requested: bool,
+    /// A refresh is under way; drawn as a notice that stays until it is done.
+    pub refreshing: bool,
     pub artist_station_fetch: FetchTask,
     /// Set by Enter in the feed: index of the activity being played; the loop expands from there.
     pub feed_expand_from: Option<usize>,
@@ -789,6 +802,22 @@ pub struct AppData {
     /// Lists whose first page has not arrived yet, by `api::List`: an empty one of
     /// these is not known to be empty.
     pub loading: [bool; 5],
+    /// Bumped each time Likes start over, so rows hidden from the old list are dropped.
+    pub likes_epoch: u64,
+    /// Lists a refresh is refetching, by `api::List`, each with the row count its
+    /// fresh copy in `staged` must reach before it is swapped in.
+    pub refreshing: [Option<usize>; 5],
+    pub staged: Staged,
+}
+
+/// Fresh pages of the lists being refreshed, kept off screen until swapped in.
+#[derive(Default)]
+pub struct Staged {
+    pub likes: Vec<Track>,
+    pub playlists: Vec<Playlist>,
+    pub albums: Vec<Album>,
+    pub following: Vec<Artist>,
+    pub feed: Vec<Activity>,
 }
 
 impl AppData {
@@ -798,25 +827,120 @@ impl AppData {
         Self { loading: [true; 5], ..Self::default() }
     }
 
-    /// A page of each library list: its rows, and what marks them liked or followed.
+    /// A refresh begins: every list in `lists` is fetched again from its first page,
+    /// off screen, and takes the place of the one on show once it is as long (or has
+    /// ended). Nothing on screen changes until then.
+    pub fn start_refresh(&mut self, lists: &[List]) {
+        self.staged = Staged::default();
+        for &list in lists {
+            let shown = match list {
+                List::Likes => self.likes.len(),
+                List::Playlists => self.playlists.len(),
+                List::Albums => self.albums.len(),
+                List::Following => self.following.len(),
+                List::Feed => self.feed.len(),
+            };
+            // ponytail: counts the rows on show, not the ones "hide unplayable" took
+            // out, so a refreshed list can come back a few rows short of where it was
+            // paged to. It pages on as usual once it is on screen.
+            self.refreshing[list as usize] = Some(shown);
+        }
+    }
+
+    /// A page of `list` settled, with `more` to come or not. Mid-refresh, swaps the
+    /// fresh rows in if there are enough of them. Returns whether the refresh of
+    /// `list` still needs pages.
+    pub fn refresh_settled(&mut self, list: List, more: bool) -> bool {
+        let Some(target) = self.refreshing[list as usize] else { return false };
+        let staged = &mut self.staged;
+        let have = match list {
+            List::Likes => staged.likes.len(),
+            List::Playlists => staged.playlists.len(),
+            List::Albums => staged.albums.len(),
+            List::Following => staged.following.len(),
+            List::Feed => staged.feed.len(),
+        };
+        if more && have < target {
+            return true;
+        }
+        self.refreshing[list as usize] = None;
+        match list {
+            List::Likes => {
+                self.likes.clear();
+                self.liked_track_urns.clear();
+                self.likes_epoch += 1;
+                let rows = std::mem::take(&mut staged.likes);
+                self.add_likes(rows);
+            }
+            List::Playlists => {
+                self.playlists.clear();
+                self.liked_playlist_uris.clear();
+                self.containers.hidden_playlists.clear();
+                let rows = std::mem::take(&mut staged.playlists);
+                self.add_playlists(rows);
+            }
+            List::Albums => {
+                self.albums.clear();
+                self.liked_album_uris.clear();
+                self.containers.hidden_albums.clear();
+                let rows = std::mem::take(&mut staged.albums);
+                self.add_albums(rows);
+            }
+            List::Following => {
+                self.following.clear();
+                self.followed_user_urns.clear();
+                let rows = std::mem::take(&mut staged.following);
+                self.add_following(rows);
+            }
+            List::Feed => {
+                self.feed.clear();
+                self.hidden_feed.clear();
+                let rows = std::mem::take(&mut staged.feed);
+                self.add_feed(rows);
+            }
+        }
+        false
+    }
+
+    /// A page of each list: its rows, and what marks them liked or followed. Mid-refresh
+    /// the page is held back instead (see `start_refresh`).
     pub fn add_likes(&mut self, page: Vec<Track>) {
+        if self.refreshing[List::Likes as usize].is_some() {
+            return self.staged.likes.extend(page);
+        }
         self.liked_track_urns.extend(page.iter().map(|t| t.track_urn.clone()));
         self.likes.extend(page);
     }
 
     pub fn add_playlists(&mut self, page: Vec<Playlist>) {
+        if self.refreshing[List::Playlists as usize].is_some() {
+            return self.staged.playlists.extend(page);
+        }
         self.liked_playlist_uris.extend(page.iter().filter(|p| !p.is_owned).map(|p| p.tracks_uri.clone()));
         self.playlists.extend(page);
     }
 
     pub fn add_albums(&mut self, page: Vec<Album>) {
+        if self.refreshing[List::Albums as usize].is_some() {
+            return self.staged.albums.extend(page);
+        }
         self.liked_album_uris.extend(page.iter().map(|a| a.tracks_uri.clone()));
         self.albums.extend(page);
     }
 
     pub fn add_following(&mut self, page: Vec<Artist>) {
+        if self.refreshing[List::Following as usize].is_some() {
+            return self.staged.following.extend(page);
+        }
         self.followed_user_urns.extend(page.iter().map(|a| a.urn.clone()));
         self.following.extend(page);
+    }
+
+    pub fn add_feed(&mut self, page: Vec<Activity>) {
+        if self.refreshing[List::Feed as usize].is_some() {
+            return self.staged.feed.extend(page);
+        }
+        self.feed.extend(page);
     }
 }
 
@@ -836,6 +960,32 @@ pub fn visible_tabs(state: &AppState) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Refresh: the rows on show stay until the fresh list is as long, or has ended.
+    #[test]
+    fn a_refreshed_list_is_swapped_in_whole() {
+        let artist = |urn: &str| Artist { name: String::new(), urn: urn.to_string(), permalink_url: String::new() };
+        let urns = |data: &AppData| data.following.iter().map(|a| a.urn.clone()).collect::<Vec<_>>().join(" ");
+        let mut data = AppData::default();
+        data.add_following(vec![artist("old1"), artist("old2"), artist("old3")]);
+        data.start_refresh(&[List::Following]);
+        data.add_following(vec![artist("a"), artist("b")]);
+        assert!(data.refresh_settled(List::Following, true), "two of three: another page");
+        assert_eq!(urns(&data), "old1 old2 old3");
+        data.add_following(vec![artist("c"), artist("d")]);
+        assert!(!data.refresh_settled(List::Following, true));
+        assert_eq!(urns(&data), "a b c d");
+        assert!(!data.followed_user_urns.contains("old1") && data.followed_user_urns.contains("d"));
+        // Back to normal: pages are appended.
+        data.add_following(vec![artist("e")]);
+        assert!(!data.refresh_settled(List::Following, true));
+        assert_eq!(urns(&data), "a b c d e");
+        // A list that got shorter swaps when it ends.
+        data.start_refresh(&[List::Following]);
+        data.add_following(vec![artist("z")]);
+        assert!(!data.refresh_settled(List::Following, false));
+        assert_eq!(urns(&data), "z");
+    }
 
     /// #55: one toast when the rate limit starts and one when it lifts, however many
     /// loop passes come between; a key that would start a stream gets a toast and a
